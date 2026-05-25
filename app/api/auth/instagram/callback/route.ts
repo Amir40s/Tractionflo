@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createSupabaseServiceClient } from '@/lib/supabase';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -51,6 +51,7 @@ export async function GET(request: Request) {
 
     if (userId && accessToken) {
       // Upsert into Supabase
+      const supabase = createSupabaseServiceClient();
       const { error: dbError } = await supabase.from('instagram_accounts').upsert(
         { ig_user_id: userId.toString(), access_token: accessToken },
         { onConflict: 'ig_user_id' }
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
       if (dbError) console.error('Supabase Insert Error:', dbError);
     }
 
-    const response = NextResponse.redirect(new URL('/?ig_connected=true', baseUrl));
+    const response = NextResponse.redirect(new URL('/dashboard?ig_connected=true', baseUrl));
     
     // Keeping cookie as fallback for frontend state
     response.cookies.set('ig_access_token', accessToken, {
@@ -70,8 +71,9 @@ export async function GET(request: Request) {
     });
 
     return response;
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown Instagram OAuth error';
     console.error('Instagram OAuth Error:', err);
-    return NextResponse.json({ error: 'Failed to exchange token', details: err.message }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to exchange token', details: message }, { status: 500 });
   }
 }

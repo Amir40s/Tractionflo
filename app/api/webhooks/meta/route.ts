@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createSupabaseServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +59,7 @@ export async function POST(request: Request) {
       }
 
       if (messagesToInsert.length > 0) {
+        const supabase = createSupabaseServiceClient();
         const { error: dbError } = await supabase.from('messages').insert(messagesToInsert);
         if (dbError) {
            console.error('Supabase Insert Error:', dbError);
