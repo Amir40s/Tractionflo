@@ -1,286 +1,732 @@
-"use client";
+const LIME = '#d4ff00'
 
-import Image from "next/image";
-import { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import Inbox from "./components/Inbox";
-import { signout } from "./login/actions";
+const suggestedPrompts = [
+  'Launch my course',
+  'Send my lead magnet',
+  'Answer FAQs',
+  'Follow up interested people',
+]
 
-function DashboardContent() {
-  const [isConnected, setIsConnected] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const searchParams = useSearchParams();
+const understandingSteps = [
+  'Instagram Reel comment detected',
+  'PDF attached',
+  'FAQ knowledge connected',
+  'Pricing replies enabled',
+  'Personalized conversations enabled',
+  'Follow-up sequence added',
+  'Lead capture enabled',
+]
 
-  useEffect(() => {
-    // Use Next.js native searchParams for reliability
-    if (searchParams?.get('ig_connected') === 'true') {
-      localStorage.setItem('ig_connected', 'true');
-      setIsConnected(true);
-    } else if (localStorage.getItem('ig_connected') === 'true') {
-      setIsConnected(true);
-    }
-  }, [searchParams]);
+const generatedResult = [
+  'Reel comment: GUIDE',
+  'DM starts',
+  'Guide sent',
+  'Pricing question answered',
+  'Follow-up tomorrow',
+  'Save as lead',
+]
 
+const comparisonRows = [
+  ['Set triggers', 'Describe the outcome'],
+  ['Add condition boxes', 'Replies ready'],
+  ['Build flow branches', 'FAQ ready'],
+  ['Connect nodes', 'Follow-up ready'],
+  ['Create FAQ rules', 'Lead capture ready'],
+  ['Test every path', 'Launch in minutes'],
+]
+
+const creatorFeatures = [
+  'Comment -> DM',
+  'Guide delivery',
+  'Pricing questions',
+  'Welcome followers',
+  'Giveaway campaigns',
+  'Course launches',
+  'FAQ replies',
+  'Follow-up sequences',
+  'Broadcast campaigns',
+  'Live engagement',
+]
+
+const uploadTypes = [
+  'PDFs',
+  'Pricing sheets',
+  'FAQs',
+  'Guides',
+  'Docs',
+  'Course material',
+]
+
+const adaptiveSignals = [
+  'Previous interactions',
+  'Interests',
+  'Context',
+  'Uploaded knowledge',
+]
+
+const audienceGroups = [
+  'Potential buyers',
+  'Superfans',
+  'Silent followers',
+  'Losing interest',
+]
+
+const languages = ['English', 'French', 'Spanish', 'German', '+ more']
+
+const pulseItems = [
+  'Productivity questions rising',
+  'Story engagement slowing',
+  'Coaching interest increasing',
+]
+
+const faqs = [
+  {
+    question: 'Is this only for Instagram?',
+    answer:
+      'TractionFlo starts with Instagram. TikTok and YouTube are on the roadmap so creators can keep the same simple workflow across more channels.',
+  },
+  {
+    question: 'Does it answer PDFs?',
+    answer:
+      'Yes. Upload PDFs, pricing sheets, guides, FAQs, docs, or course material, and TractionFlo can use that knowledge inside replies.',
+  },
+  {
+    question: 'Is this another chatbot?',
+    answer:
+      'No. It is an automation copilot for creator growth outcomes: comment replies, DMs, lead magnets, FAQs, broadcasts, and follow-ups.',
+  },
+  {
+    question: 'Can I edit replies?',
+    answer:
+      'Yes. The goal is to generate the automation for you, then let you review and refine the replies before launch.',
+  },
+  {
+    question: 'Can I use multiple languages?',
+    answer:
+      'Yes. TractionFlo is designed to understand the follower language and respond in that language automatically.',
+  },
+  {
+    question: 'How fast can I launch?',
+    answer:
+      'Describe the outcome, attach the needed knowledge, review the generated setup, and launch without building a giant flow.',
+  },
+  {
+    question: 'Do I need technical skills?',
+    answer:
+      'No. You build by chatting instead of wiring triggers, conditions, branches, and contact rules by hand.',
+  },
+]
+
+function ArrowIcon() {
   return (
-    <div className="flex h-screen w-full bg-[#f9fafb] text-[#111827] font-sans">
-      {/* Sidebar */}
-      <aside className="w-52 flex flex-col bg-white border-r border-gray-200 shadow-sm hidden md:flex">
-        <div className="p-4 flex items-center gap-2.5 border-b border-gray-100">
-          <div className="w-6 h-6 bg-[#d4ff00] rounded flex items-center justify-center font-bold text-black shadow-sm text-xs">
-            ⚡
-          </div>
-          <span className="font-extrabold text-lg tracking-tight text-black">TractionFlo</span>
-        </div>
-
-        <nav className="flex-1 px-3 py-3 space-y-1">
-          {/* Active Link - explicit lime green */}
-          <button 
-            onClick={() => setActiveTab('dashboard')}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg font-bold shadow-sm transition-transform hover:scale-[1.02] text-xs ${activeTab === 'dashboard' ? 'bg-[#d4ff00] text-black' : 'text-gray-500 hover:bg-gray-100 hover:text-black'}`}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012-2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
-            Dashboard
-          </button>
-          
-          <button 
-            onClick={() => setActiveTab('inbox')}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg font-bold shadow-sm transition-transform hover:scale-[1.02] text-xs ${activeTab === 'inbox' ? 'bg-[#d4ff00] text-black' : 'text-gray-500 hover:bg-gray-100 hover:text-black'}`}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-            Inbox
-          </button>
-
-          <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 hover:bg-[#f0fdf4] hover:text-[#15803d] transition-all font-semibold text-xs">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-            Automations
-          </button>
-          <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 hover:bg-[#f0fdf4] hover:text-[#15803d] transition-all font-semibold text-xs">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-            Audience
-          </button>
-          <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-black transition-all font-semibold text-xs">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-            Settings
-          </button>
-
-          <form action={signout} className="mt-auto pt-4 border-t border-gray-100">
-            <button type="submit" className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-red-500 hover:bg-red-50 hover:text-red-600 transition-all font-semibold text-xs">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-              Logout
-            </button>
-          </form>
-        </nav>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col h-screen overflow-y-auto relative bg-[#f9fafb]">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-200 py-2.5 px-5 flex justify-between items-center sticky top-0 z-10">
-          <h1 className="text-lg font-extrabold tracking-tight text-black">Overview</h1>
-          <div className="flex items-center gap-3">
-            {!isConnected ? (
-              <a 
-                href="/api/auth/instagram" 
-                target="popup" 
-                onClick={(e) => {
-                  e.preventDefault();
-                  window.open('/api/auth/instagram', 'popup', 'width=600,height=700,scrollbars=yes');
-                }} 
-                className="bg-[#d4ff00] hover:bg-[#b8e600] text-black px-3 py-1.5 rounded-full font-bold transition-transform hover:scale-105 shadow-sm flex items-center gap-1.5 border border-[#b8e600] text-[11px]"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
-                <span>CONNECT INSTAGRAM</span>
-              </a>
-            ) : (
-              <div className="bg-[#f0fdf4] text-[#15803d] px-3 py-1.5 rounded-full font-bold shadow-sm flex items-center gap-1.5 border border-green-200 text-[11px]">
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
-                <span>CONNECTED</span>
-                <svg className="w-3.5 h-3.5 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-              </div>
-            )}
-            <div className="w-7 h-7 rounded-full bg-gray-200 border-2 border-white shadow-sm overflow-hidden ring-2 ring-[#d4ff00] ring-offset-1">
-              <img src="https://i.pravatar.cc/150?img=32" alt="User profile" className="w-full h-full object-cover" />
-            </div>
-          </div>
-        </header>
-
-        {/* Dashboard Content OR Inbox Content */}
-        {activeTab === 'dashboard' ? (
-          <div className="p-5 md:p-6 space-y-6 w-full">
-            
-            <div className="space-y-1">
-              <h2 className="text-2xl md:text-3xl font-extrabold tracking-tighter text-black">
-                Turn comments into customers.<br/>
-                <span className="text-[#d4ff00]" style={{ textShadow: '1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000' }}>Automatically.</span>
-              </h2>
-              <p className="text-gray-600 text-sm font-medium max-w-lg mt-1.5">
-                People comment. People ask. People show interest. TractionFlo turns it into conversations, leads, and sales—on autopilot.
-              </p>
-            </div>
-            
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
-              <div className="bg-[#d4ff00] text-black p-4 rounded-xl shadow-sm border border-[#b8e600] hover:-translate-y-0.5 transition-transform">
-                <div className="w-6 h-6 rounded-full bg-black/10 flex items-center justify-center mb-2.5">
-                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                </div>
-                <p className="text-[10px] font-bold opacity-80 mb-0.5 uppercase tracking-wider">Comments Processed</p>
-                <h2 className="text-2xl font-extrabold tracking-tight">12,482</h2>
-                <div className="mt-2 flex items-center text-[10px] font-bold">
-                  <span className="flex items-center gap-1 bg-black/10 px-1.5 py-0.5 rounded-md">
-                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-                    12.5%
-                  </span>
-                </div>
-              </div>
-              
-              <div className="bg-[#f0fdf4] p-4 rounded-xl border border-green-200 shadow-sm hover:-translate-y-0.5 transition-transform relative overflow-hidden">
-                <div className="w-6 h-6 rounded-full bg-white text-[#15803d] flex items-center justify-center mb-2.5 shadow-sm border border-green-100">
-                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                </div>
-                <p className="text-[10px] font-bold text-[#15803d] mb-0.5 uppercase tracking-wider">DMs Sent</p>
-                <h2 className="text-2xl font-extrabold tracking-tight text-black">8,309</h2>
-                <div className="mt-2 flex items-center text-[10px] font-bold">
-                  <span className="text-[#15803d] flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-md border border-green-100 shadow-sm">
-                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-                    8.2%
-                  </span>
-                </div>
-              </div>
-
-              <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm hover:-translate-y-0.5 transition-transform relative overflow-hidden">
-                 <div className="w-6 h-6 rounded-full bg-white text-blue-500 flex items-center justify-center mb-2.5 shadow-sm border border-blue-100">
-                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                </div>
-                <p className="text-[10px] font-bold text-blue-600 mb-0.5 uppercase tracking-wider">Leads Captured</p>
-                <h2 className="text-2xl font-extrabold tracking-tight text-black">1,204</h2>
-                <div className="mt-2 flex items-center text-[10px] font-bold">
-                  <span className="text-blue-600 flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-md border border-blue-100 shadow-sm">
-                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-                    24.1%
-                  </span>
-                </div>
-              </div>
-
-              <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 shadow-sm hover:-translate-y-0.5 transition-transform relative overflow-hidden">
-                 <div className="w-6 h-6 rounded-full bg-white text-yellow-600 flex items-center justify-center mb-2.5 shadow-sm border border-yellow-100">
-                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                </div>
-                <p className="text-[10px] font-bold text-yellow-600 mb-0.5 uppercase tracking-wider">Sales Tracked</p>
-                <h2 className="text-2xl font-extrabold tracking-tight text-black">$48.2k</h2>
-                <div className="mt-2 flex items-center text-[10px] font-bold">
-                  <span className="text-yellow-600 flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-md border border-yellow-100 shadow-sm">
-                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 10l7-7m0 0l7 7m-7-7v18" /></svg>
-                    12.4%
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Activity Section mapped to Image style notifications */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
-              
-              <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden p-5">
-                <h3 className="font-extrabold text-lg mb-3 text-black">Live Automation Feed</h3>
-                <div className="space-y-2.5">
-                  
-                  {/* Activity Item */}
-                  <div className="flex items-center gap-2.5 bg-white p-2.5 rounded-lg border border-gray-200 shadow-sm hover:border-green-300 transition-colors">
-                     <div className="w-8 h-8 rounded-full bg-[#f0fdf4] text-[#15803d] flex items-center justify-center shrink-0 border border-green-100">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
-                     </div>
-                     <div className="flex-1">
-                        <h4 className="font-bold text-sm text-black">Lead captured</h4>
-                        <p className="text-[#15803d] font-medium text-[11px]">Added to list</p>
-                     </div>
-                     <div className="text-right">
-                        <p className="font-bold text-xs text-black">Sophia O.</p>
-                        <p className="text-[10px] text-gray-500">Just now</p>
-                     </div>
-                  </div>
-
-                  {/* Activity Item */}
-                  <div className="flex items-center gap-2.5 bg-white p-2.5 rounded-lg border border-gray-200 shadow-sm hover:border-yellow-300 transition-colors">
-                     <div className="w-8 h-8 rounded-full bg-yellow-50 text-yellow-600 flex items-center justify-center shrink-0 border border-yellow-100">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                     </div>
-                     <div className="flex-1">
-                        <h4 className="font-bold text-sm text-black">Follow-up scheduled</h4>
-                        <p className="text-yellow-600 font-medium text-[11px]">In 24 hours</p>
-                     </div>
-                     <div className="text-right">
-                        <p className="font-bold text-xs text-black">Mike F.</p>
-                        <p className="text-[10px] text-gray-500">2m ago</p>
-                     </div>
-                  </div>
-
-                  {/* Activity Item */}
-                  <div className="flex items-center gap-2.5 bg-white p-2.5 rounded-lg border border-gray-200 shadow-sm hover:border-green-300 transition-colors">
-                     <div className="w-8 h-8 rounded-full bg-[#f0fdf4] text-[#15803d] flex items-center justify-center shrink-0 border border-green-100">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>
-                     </div>
-                     <div className="flex-1">
-                        <h4 className="font-bold text-sm text-black">Opportunity saved</h4>
-                        <p className="text-[#15803d] font-medium text-[11px]">Ready to close</p>
-                     </div>
-                     <div className="text-right">
-                        <p className="font-bold text-xs text-black">Alex J.</p>
-                        <p className="text-[10px] text-gray-500">5m ago</p>
-                     </div>
-                  </div>
-
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-200 shadow-md p-5 relative overflow-hidden">
-                 <h3 className="font-extrabold text-lg mb-1.5 text-black">The TractionFlo way</h3>
-                 <p className="text-gray-500 text-xs font-medium mb-4">Launch in minutes. Focus on growth, not workflows.</p>
-                 
-                 <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 shadow-sm mb-4 flex items-center justify-between group cursor-pointer hover:border-[#d4ff00] transition-colors">
-                   <p className="font-bold text-xs text-black">"Send my guide when someone comments GUIDE"</p>
-                   <div className="w-6 h-6 bg-white border border-gray-200 rounded-full flex items-center justify-center text-[#15803d] group-hover:bg-[#d4ff00] group-hover:text-black transition-colors">
-                      <svg className="w-3 h-3 -rotate-45 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                   </div>
-                 </div>
-
-                 <ul className="space-y-2.5 mb-5 text-black">
-                   <li className="flex items-center gap-2 font-bold text-xs">
-                     <svg className="w-4 h-4 text-[#15803d] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-                     Replies ready
-                   </li>
-                   <li className="flex items-center gap-2 font-bold text-xs">
-                     <svg className="w-4 h-4 text-[#15803d] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-                     Follow-up ready
-                   </li>
-                   <li className="flex items-center gap-2 font-bold text-xs">
-                     <svg className="w-4 h-4 text-[#15803d] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-                     Lead capture ready
-                   </li>
-                 </ul>
-
-                 <div className="inline-flex items-center gap-1.5 bg-[#d4ff00] text-black px-3 py-1.5 rounded-md font-bold border border-[#b8e600] shadow-sm text-xs">
-                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                   Time: Minutes
-                 </div>
-              </div>
-
-            </div>
-            
-          </div>
-        ) : (
-          <div className="flex-1 w-full h-full overflow-hidden flex flex-col bg-white">
-            <Inbox />
-          </div>
-        )}
-      </main>
-    </div>
-  );
+    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M4 10H16M11 5L16 10L11 15"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
 
-export default function DashboardHome() {
+function CheckIcon() {
   return (
-    <Suspense fallback={<div className="flex h-screen w-full items-center justify-center bg-[#f9fafb]">Loading...</div>}>
-      <DashboardContent />
-    </Suspense>
-  );
+    <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M4 10.5L8 14L16 6"
+        stroke="currentColor"
+        strokeWidth="2.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function GlobeIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3M12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3M12 21C14 18.75 15 15.75 15 12C15 8.25 14 5.25 12 3M12 21C10 18.75 9 15.75 9 12C9 8.25 10 5.25 12 3M3.75 9H20.25M3.75 15H20.25"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function SectionHeader({
+  eyebrow,
+  title,
+  body,
+}: {
+  eyebrow: string
+  title: string
+  body?: string
+}) {
+  return (
+    <div className="mx-auto mb-14 max-w-4xl text-center">
+      <p className="mb-5 text-xs font-black uppercase tracking-[0.22em] text-black/50">{eyebrow}</p>
+      <h2 className="text-4xl font-black leading-[0.95] tracking-normal text-black md:text-6xl">
+        {title}
+      </h2>
+      {body ? (
+        <p className="mx-auto mt-7 max-w-2xl text-lg font-semibold leading-8 text-black/60">{body}</p>
+      ) : null}
+    </div>
+  )
+}
+
+function LimeNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="inline-flex -rotate-2 items-center border border-black bg-black px-5 py-2 text-4xl font-bold leading-none lg:px-4 lg:py-1.5 lg:text-3xl"
+      style={{ color: LIME, fontFamily: 'var(--font-handwritten)' }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function SmallLimeNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="inline-flex -rotate-1 items-center px-3 py-1 text-4xl font-bold leading-none"
+      style={{ color: LIME, fontFamily: 'var(--font-handwritten)' }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function DemoColumn({
+  title,
+  kicker,
+  children,
+}: {
+  title: string
+  kicker: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="min-w-0 border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.06)] lg:p-3">
+      <div className="mb-5 border-b border-black/10 pb-4 lg:mb-3 lg:pb-2.5">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-black/40 lg:text-[10px]">{kicker}</p>
+          <h3 className="mt-1 text-xl font-black text-black lg:text-base">{title}</h3>
+        </div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+export default function LandingPage() {
+  return (
+    <main className="min-h-screen overflow-x-hidden bg-white text-black">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-black/10 bg-white/95 backdrop-blur">
+        <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 lg:px-8">
+          <a href="#" className="shrink-0 text-lg font-black tracking-normal text-black lg:text-xl">
+            Traction<span style={{ color: LIME }}>Flo</span>
+          </a>
+
+          <div className="hidden items-center gap-8 text-sm font-bold text-black/70 lg:flex">
+            <a href="#product" className="hover:text-black">
+              Product
+            </a>
+            <a href="#examples" className="hover:text-black">
+              Examples
+            </a>
+            <a href="#roadmap" className="hover:text-black">
+              Roadmap
+            </a>
+            <a href="#pricing" className="hover:text-black">
+              Pricing
+            </a>
+            <a href="#faq" className="hover:text-black">
+              FAQ
+            </a>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              aria-label="Language selector"
+              className="hidden h-10 w-10 items-center justify-center border border-black/15 bg-white text-black transition hover:border-black hover:bg-black hover:text-white md:inline-flex"
+              type="button"
+            >
+              <GlobeIcon />
+            </button>
+            <a
+              href="/signup"
+              className="hidden shrink-0 items-center gap-2 border border-black bg-black px-3 py-2 text-xs font-black text-white transition hover:bg-white hover:text-black sm:inline-flex sm:px-4 sm:text-sm"
+            >
+              <span>Get Founding Access</span>
+              <ArrowIcon />
+            </a>
+          </div>
+        </nav>
+      </header>
+
+      <section
+        id="product"
+        className="flex min-h-[100svh] scroll-mt-20 flex-col justify-center px-5 pb-12 pt-20 lg:h-[100svh] lg:min-h-0 lg:overflow-hidden lg:px-8 lg:pb-4 lg:pt-16"
+      >
+        <div className="mx-auto w-full max-w-7xl lg:flex lg:h-full lg:flex-col lg:justify-center">
+          <div className="mx-auto max-w-5xl text-center">
+            <div
+              className="mx-auto mb-6 block max-w-[20rem] border border-black px-3 py-2 text-center text-[10px] font-black uppercase leading-5 tracking-[0.14em] sm:max-w-full sm:px-4 sm:text-xs sm:tracking-[0.2em] lg:mb-3 lg:py-1"
+              style={{ backgroundColor: LIME }}
+            >
+              Starting with Instagram. TikTok + YouTube coming next.
+            </div>
+            <h1 className="mx-auto max-w-[21rem] break-words text-[2.5rem] font-black leading-[0.9] tracking-normal text-black sm:max-w-none sm:text-5xl md:text-7xl lg:text-[clamp(3.25rem,4.2vw,4rem)]">
+              Get the same Instagram growth outcomes.
+            </h1>
+            <p className="mx-auto mt-5 max-w-[21rem] text-base font-bold leading-7 text-black/65 sm:max-w-3xl sm:text-lg md:text-2xl md:leading-8 lg:mt-3 lg:text-lg lg:leading-6">
+              Without learning complex automation tools. Same features. Same results. 10x simpler.
+            </p>
+
+            <div className="mt-6 flex flex-col items-center justify-center gap-4 sm:flex-row lg:mt-4">
+              <a
+                href="/signup"
+                className="inline-flex w-full items-center justify-center gap-2 border border-black bg-black px-6 py-4 text-base font-black text-white transition hover:bg-white hover:text-black sm:w-auto lg:px-5 lg:py-2.5 lg:text-sm"
+              >
+                Get Founding Access
+                <ArrowIcon />
+              </a>
+              <a
+                href="#demo"
+                className="inline-flex w-full items-center justify-center border border-black px-6 py-4 text-base font-black text-black transition hover:bg-black hover:text-white sm:w-auto lg:px-5 lg:py-2.5 lg:text-sm"
+              >
+                Watch Demo
+              </a>
+            </div>
+
+            <div className="mt-6 flex flex-col items-center justify-center gap-3 text-sm font-black text-black/70 sm:flex-row sm:gap-6 lg:mt-3 lg:text-xs">
+              {['No flow builders', 'No conditions boxes', 'No hours of setup'].map((item) => (
+                <div key={item} className="flex items-center gap-2">
+                  <span className="h-2 w-2 border border-black" style={{ backgroundColor: LIME }} />
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div id="demo" className="mt-9 grid min-w-0 gap-5 lg:mt-3 lg:grid-cols-3 lg:gap-3">
+            <DemoColumn title="TractionFlo Copilot" kicker="Column 1">
+              <div className="border border-black/10 bg-black/[0.02] p-4 lg:p-3">
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-black/45 lg:text-[10px]">User types</p>
+                <p className="mt-3 break-words text-base font-extrabold leading-7 text-black md:text-lg lg:mt-2 lg:text-sm lg:leading-5">
+                  When someone comments GUIDE on my Reel, send my free PDF, answer pricing
+                  questions from my uploaded FAQ, and follow up if they are interested.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="mt-4 flex w-full items-center justify-center gap-2 border border-black bg-black px-4 py-3 text-sm font-black text-white lg:mt-3 lg:py-2 lg:text-xs"
+              >
+                Generate
+                <ArrowIcon />
+              </button>
+              <div className="mt-5 flex flex-wrap gap-2 lg:mt-3 lg:gap-1.5">
+                {suggestedPrompts.map((prompt) => (
+                  <span key={prompt} className="min-w-0 break-words border border-black/15 px-3 py-2 text-xs font-black lg:px-2 lg:py-1.5 lg:text-[11px]">
+                    {prompt}
+                  </span>
+                ))}
+              </div>
+            </DemoColumn>
+
+            <DemoColumn title="TractionFlo understanding" kicker="Column 2">
+              <div className="space-y-3 lg:space-y-1.5">
+                {understandingSteps.map((step) => (
+                  <div
+                    key={step}
+                    className="flex min-w-0 items-center gap-3 border border-black/10 px-3 py-2.5 text-sm font-extrabold text-black lg:gap-2 lg:py-1.5 lg:text-xs"
+                  >
+                    <span className="flex h-6 w-6 items-center justify-center border border-black text-black lg:h-5 lg:w-5" style={{ backgroundColor: LIME }}>
+                      <CheckIcon />
+                    </span>
+                    <span className="min-w-0 break-words">{step}</span>
+                  </div>
+                ))}
+              </div>
+            </DemoColumn>
+
+            <DemoColumn title="Generated Instagram result" kicker="Column 3">
+              <div className="space-y-3 lg:space-y-1.5">
+                {generatedResult.map((step, index) => (
+                  <div key={step} className="flex min-w-0 items-center gap-3">
+                    <div
+                      className="flex h-8 w-8 shrink-0 items-center justify-center border border-black text-xs font-black lg:h-6 lg:w-6"
+                      style={{ backgroundColor: index === 0 ? LIME : 'white' }}
+                    >
+                      {index + 1}
+                    </div>
+                    <div className="min-w-0 flex-1 break-words border border-black/10 px-3 py-2.5 text-sm font-extrabold lg:py-1.5 lg:text-xs">
+                      {step}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 lg:mt-2">
+                <LimeNote>Done.</LimeNote>
+              </div>
+            </DemoColumn>
+          </div>
+        </div>
+      </section>
+
+      <section id="examples" className="scroll-mt-24 border-t border-black/10 px-5 pb-12 pt-28 lg:px-8 lg:pb-14 lg:pt-36">
+        <div className="mx-auto max-w-7xl">
+          <SectionHeader
+            eyebrow="Old way vs TractionFlo"
+            title="Same power. Same results. 10x simpler."
+            body="Creators already know what they want: comment to DM, lead magnets, FAQs, broadcasts, and follow-ups. TractionFlo removes the maze between idea and launch."
+          />
+
+          <div className="overflow-hidden border border-black">
+            <div className="grid grid-cols-2 border-b border-black bg-black text-white">
+              <div className="border-r border-white/20 p-5">
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-white/55">
+                  Old way
+                </p>
+                <h3 className="mt-2 text-2xl font-black">Too much setup</h3>
+              </div>
+              <div className="p-5">
+                <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
+                  TractionFlo
+                </p>
+                <h3 className="mt-2 text-2xl font-black">Chat and launch</h3>
+              </div>
+            </div>
+            <div className="divide-y divide-black/10">
+              {comparisonRows.map(([old, current]) => (
+                <div key={old} className="grid grid-cols-2">
+                  <div className="border-r border-black/10 p-5 text-xl font-black text-black/45">
+                    {old}
+                  </div>
+                  <div className="flex items-center justify-between gap-4 p-5 text-xl font-black text-black">
+                    <span>{current}</span>
+                    <span
+                      className="flex h-7 w-7 shrink-0 items-center justify-center border border-black text-black"
+                      style={{ backgroundColor: LIME }}
+                    >
+                      <CheckIcon />
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-10 text-center">
+            <SmallLimeNote>Same power. Same results. 10x simpler.</SmallLimeNote>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-5 pb-12 pt-12 lg:px-8 lg:pb-14 lg:pt-14">
+        <div className="mx-auto max-w-7xl">
+          <SectionHeader
+            eyebrow="Creator workflows"
+            title="Same features creators already use."
+            body="No reinvention. TractionFlo keeps the familiar outcomes and replaces the builder complexity with a conversation."
+          />
+          <div className="mx-auto max-w-5xl divide-y divide-black/10 border-y border-black/10">
+            {creatorFeatures.map((feature) => (
+              <div key={feature} className="flex items-center justify-between gap-6 py-6">
+                <span className="text-3xl font-black tracking-normal text-black md:text-5xl">
+                  {feature}
+                </span>
+                <span className="h-5 w-5 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-black/10 px-5 pb-12 pt-12 lg:px-8 lg:pb-14 lg:pt-14">
+        <div className="mx-auto grid max-w-7xl items-center gap-14 lg:grid-cols-[0.9fr_1.1fr]">
+          <div>
+            <p className="mb-5 text-xs font-black uppercase tracking-[0.22em] text-black/50">
+              Knowledge
+            </p>
+            <h2 className="text-4xl font-black leading-[0.95] tracking-normal md:text-7xl">
+              Upload once. Answer forever.
+            </h2>
+            <div className="mt-10 border border-black p-5">
+              <div className="mb-5 flex items-center gap-4 border-b border-black/10 pb-5">
+                <span className="h-4 w-4 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
+                <p className="text-sm font-black uppercase tracking-[0.2em] text-black/45">
+                  Upload knowledge
+                </p>
+              </div>
+              <div className="space-y-3">
+                {['Course guide.pdf', 'Pricing sheet.pdf', 'FAQ doc.pdf'].map((file) => (
+                  <div key={file} className="flex items-center justify-between border border-black/10 p-4">
+                    <span className="font-black">{file}</span>
+                    <span className="text-xs font-black uppercase tracking-[0.16em] text-black/45">
+                      Connected
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              {uploadTypes.map((item) => (
+                <div key={item} className="border border-black/10 p-4 text-lg font-black">
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="border border-black p-6">
+            <div className="mb-5 flex justify-start">
+              <div className="max-w-[82%] border border-black/10 bg-black/[0.02] p-4">
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-black/45">
+                  Follower asks
+                </p>
+                <p className="mt-3 text-3xl font-black leading-tight">What is included?</p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <div className="max-w-[90%] border border-black bg-black p-5 text-white">
+                <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
+                  TractionFlo answers
+                </p>
+                <p className="mt-4 text-xl font-bold leading-8">
+                  The course includes the setup checklist, pricing breakdown, templates, and the
+                  private onboarding guide from your uploaded docs.
+                </p>
+              </div>
+            </div>
+            <p className="mt-5 text-sm font-bold text-black/50">
+              No manual reply writing. TractionFlo reads the source material and answers naturally.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-5 pb-28 pt-12 lg:px-8 lg:pb-36 lg:pt-14">
+        <div className="mx-auto max-w-7xl">
+          <SectionHeader
+            eyebrow="Adaptive conversations"
+            title="Every conversation adapts."
+            body="No same-message blasts. Replies change based on what each follower has asked, clicked, ignored, or shown interest in."
+          />
+          <div className="grid gap-4 md:grid-cols-2">
+            {adaptiveSignals.map((signal) => (
+              <div key={signal} className="flex items-center gap-5 border border-black/10 p-8">
+                <span className="h-4 w-4 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
+                <h3 className="text-3xl font-black">{signal}</h3>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-black/10 px-5 pb-12 pt-28 lg:px-8 lg:pb-14 lg:pt-36">
+        <div className="mx-auto grid max-w-7xl gap-14 lg:grid-cols-[1fr_0.9fr]">
+          <div>
+            <p className="mb-5 text-xs font-black uppercase tracking-[0.22em] text-black/50">
+              Audience intelligence
+            </p>
+            <h2 className="text-4xl font-black leading-[0.95] tracking-normal md:text-7xl">
+              Know who is ready, quiet, or slipping away.
+            </h2>
+          </div>
+          <div className="space-y-4">
+            {audienceGroups.map((group) => (
+              <div key={group} className="flex items-center gap-5 border border-black/10 p-5">
+                <span className="h-4 w-4 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
+                <span className="text-2xl font-black">{group}</span>
+              </div>
+            ))}
+            <div className="border border-black bg-black p-6 text-white">
+              <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
+                Suggested
+              </p>
+              <p className="mt-3 text-2xl font-black">Silent followers active tonight. Run a poll.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-5 py-28 lg:px-8 lg:py-36">
+        <div className="mx-auto max-w-7xl">
+          <SectionHeader
+            eyebrow="Multi-language"
+            title="One audience. Many languages."
+            body="Follower asks in Spanish. TractionFlo replies automatically in Spanish, using the same uploaded knowledge and brand context."
+          />
+          <div className="mx-auto grid max-w-5xl gap-4 md:grid-cols-5">
+            {languages.map((language) => (
+              <div
+                key={language}
+                className="border border-black/10 px-5 py-8 text-center text-2xl font-black"
+                style={language === 'Spanish' ? { backgroundColor: LIME, borderColor: 'black' } : undefined}
+              >
+                {language}
+              </div>
+            ))}
+          </div>
+          <div className="mx-auto mt-10 grid max-w-5xl gap-5 md:grid-cols-2">
+            <div className="border border-black/10 p-5">
+              <p className="text-xs font-black uppercase tracking-[0.2em] text-black/45">
+                Follower asks in Spanish
+              </p>
+              <p className="mt-3 text-3xl font-black">Que incluye el curso?</p>
+            </div>
+            <div className="border border-black bg-black p-5 text-white">
+              <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
+                TractionFlo replies in Spanish
+              </p>
+              <p className="mt-3 text-2xl font-black">
+                Incluye plantillas, guia paso a paso y soporte para lanzar tu primera automatizacion.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="border-t border-black/10 px-5 py-28 lg:px-8 lg:py-36">
+        <div className="mx-auto max-w-7xl">
+          <SectionHeader
+            eyebrow="Daily audience pulse"
+            title="Wake up with the signal, not a dashboard maze."
+            body="TractionFlo turns conversation patterns into simple next actions, without adding another analytics maze."
+          />
+          <div className="mx-auto max-w-4xl border border-black">
+            <div className="border-b border-black p-6">
+              <p className="text-xs font-black uppercase tracking-[0.2em] text-black/45">
+                Today&apos;s pulse
+              </p>
+            </div>
+            <div className="divide-y divide-black/10">
+              {pulseItems.map((item) => (
+                <div key={item} className="flex items-center gap-5 p-6">
+                  <span className="h-4 w-4 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
+                  <span className="text-2xl font-black">{item}</span>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-black bg-black p-6 text-white">
+              <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
+                Suggested actions
+              </p>
+              <p className="mt-3 text-2xl font-black">
+                Share a quick story poll, reply to coaching intent, and send the guide to new
+                commenters.
+              </p>
+              <button
+                type="button"
+                className="mt-6 inline-flex items-center gap-2 border border-white px-5 py-3 text-sm font-black text-white transition hover:bg-white hover:text-black"
+              >
+                Create action plan
+                <ArrowIcon />
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="roadmap" className="scroll-mt-24 px-5 pb-28 pt-12 lg:px-8 lg:pb-36 lg:pt-14">
+        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-3">
+          {[
+            ['Now', 'Instagram comment to DM, FAQs, lead magnets, follow-ups, broadcasts.'],
+            ['Next', 'TikTok and YouTube workflows built with the same chat-first system.'],
+            ['Always', 'ManyChat outcomes with less setup, less wiring, and less maintenance.'],
+          ].map(([label, copy]) => (
+            <div key={label} className="border border-black/10 p-8">
+              <p className="mb-10 text-xs font-black uppercase tracking-[0.22em] text-black/45">
+                {label}
+              </p>
+              <p className="text-3xl font-black leading-tight">{copy}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section id="pricing" className="scroll-mt-24 border-y border-black bg-black px-5 py-24 text-white lg:px-8">
+        <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-10 lg:flex-row lg:items-center">
+          <div className="max-w-3xl">
+            <p className="mb-5 text-xs font-black uppercase tracking-[0.22em]" style={{ color: LIME }}>
+              Pricing
+            </p>
+            <h2 className="text-4xl font-black leading-[0.95] tracking-normal md:text-6xl">
+              Founding access for creators who want the outcome, not the builder.
+            </h2>
+          </div>
+          <a
+            href="/signup"
+            className="inline-flex items-center gap-2 border border-white px-6 py-4 text-base font-black text-white transition hover:bg-white hover:text-black"
+          >
+            Get Founding Access
+            <ArrowIcon />
+          </a>
+        </div>
+      </section>
+
+      <section id="faq" className="scroll-mt-24 px-5 py-28 lg:px-8 lg:py-36">
+        <div className="mx-auto max-w-5xl">
+          <SectionHeader eyebrow="FAQ" title="Questions creators ask before switching." />
+          <div className="divide-y divide-black/10 border-y border-black/10">
+            {faqs.map((faq) => (
+              <details key={faq.question} className="group py-6">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-6 text-left text-2xl font-black">
+                  {faq.question}
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center border border-black text-xl group-open:bg-black group-open:text-white">
+                    +
+                  </span>
+                </summary>
+                <p className="mt-5 max-w-3xl text-lg font-semibold leading-8 text-black/60">
+                  {faq.answer}
+                </p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="px-5 pb-24 lg:px-8">
+        <div className="mx-auto max-w-7xl border border-black p-8 text-center md:p-16">
+          <p className="mb-6 text-xs font-black uppercase tracking-[0.22em] text-black/50">
+            Final CTA
+          </p>
+          <h2 className="mx-auto max-w-5xl text-5xl font-black leading-[0.9] tracking-normal md:text-8xl">
+            Your audience is already interested.
+          </h2>
+          <p className="mx-auto mt-8 max-w-3xl text-2xl font-bold leading-9 text-black/65">
+            Do not make automation another full-time job.
+          </p>
+          <div className="mx-auto mt-10 grid max-w-4xl gap-3 text-left md:grid-cols-2">
+            {[
+              'Same outcomes as ManyChat',
+              'Same features creators use',
+              '10x simpler',
+              'Build by chatting',
+            ].map((item) => (
+              <div key={item} className="flex items-center gap-3 border border-black/10 p-4 font-black">
+                <span className="h-4 w-4 border border-black" style={{ backgroundColor: LIME }} />
+                {item}
+              </div>
+            ))}
+          </div>
+          <a
+            href="/signup"
+            className="mt-10 inline-flex items-center gap-2 border border-black bg-black px-7 py-4 text-base font-black text-white transition hover:bg-white hover:text-black"
+          >
+            Get Founding Access
+            <ArrowIcon />
+          </a>
+        </div>
+      </section>
+    </main>
+  )
 }

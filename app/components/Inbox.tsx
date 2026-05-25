@@ -2,8 +2,13 @@
 
 import { useState, useEffect } from "react";
 
+type Message = {
+  id?: string | number;
+  text?: string;
+};
+
 export default function Inbox() {
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
 
   useEffect(() => {
     const fetchMessages = async () => {
@@ -11,9 +16,9 @@ export default function Inbox() {
         const res = await fetch('/api/messages');
         if (res.ok) {
           const data = await res.json();
-          setMessages(data);
+          setMessages(Array.isArray(data) ? data : []);
         }
-      } catch (err) {}
+      } catch {}
     };
 
     fetchMessages();

@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createSupabaseServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic'; // Prevent caching
 
 export async function GET() {
   try {
+    const supabase = createSupabaseServiceClient();
     const { data, error } = await supabase
       .from('messages')
       .select('*')
@@ -16,7 +17,7 @@ export async function GET() {
     }
 
     return NextResponse.json(data || []);
-  } catch (error) {
+  } catch {
     return NextResponse.json([]);
   }
 }

@@ -4,8 +4,13 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
 
+function redirectToAuthConfigError(pathname: '/login' | '/signup', error: unknown): never {
+  const message = error instanceof Error ? error.message : 'Supabase is not configured'
+  redirect(`${pathname}?error=${encodeURIComponent(message)}`)
+}
+
 export async function login(formData: FormData) {
-  const supabase = await createClient()
+  const supabase = await createClient().catch((error) => redirectToAuthConfigError('/login', error))
 
   const email = formData.get('email') as string
   const password = formData.get('password') as string
@@ -23,12 +28,12 @@ export async function login(formData: FormData) {
     return redirect('/login?error=' + encodeURIComponent(error.message))
   }
 
-  revalidatePath('/', 'layout')
-  redirect('/')
+  revalidatePath('/dashboard', 'layout')
+  redirect('/dashboard')
 }
 
 export async function signup(formData: FormData) {
-  const supabase = await createClient()
+  const supabase = await createClient().catch((error) => redirectToAuthConfigError('/signup', error))
 
   const name = formData.get('name') as string
   const phone = formData.get('phone') as string
@@ -59,7 +64,7 @@ export async function signup(formData: FormData) {
 }
 
 export async function signout() {
-  const supabase = await createClient()
+  const supabase = await createClient().catch((error) => redirectToAuthConfigError('/login', error))
   await supabase.auth.signOut()
   redirect('/login')
 }
