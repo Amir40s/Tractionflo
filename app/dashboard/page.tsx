@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Inbox from "../components/Inbox";
 import { signout } from "../login/actions";
+import BrandLogo from "../components/BrandLogo";
 
 function DashboardContent() {
   const [isConnected, setIsConnected] = useState(false);
@@ -29,11 +30,8 @@ function DashboardContent() {
     <div className="flex h-screen w-full bg-[#f9fafb] text-[#111827] font-sans">
       {/* Sidebar */}
       <aside className="w-52 flex flex-col bg-white border-r border-gray-200 shadow-sm hidden md:flex">
-        <div className="p-4 flex items-center gap-2.5 border-b border-gray-100">
-          <div className="w-6 h-6 bg-[#d4ff00] rounded flex items-center justify-center font-bold text-black shadow-sm text-xs">
-            ⚡
-          </div>
-          <span className="font-extrabold text-lg tracking-tight text-black">TractionFlo</span>
+        <div className="p-4 flex items-center border-b border-gray-100">
+          <BrandLogo className="h-10 w-36" preload sizes="144px" />
         </div>
 
         <nav className="flex-1 px-3 py-3 space-y-1">

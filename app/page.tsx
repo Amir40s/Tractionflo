@@ -1,3 +1,5 @@
+import BrandLogo from "./components/BrandLogo"
+
 const LIME = '#d4ff00'
 
 const suggestedPrompts = [
@@ -230,8 +232,8 @@ export default function LandingPage() {
     <main className="min-h-screen overflow-x-hidden bg-white text-black">
       <header className="fixed inset-x-0 top-0 z-40 border-b border-black/10 bg-white/95 backdrop-blur">
         <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 lg:px-8">
-          <a href="#" className="shrink-0 text-lg font-black tracking-normal text-black lg:text-xl">
-            Traction<span style={{ color: LIME }}>Flo</span>
+          <a href="#" className="inline-flex shrink-0 items-center">
+            <BrandLogo className="h-10 w-36" preload sizes="144px" />
           </a>
 
           <div className="hidden items-center gap-8 text-sm font-bold text-black/70 lg:flex">
