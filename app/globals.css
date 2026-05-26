@@ -3,7 +3,7 @@
 @theme inline {
   --color-primary: #d4ff00;
   --color-primary-hover: #b8e600;
-  --color-secondary: #f0fdf4;
+  --color-secondary: #edf2ed;
   --color-foreground: #000000;
   --color-foreground-muted: #6b7280;
   --color-background: #ffffff;
@@ -23,5 +23,91 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-plus-jakarta-sans);
-  overflow-x: hidden;
+  overflow-x: clip;
+  scroll-behavior: smooth;
+}
+
+/* Creator workflows: sticky phone needs a tall stretched aside */
+#workflows,
+#workflows .mx-auto {
+  overflow: visible;
+}
+
+.workflows-sticky-aside {
+  align-self: stretch;
+  height: 100%;
+}
+
+.workflows-sticky-preview {
+  position: sticky;
+  top: calc(5rem + env(safe-area-inset-top, 0px));
+  height: fit-content;
+  width: 100%;
+  z-index: 2;
+}
+
+/* Custom background patterns */
+.bg-grid-pattern {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+}
+
+.bg-grid-pattern-dark {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+}
+
+/* Custom keyframes for premium animations */
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 30s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Custom glow animations */
+.premium-glow {
+  position: relative;
+}
+.premium-glow::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(90deg, #d4ff00, #007257, #d4ff00);
+  background-size: 200% auto;
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0.15;
+  transition: opacity 0.3s ease;
+}
+.premium-glow:hover::before {
+  opacity: 0.35;
+  animation: borderGlow 3s linear infinite;
+}
+
+@keyframes borderGlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
