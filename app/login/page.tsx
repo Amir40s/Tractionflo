@@ -1,5 +1,6 @@
 import { login } from './actions'
 import Link from 'next/link'
+import BrandLogo from '../components/BrandLogo'
 
 export default async function LoginPage({
   searchParams,
@@ -23,9 +24,7 @@ export default async function LoginPage({
         <div className="relative z-10 flex flex-col h-full">
           {/* Logo */}
           <div className="mb-12">
-            <h1 className="text-3xl font-extrabold tracking-tighter text-foreground">
-              Traction<span className="text-primary">Flo</span>
-            </h1>
+            <BrandLogo className="h-12 w-44" preload sizes="176px" />
           </div>
 
           <div className="max-w-xl">
@@ -76,15 +75,6 @@ export default async function LoginPage({
               </div>
             </div>
             
-            {/* Decorative Image */}
-            <div className="absolute right-[-25%] top-[15%] w-[80%] max-w-[600px] h-auto opacity-90 transform rotate-[-2deg] hover:rotate-0 transition-transform duration-500 hidden xl:block">
-              <img 
-                src="/IMG_3527.PNG" 
-                alt="Platform Preview" 
-                className="w-full h-auto rounded-xl shadow-2xl border-4 border-white/50"
-              />
-            </div>
-
           </div>
         </div>
       </div>
@@ -99,9 +89,9 @@ export default async function LoginPage({
           <div className="w-full max-w-[480px] bg-white rounded-[1.5rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 p-6 sm:p-8">
             
             <div className="text-center mb-8">
-              <h1 className="text-3xl font-extrabold tracking-tighter text-foreground lg:hidden mb-6">
-                Traction<span className="text-primary">Flo</span>
-              </h1>
+              <div className="mb-6 flex justify-center lg:hidden">
+                <BrandLogo className="h-12 w-44" preload sizes="176px" />
+              </div>
               <h2 className="text-[28px] font-extrabold text-foreground mb-2">Welcome Back!</h2>
               <p className="text-foreground-muted text-sm font-medium">Login to your account and continue to manage your Instagram Automation</p>
             </div>
