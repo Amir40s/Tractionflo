@@ -1,3 +1,44 @@
+import {
+  ArrowRight,
+  BadgeCheck,
+  BarChart3,
+  BookOpenCheck,
+  Bot,
+  Check,
+  CircleDollarSign,
+  CircleHelp,
+  Clock3,
+  Database,
+  EyeOff,
+  FileText,
+  Files,
+  Gift,
+  Globe2,
+  GraduationCap,
+  Heart,
+  History,
+  Languages,
+  ListChecks,
+  Megaphone,
+  MessageCircle,
+  MousePointerClick,
+  PanelsTopLeft,
+  Paperclip,
+  PlayCircle,
+  Radio,
+  Repeat2,
+  Rocket,
+  Sparkles,
+  Target,
+  TrendingDown,
+  TrendingUp,
+  UploadCloud,
+  UserPlus,
+  UserRoundCheck,
+  WandSparkles,
+  Zap,
+  type LucideIcon,
+} from "lucide-react"
 import BrandLogo from "./components/BrandLogo"
 
 const LIME = '#d4ff00'
@@ -37,48 +78,67 @@ const comparisonRows = [
   ['Test every path', 'Launch in minutes'],
 ]
 
+const trustPoints = [
+  { label: 'No flow builders', icon: PanelsTopLeft },
+  { label: 'No conditions boxes', icon: MousePointerClick },
+  { label: 'No hours of setup', icon: Clock3 },
+]
+
 const creatorFeatures = [
-  'Comment -> DM',
-  'Guide delivery',
-  'Pricing questions',
-  'Welcome followers',
-  'Giveaway campaigns',
-  'Course launches',
-  'FAQ replies',
-  'Follow-up sequences',
-  'Broadcast campaigns',
-  'Live engagement',
+  { label: 'Comment -> DM', icon: MessageCircle },
+  { label: 'Guide delivery', icon: FileText },
+  { label: 'Pricing questions', icon: CircleDollarSign },
+  { label: 'Welcome followers', icon: UserPlus },
+  { label: 'Giveaway campaigns', icon: Gift },
+  { label: 'Course launches', icon: Rocket },
+  { label: 'FAQ replies', icon: CircleHelp },
+  { label: 'Follow-up sequences', icon: Repeat2 },
+  { label: 'Broadcast campaigns', icon: Megaphone },
+  { label: 'Live engagement', icon: Radio },
 ]
 
 const uploadTypes = [
-  'PDFs',
-  'Pricing sheets',
-  'FAQs',
-  'Guides',
-  'Docs',
-  'Course material',
+  { label: 'PDFs', icon: FileText },
+  { label: 'Pricing sheets', icon: CircleDollarSign },
+  { label: 'FAQs', icon: CircleHelp },
+  { label: 'Guides', icon: BookOpenCheck },
+  { label: 'Docs', icon: Files },
+  { label: 'Course material', icon: GraduationCap },
 ]
 
 const adaptiveSignals = [
-  'Previous interactions',
-  'Interests',
-  'Context',
-  'Uploaded knowledge',
+  { label: 'Previous interactions', icon: History },
+  { label: 'Interests', icon: Target },
+  { label: 'Context', icon: Bot },
+  { label: 'Uploaded knowledge', icon: Database },
 ]
 
 const audienceGroups = [
-  'Potential buyers',
-  'Superfans',
-  'Silent followers',
-  'Losing interest',
+  { label: 'Potential buyers', icon: UserRoundCheck },
+  { label: 'Superfans', icon: Heart },
+  { label: 'Silent followers', icon: EyeOff },
+  { label: 'Losing interest', icon: TrendingDown },
 ]
 
 const languages = ['English', 'French', 'Spanish', 'German', '+ more']
 
 const pulseItems = [
-  'Productivity questions rising',
-  'Story engagement slowing',
-  'Coaching interest increasing',
+  { label: 'Productivity questions rising', icon: TrendingUp },
+  { label: 'Story engagement slowing', icon: BarChart3 },
+  { label: 'Coaching interest increasing', icon: TrendingUp },
+]
+
+const roadmapItems = [
+  { label: 'Now', copy: 'Instagram comment to DM, FAQs, lead magnets, follow-ups, broadcasts.', icon: MessageCircle },
+  { label: 'Next', copy: 'TikTok and YouTube workflows built with the same chat-first system.', icon: Rocket },
+  { label: 'Always', copy: 'ManyChat outcomes with less setup, less wiring, and less maintenance.', icon: Sparkles },
+]
+
+const finalCtaItems = [
+  { label: 'Same outcomes as ManyChat', icon: BadgeCheck },
+  { label: 'Same features creators use', icon: ListChecks },
+  { label: '10x simpler', icon: Zap },
+  { label: 'Build by chatting', icon: MessageCircle },
 ]
 
 const faqs = [
@@ -119,48 +179,6 @@ const faqs = [
   },
 ]
 
-function ArrowIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path
-        d="M4 10H16M11 5L16 10L11 15"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-function CheckIcon() {
-  return (
-    <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <path
-        d="M4 10.5L8 14L16 6"
-        stroke="currentColor"
-        strokeWidth="2.25"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-function GlobeIcon() {
-  return (
-    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3M12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3M12 21C14 18.75 15 15.75 15 12C15 8.25 14 5.25 12 3M12 21C10 18.75 9 15.75 9 12C9 8.25 10 5.25 12 3M3.75 9H20.25M3.75 15H20.25"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
 function SectionHeader({
   eyebrow,
   title,
@@ -180,6 +198,35 @@ function SectionHeader({
         <p className="mx-auto mt-7 max-w-2xl text-lg font-semibold leading-8 text-black/60">{body}</p>
       ) : null}
     </div>
+  )
+}
+
+function IconTile({
+  icon: Icon,
+  tone = 'lime',
+  className = '',
+  iconClassName = 'h-5 w-5',
+}: {
+  icon: LucideIcon
+  tone?: 'lime' | 'white' | 'dark'
+  className?: string
+  iconClassName?: string
+}) {
+  const toneClass =
+    tone === 'dark'
+      ? 'border-black bg-black text-white'
+      : tone === 'white'
+        ? 'border-black/15 bg-white text-black'
+        : 'border-black text-black'
+
+  return (
+    <span
+      className={`flex h-10 w-10 shrink-0 items-center justify-center border ${toneClass} ${className}`}
+      style={tone === 'lime' ? { backgroundColor: LIME } : undefined}
+      aria-hidden="true"
+    >
+      <Icon className={iconClassName} strokeWidth={2.5} />
+    </span>
   )
 }
 
@@ -215,11 +262,11 @@ function DemoColumn({
   children: React.ReactNode
 }) {
   return (
-    <div className="min-w-0 border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.06)] lg:p-3">
-      <div className="mb-5 border-b border-black/10 pb-4 lg:mb-3 lg:pb-2.5">
+    <div className="min-w-0 border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.06)]">
+      <div className="mb-5 border-b border-black/10 pb-4">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-black/40 lg:text-[10px]">{kicker}</p>
-          <h3 className="mt-1 text-xl font-black text-black lg:text-base">{title}</h3>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-black/40">{kicker}</p>
+          <h3 className="mt-1 text-xl font-black text-black">{title}</h3>
         </div>
       </div>
       {children}
@@ -260,14 +307,14 @@ export default function LandingPage() {
               className="hidden h-10 w-10 items-center justify-center border border-black/15 bg-white text-black transition hover:border-black hover:bg-black hover:text-white md:inline-flex"
               type="button"
             >
-              <GlobeIcon />
+              <Globe2 className="h-5 w-5" strokeWidth={2.4} aria-hidden="true" />
             </button>
             <a
               href="/signup"
               className="hidden shrink-0 items-center gap-2 border border-black bg-black px-3 py-2 text-xs font-black text-white transition hover:bg-white hover:text-black sm:inline-flex sm:px-4 sm:text-sm"
             >
               <span>Get Founding Access</span>
-              <ArrowIcon />
+              <ArrowRight className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
             </a>
           </div>
         </nav>
@@ -275,111 +322,117 @@ export default function LandingPage() {
 
       <section
         id="product"
-        className="flex min-h-[100svh] scroll-mt-20 flex-col justify-center px-5 pb-12 pt-20 lg:h-[100svh] lg:min-h-0 lg:overflow-hidden lg:px-8 lg:pb-4 lg:pt-16"
+        className="flex h-[100vh] scroll-mt-20 flex-col justify-center overflow-hidden px-5 pb-8 pt-20 lg:px-8 lg:pb-8 lg:pt-16"
       >
-        <div className="mx-auto w-full max-w-7xl lg:flex lg:h-full lg:flex-col lg:justify-center">
+        <div className="mx-auto flex h-full w-full max-w-7xl flex-col justify-center">
           <div className="mx-auto max-w-5xl text-center">
             <div
-              className="mx-auto mb-6 block max-w-[20rem] border border-black px-3 py-2 text-center text-[10px] font-black uppercase leading-5 tracking-[0.14em] sm:max-w-full sm:px-4 sm:text-xs sm:tracking-[0.2em] lg:mb-3 lg:py-1"
+              className="mx-auto mb-6 block max-w-[20rem] border border-black px-3 py-2 text-center text-[10px] font-black uppercase leading-5 tracking-[0.14em] sm:max-w-full sm:px-4 sm:text-xs sm:tracking-[0.2em] lg:mb-8 lg:py-3"
               style={{ backgroundColor: LIME }}
             >
               Starting with Instagram. TikTok + YouTube coming next.
             </div>
-            <h1 className="mx-auto max-w-[21rem] break-words text-[2.5rem] font-black leading-[0.9] tracking-normal text-black sm:max-w-none sm:text-5xl md:text-7xl lg:text-[clamp(3.25rem,4.2vw,4rem)]">
+            <h1 className="mx-auto max-w-[21rem] break-words text-[2.5rem] font-black leading-[0.9] tracking-normal text-black sm:max-w-none sm:text-5xl md:text-7xl lg:max-w-6xl lg:text-[clamp(5rem,6.3vw,8rem)]">
               Get the same Instagram growth outcomes.
             </h1>
-            <p className="mx-auto mt-5 max-w-[21rem] text-base font-bold leading-7 text-black/65 sm:max-w-3xl sm:text-lg md:text-2xl md:leading-8 lg:mt-3 lg:text-lg lg:leading-6">
+            <p className="mx-auto mt-5 max-w-[21rem] text-base font-bold leading-7 text-black/65 sm:max-w-3xl sm:text-lg md:text-2xl md:leading-8 lg:mt-7 lg:max-w-5xl lg:text-2xl lg:leading-8">
               Without learning complex automation tools. Same features. Same results. 10x simpler.
             </p>
 
-            <div className="mt-6 flex flex-col items-center justify-center gap-4 sm:flex-row lg:mt-4">
+            <div className="mt-6 flex flex-col items-center justify-center gap-4 sm:flex-row lg:mt-8">
               <a
                 href="/signup"
-                className="inline-flex w-full items-center justify-center gap-2 border border-black bg-black px-6 py-4 text-base font-black text-white transition hover:bg-white hover:text-black sm:w-auto lg:px-5 lg:py-2.5 lg:text-sm"
+                className="inline-flex w-full items-center justify-center gap-2 border border-black bg-black px-6 py-4 text-base font-black text-white transition hover:bg-white hover:text-black sm:w-auto lg:px-10 lg:py-5 lg:text-lg"
               >
                 Get Founding Access
-                <ArrowIcon />
+                <ArrowRight className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
               </a>
               <a
                 href="#demo"
-                className="inline-flex w-full items-center justify-center border border-black px-6 py-4 text-base font-black text-black transition hover:bg-black hover:text-white sm:w-auto lg:px-5 lg:py-2.5 lg:text-sm"
+                className="inline-flex w-full items-center justify-center gap-2 border border-black px-6 py-4 text-base font-black text-black transition hover:bg-black hover:text-white sm:w-auto lg:px-10 lg:py-5 lg:text-lg"
               >
+                <PlayCircle className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
                 Watch Demo
               </a>
             </div>
 
-            <div className="mt-6 flex flex-col items-center justify-center gap-3 text-sm font-black text-black/70 sm:flex-row sm:gap-6 lg:mt-3 lg:text-xs">
-              {['No flow builders', 'No conditions boxes', 'No hours of setup'].map((item) => (
-                <div key={item} className="flex items-center gap-2">
-                  <span className="h-2 w-2 border border-black" style={{ backgroundColor: LIME }} />
-                  {item}
+            <div className="mt-6 flex flex-col items-center justify-center gap-3 text-sm font-black text-black/70 sm:flex-row sm:gap-6 lg:mt-8 lg:text-base">
+              {trustPoints.map(({ label, icon }) => (
+                <div key={label} className="flex items-center gap-2">
+                  <IconTile icon={icon} className="h-12 w-12 lg:h-14 lg:w-14" iconClassName="h-5 w-5" />
+                  {label}
                 </div>
               ))}
             </div>
           </div>
+        </div>
+      </section>
 
-          <div id="demo" className="mt-9 grid min-w-0 gap-5 lg:mt-3 lg:grid-cols-3 lg:gap-3">
-            <DemoColumn title="TractionFlo Copilot" kicker="Column 1">
-              <div className="border border-black/10 bg-black/[0.02] p-4 lg:p-3">
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-black/45 lg:text-[10px]">User types</p>
-                <p className="mt-3 break-words text-base font-extrabold leading-7 text-black md:text-lg lg:mt-2 lg:text-sm lg:leading-5">
+      <section
+        id="demo"
+        className="flex min-h-[100vh] scroll-mt-24 items-center px-5 py-12 lg:h-[100vh] lg:min-h-0 lg:overflow-hidden lg:px-8 lg:py-16"
+      >
+        <div className="mx-auto grid w-full max-w-7xl min-w-0 gap-5 lg:grid-cols-3 lg:gap-5">
+          <DemoColumn title="TractionFlo Copilot" kicker="Column 1">
+              <div className="border border-black/10 bg-black/[0.02] p-4">
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-black/45">User types</p>
+                <p className="mt-3 break-words text-base font-extrabold leading-7 text-black md:text-lg">
                   When someone comments GUIDE on my Reel, send my free PDF, answer pricing
                   questions from my uploaded FAQ, and follow up if they are interested.
                 </p>
               </div>
               <button
                 type="button"
-                className="mt-4 flex w-full items-center justify-center gap-2 border border-black bg-black px-4 py-3 text-sm font-black text-white lg:mt-3 lg:py-2 lg:text-xs"
+                className="mt-4 flex w-full items-center justify-center gap-2 border border-black bg-black px-4 py-3 text-sm font-black text-white"
               >
                 Generate
-                <ArrowIcon />
+                <Sparkles className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
               </button>
-              <div className="mt-5 flex flex-wrap gap-2 lg:mt-3 lg:gap-1.5">
+              <div className="mt-5 flex flex-wrap gap-2">
                 {suggestedPrompts.map((prompt) => (
-                  <span key={prompt} className="min-w-0 break-words border border-black/15 px-3 py-2 text-xs font-black lg:px-2 lg:py-1.5 lg:text-[11px]">
+                  <span key={prompt} className="min-w-0 break-words border border-black/15 px-3 py-2 text-xs font-black">
                     {prompt}
                   </span>
                 ))}
               </div>
-            </DemoColumn>
+          </DemoColumn>
 
-            <DemoColumn title="TractionFlo understanding" kicker="Column 2">
-              <div className="space-y-3 lg:space-y-1.5">
+          <DemoColumn title="TractionFlo understanding" kicker="Column 2">
+              <div className="space-y-3">
                 {understandingSteps.map((step) => (
                   <div
                     key={step}
-                    className="flex min-w-0 items-center gap-3 border border-black/10 px-3 py-2.5 text-sm font-extrabold text-black lg:gap-2 lg:py-1.5 lg:text-xs"
+                    className="flex min-w-0 items-center gap-3 border border-black/10 px-3 py-2.5 text-sm font-extrabold text-black"
                   >
-                    <span className="flex h-6 w-6 items-center justify-center border border-black text-black lg:h-5 lg:w-5" style={{ backgroundColor: LIME }}>
-                      <CheckIcon />
+                    <span className="flex h-6 w-6 items-center justify-center border border-black text-black" style={{ backgroundColor: LIME }}>
+                      <Check className="h-4 w-4 shrink-0" strokeWidth={2.7} aria-hidden="true" />
                     </span>
                     <span className="min-w-0 break-words">{step}</span>
                   </div>
                 ))}
               </div>
-            </DemoColumn>
+          </DemoColumn>
 
-            <DemoColumn title="Generated Instagram result" kicker="Column 3">
-              <div className="space-y-3 lg:space-y-1.5">
+          <DemoColumn title="Generated Instagram result" kicker="Column 3">
+              <div className="space-y-3">
                 {generatedResult.map((step, index) => (
                   <div key={step} className="flex min-w-0 items-center gap-3">
                     <div
-                      className="flex h-8 w-8 shrink-0 items-center justify-center border border-black text-xs font-black lg:h-6 lg:w-6"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center border border-black text-xs font-black"
                       style={{ backgroundColor: index === 0 ? LIME : 'white' }}
                     >
                       {index + 1}
                     </div>
-                    <div className="min-w-0 flex-1 break-words border border-black/10 px-3 py-2.5 text-sm font-extrabold lg:py-1.5 lg:text-xs">
+                    <div className="min-w-0 flex-1 break-words border border-black/10 px-3 py-2.5 text-sm font-extrabold">
                       {step}
                     </div>
                   </div>
                 ))}
               </div>
-              <div className="mt-5 lg:mt-2">
+              <div className="mt-5">
                 <LimeNote>Done.</LimeNote>
               </div>
-            </DemoColumn>
-          </div>
+          </DemoColumn>
         </div>
       </section>
 
@@ -393,17 +446,23 @@ export default function LandingPage() {
 
           <div className="overflow-hidden border border-black">
             <div className="grid grid-cols-2 border-b border-black bg-black text-white">
-              <div className="border-r border-white/20 p-5">
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-white/55">
-                  Old way
-                </p>
-                <h3 className="mt-2 text-2xl font-black">Too much setup</h3>
+              <div className="flex items-start gap-5 border-r border-white/20 p-5">
+                <IconTile icon={PanelsTopLeft} tone="dark" className="border-white/25" />
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.2em] text-white/55">
+                    Old way
+                  </p>
+                  <h3 className="mt-2 break-words text-2xl font-black">Too much setup</h3>
+                </div>
               </div>
-              <div className="p-5">
-                <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
-                  TractionFlo
-                </p>
-                <h3 className="mt-2 text-2xl font-black">Chat and launch</h3>
+              <div className="flex items-start gap-5 p-5">
+                <IconTile icon={Sparkles} />
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
+                    TractionFlo
+                  </p>
+                  <h3 className="mt-2 break-words text-2xl font-black">Chat and launch</h3>
+                </div>
               </div>
             </div>
             <div className="divide-y divide-black/10">
@@ -418,7 +477,7 @@ export default function LandingPage() {
                       className="flex h-7 w-7 shrink-0 items-center justify-center border border-black text-black"
                       style={{ backgroundColor: LIME }}
                     >
-                      <CheckIcon />
+                      <Check className="h-4 w-4 shrink-0" strokeWidth={2.7} aria-hidden="true" />
                     </span>
                   </div>
                 </div>
@@ -440,12 +499,12 @@ export default function LandingPage() {
             body="No reinvention. TractionFlo keeps the familiar outcomes and replaces the builder complexity with a conversation."
           />
           <div className="mx-auto max-w-5xl divide-y divide-black/10 border-y border-black/10">
-            {creatorFeatures.map((feature) => (
-              <div key={feature} className="flex items-center justify-between gap-6 py-6">
-                <span className="text-3xl font-black tracking-normal text-black md:text-5xl">
-                  {feature}
+            {creatorFeatures.map(({ label, icon }) => (
+              <div key={label} className="flex items-center gap-6 py-6">
+                <IconTile icon={icon} className="h-12 w-12 md:h-14 md:w-14" />
+                <span className="min-w-0 break-words text-3xl font-black tracking-normal text-black md:text-5xl">
+                  {label}
                 </span>
-                <span className="h-5 w-5 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
               </div>
             ))}
           </div>
@@ -463,16 +522,20 @@ export default function LandingPage() {
             </h2>
             <div className="mt-10 border border-black p-5">
               <div className="mb-5 flex items-center gap-4 border-b border-black/10 pb-5">
-                <span className="h-4 w-4 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
+                <IconTile icon={UploadCloud} className="h-9 w-9" />
                 <p className="text-sm font-black uppercase tracking-[0.2em] text-black/45">
                   Upload knowledge
                 </p>
               </div>
               <div className="space-y-3">
                 {['Course guide.pdf', 'Pricing sheet.pdf', 'FAQ doc.pdf'].map((file) => (
-                  <div key={file} className="flex items-center justify-between border border-black/10 p-4">
-                    <span className="font-black">{file}</span>
-                    <span className="text-xs font-black uppercase tracking-[0.16em] text-black/45">
+                  <div key={file} className="flex items-center justify-between gap-4 border border-black/10 p-4">
+                    <span className="flex min-w-0 items-center gap-3 font-black">
+                      <Paperclip className="h-4 w-4 shrink-0 text-black/45" strokeWidth={2.5} aria-hidden="true" />
+                      <span className="min-w-0 break-words">{file}</span>
+                    </span>
+                    <span className="inline-flex shrink-0 items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-black/45">
+                      <Check className="h-3.5 w-3.5" strokeWidth={2.7} aria-hidden="true" />
                       Connected
                     </span>
                   </div>
@@ -480,9 +543,10 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              {uploadTypes.map((item) => (
-                <div key={item} className="border border-black/10 p-4 text-lg font-black">
-                  {item}
+              {uploadTypes.map(({ label, icon }) => (
+                <div key={label} className="flex items-center gap-3 border border-black/10 p-4 text-lg font-black">
+                  <IconTile icon={icon} className="h-9 w-9" iconClassName="h-4 w-4" />
+                  {label}
                 </div>
               ))}
             </div>
@@ -523,10 +587,10 @@ export default function LandingPage() {
             body="No same-message blasts. Replies change based on what each follower has asked, clicked, ignored, or shown interest in."
           />
           <div className="grid gap-4 md:grid-cols-2">
-            {adaptiveSignals.map((signal) => (
-              <div key={signal} className="flex items-center gap-5 border border-black/10 p-8">
-                <span className="h-4 w-4 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
-                <h3 className="text-3xl font-black">{signal}</h3>
+            {adaptiveSignals.map(({ label, icon }) => (
+              <div key={label} className="flex items-center gap-5 border border-black/10 p-8">
+                <IconTile icon={icon} className="h-12 w-12" />
+                <h3 className="text-3xl font-black">{label}</h3>
               </div>
             ))}
           </div>
@@ -544,17 +608,29 @@ export default function LandingPage() {
             </h2>
           </div>
           <div className="space-y-4">
-            {audienceGroups.map((group) => (
-              <div key={group} className="flex items-center gap-5 border border-black/10 p-5">
-                <span className="h-4 w-4 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
-                <span className="text-2xl font-black">{group}</span>
+            {audienceGroups.map(({ label, icon }) => (
+              <div key={label} className="flex items-center gap-5 border border-black/10 p-5">
+                <IconTile icon={icon} className="h-11 w-11" />
+                <span className="text-2xl font-black">{label}</span>
               </div>
             ))}
             <div className="border border-black bg-black p-6 text-white">
-              <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
-                Suggested
-              </p>
-              <p className="mt-3 text-2xl font-black">Silent followers active tonight. Run a poll.</p>
+              <div
+                className="items-start"
+                style={{
+                  columnGap: '1.25rem',
+                  display: 'grid',
+                  gridTemplateColumns: 'auto minmax(0, 1fr)',
+                }}
+              >
+                <IconTile icon={WandSparkles} className="self-start" />
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
+                    Suggested
+                  </p>
+                  <p className="mt-3 break-words text-2xl font-black">Silent followers active tonight. Run a poll.</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -571,9 +647,10 @@ export default function LandingPage() {
             {languages.map((language) => (
               <div
                 key={language}
-                className="border border-black/10 px-5 py-8 text-center text-2xl font-black"
+                className="flex items-center justify-center gap-4 border border-black/10 px-5 py-8 text-center text-2xl font-black"
                 style={language === 'Spanish' ? { backgroundColor: LIME, borderColor: 'black' } : undefined}
               >
+                <Languages className="h-6 w-6" strokeWidth={2.5} aria-hidden="true" />
                 {language}
               </div>
             ))}
@@ -611,27 +688,39 @@ export default function LandingPage() {
               </p>
             </div>
             <div className="divide-y divide-black/10">
-              {pulseItems.map((item) => (
-                <div key={item} className="flex items-center gap-5 p-6">
-                  <span className="h-4 w-4 shrink-0 border border-black" style={{ backgroundColor: LIME }} />
-                  <span className="text-2xl font-black">{item}</span>
+              {pulseItems.map(({ label, icon }) => (
+                <div key={label} className="flex items-center gap-5 p-6">
+                  <IconTile icon={icon} className="h-11 w-11" />
+                  <span className="text-2xl font-black">{label}</span>
                 </div>
               ))}
             </div>
             <div className="border-t border-black bg-black p-6 text-white">
-              <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
-                Suggested actions
-              </p>
-              <p className="mt-3 text-2xl font-black">
-                Share a quick story poll, reply to coaching intent, and send the guide to new
-                commenters.
-              </p>
+              <div
+                className="items-start"
+                style={{
+                  columnGap: '1.25rem',
+                  display: 'grid',
+                  gridTemplateColumns: 'auto minmax(0, 1fr)',
+                }}
+              >
+                <IconTile icon={WandSparkles} className="self-start" />
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>
+                    Suggested actions
+                  </p>
+                  <p className="mt-3 break-words text-2xl font-black">
+                    Share a quick story poll, reply to coaching intent, and send the guide to new
+                    commenters.
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
                 className="mt-6 inline-flex items-center gap-2 border border-white px-5 py-3 text-sm font-black text-white transition hover:bg-white hover:text-black"
               >
                 Create action plan
-                <ArrowIcon />
+                <WandSparkles className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -640,16 +729,15 @@ export default function LandingPage() {
 
       <section id="roadmap" className="scroll-mt-24 px-5 pb-28 pt-12 lg:px-8 lg:pb-36 lg:pt-14">
         <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-3">
-          {[
-            ['Now', 'Instagram comment to DM, FAQs, lead magnets, follow-ups, broadcasts.'],
-            ['Next', 'TikTok and YouTube workflows built with the same chat-first system.'],
-            ['Always', 'ManyChat outcomes with less setup, less wiring, and less maintenance.'],
-          ].map(([label, copy]) => (
-            <div key={label} className="border border-black/10 p-8">
-              <p className="mb-10 text-xs font-black uppercase tracking-[0.22em] text-black/45">
-                {label}
-              </p>
-              <p className="text-3xl font-black leading-tight">{copy}</p>
+          {roadmapItems.map(({ label, copy, icon }) => (
+            <div key={label} className="flex items-start gap-5 border border-black/10 p-8">
+              <IconTile icon={icon} className="h-12 w-12" />
+              <div className="min-w-0">
+                <p className="mb-4 text-xs font-black uppercase tracking-[0.22em] text-black/45">
+                  {label}
+                </p>
+                <p className="break-words text-3xl font-black leading-tight">{copy}</p>
+              </div>
             </div>
           ))}
         </div>
@@ -670,7 +758,7 @@ export default function LandingPage() {
             className="inline-flex items-center gap-2 border border-white px-6 py-4 text-base font-black text-white transition hover:bg-white hover:text-black"
           >
             Get Founding Access
-            <ArrowIcon />
+            <ArrowRight className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
           </a>
         </div>
       </section>
@@ -708,15 +796,10 @@ export default function LandingPage() {
             Do not make automation another full-time job.
           </p>
           <div className="mx-auto mt-10 grid max-w-4xl gap-3 text-left md:grid-cols-2">
-            {[
-              'Same outcomes as ManyChat',
-              'Same features creators use',
-              '10x simpler',
-              'Build by chatting',
-            ].map((item) => (
-              <div key={item} className="flex items-center gap-3 border border-black/10 p-4 font-black">
-                <span className="h-4 w-4 border border-black" style={{ backgroundColor: LIME }} />
-                {item}
+            {finalCtaItems.map(({ label, icon }) => (
+              <div key={label} className="flex items-center gap-3 border border-black/10 p-4 font-black">
+                <IconTile icon={icon} className="h-9 w-9" iconClassName="h-4 w-4" />
+                {label}
               </div>
             ))}
           </div>
@@ -725,7 +808,7 @@ export default function LandingPage() {
             className="mt-10 inline-flex items-center gap-2 border border-black bg-black px-7 py-4 text-base font-black text-white transition hover:bg-white hover:text-black"
           >
             Get Founding Access
-            <ArrowIcon />
+            <ArrowRight className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
           </a>
         </div>
       </section>
