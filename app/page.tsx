@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { motion, useScroll, useMotionValueEvent } from "framer-motion";
+import { motion, AnimatePresence, useScroll, useMotionValueEvent } from "framer-motion";
 import {
   ArrowRight,
   BadgeCheck,
@@ -39,11 +39,26 @@ import {
   Zap,
   X,
   ChevronDown,
+  Gift,
+  Users,
+  Mail,
+  Lock,
+  Star,
+  GitBranch,
+  Tag,
+  AlertTriangle,
+  Frown,
+  Bug,
+  Sliders,
+  Pencil,
+  Send,
+  MessageSquare,
 } from "lucide-react";
 import BrandLogo from "./components/BrandLogo";
 import CopilotPlayground from "./components/CopilotPlayground";
 import KnowledgeUploader from "./components/KnowledgeUploader";
 import CreatorWorkflows from "./components/CreatorWorkflows";
+import HeroDemo from "./components/HeroDemo";
 const LIME = '#d4ff00';
 const trustPoints = [
   { label: 'No flow builders', icon: PanelsTopLeft },
@@ -158,22 +173,72 @@ function SectionHeader({
 
 export default function LandingPage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
-  const [showAfter, setShowAfter] = useState(false);
+  const [autoStepOld, setAutoStepOld] = useState(-1);
+  const [autoStepNew, setAutoStepNew] = useState(0);
+  const [typedText, setTypedText] = useState("");
+  const [isThinking, setIsThinking] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
-  const problemRef = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: problemRef,
-    offset: ["start 85%", "center 20%"]
-  });
+  useEffect(() => {
+    let active = true;
+    const fullText = "When someone comments GUIDE, send my PDF guide.";
+    
+    const runSequence = async () => {
+      while (active) {
+        if (!active) break;
+        setAutoStepOld(-1);
+        setAutoStepNew(0);
+        setTypedText("");
+        setIsThinking(false);
+        setIsReady(false);
+        
+        await new Promise((r) => setTimeout(r, 1200));
+        
+        // PHASE 1: Old Way builder pain highlight sequence
+        for (let i = 0; i < 5; i++) {
+          if (!active) break;
+          setAutoStepOld(i);
+          await new Promise((r) => setTimeout(r, 800));
+        }
+        
+        await new Promise((r) => setTimeout(r, 1200));
+        
+        // PHASE 2: New Way User Types Prompt
+        if (!active) break;
+        setAutoStepNew(0);
+        
+        for (let i = 0; i <= fullText.length; i++) {
+          if (!active) break;
+          setTypedText(fullText.slice(0, i));
+          await new Promise((r) => setTimeout(r, 40));
+        }
+        
+        await new Promise((r) => setTimeout(r, 1200));
+        
+        // PHASE 3: New Way Generative AI Figures logic
+        if (!active) break;
+        setAutoStepNew(1);
+        setIsThinking(true);
+        
+        await new Promise((r) => setTimeout(r, 2200));
+        
+        // PHASE 4: New Way Automation Active & Launched
+        if (!active) break;
+        setIsThinking(false);
+        setAutoStepNew(2);
+        setIsReady(true);
+        
+        await new Promise((r) => setTimeout(r, 4500));
+      }
+    };
+    
+    runSequence();
+    
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  // Snap cards to green only after the card is fully visible on the screen and reaches the center
-  useMotionValueEvent(scrollYProgress, "change", (latest) => {
-    if (latest > 0.42) {
-      setShowAfter(true);
-    } else {
-      setShowAfter(false);
-    }
-  });
 
   const toggleFaq = (index: number) => {
     setActiveFaq(activeFaq === index ? null : index);
@@ -262,90 +327,145 @@ export default function LandingPage() {
             </a>
           </div>
         </nav>
-      </header>
+      </header> 
+
+
+      
 
       {/* 2. Hero Section */}
       <section
         id="product"
-        className="relative min-h-[90vh] flex flex-col justify-center overflow-hidden px-5 pb-16 pt-28 lg:px-8 bg-grid-pattern"
+        className="relative min-h-screen flex flex-col justify-center overflow-hidden px-5 pb-8 pt-20 lg:pt-20 lg:pb-8 lg:px-8 bg-grid-pattern"
       >
         {/* Floating gradient circles in background */}
         <div className="absolute top-[20%] left-[10%] w-[350px] h-[350px] bg-primary/10 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute bottom-[20%] right-[10%] w-[350px] h-[350px] bg-black/[0.02] rounded-full blur-[100px] pointer-events-none" />
 
-        <div className="mx-auto max-w-6xl text-center z-10">
+        <div className="mx-auto max-w-7xl z-10 w-full">
+          <div className="grid gap-12 lg:grid-cols-12 lg:items-start lg:text-left text-center lg:pt-4">
+            
+            {/* Left Column: Core Branding & Call to Actions */}
+            <div className="lg:col-span-7 flex flex-col items-center lg:items-start text-center lg:text-left select-none">
+              
+              {/* Rounded Tag Badge */}
+              <motion.div
+                initial={{ opacity: 0, y: -15 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-4 inline-flex items-center gap-2 border border-black/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.2em] rounded-full shadow-sm bg-white"
+              >
+                <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                <span className="text-black">Starting with Instagram</span>
+                <div className="h-3 w-px bg-black/15 mx-1" />
+                <span className="text-black/50">TikTok + YouTube coming next</span>
+              </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: -15 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mx-auto mb-6 inline-block border border-black px-4 py-2 text-center text-[10px] font-black uppercase tracking-[0.2em] rounded-sm shadow-sm"
-            style={{ backgroundColor: LIME }}
-          >
-            Starting with Instagram. TikTok + YouTube coming next.
-          </motion.div>
+              {/* Main Heading */}
+              <motion.h1
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="text-[2.75rem] font-black leading-[0.95] tracking-tight text-black sm:text-6xl lg:text-[clamp(3.2rem,4.8vw,4.8rem)] text-center lg:text-left"
+              >
+                Stop building flows. <br />
+                Start getting <br className="hidden lg:block" />
+                <span className="inline-block relative">
+                  conversations
+                  <span className="absolute left-0 right-0 bottom-1.5 h-[6px] bg-[#d4ff00]/70 -z-10 rounded-full" />
+                </span>.
+              </motion.h1>
 
-          <motion.h1
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="mx-auto max-w-4xl text-[2.75rem] font-black leading-[0.9] tracking-tight text-black sm:text-6xl md:text-7xl lg:text-[ clamp(4.5rem,6.5vw,7.5rem)]"
-          >
-            Get the same Instagram <br className="hidden md:block" />
-            growth outcomes.
-          </motion.h1>
+              {/* Description */}
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.2 }}
+                className="mt-4 max-w-xl text-base font-bold leading-7 text-black/65 sm:text-lg md:text-xl"
+              >
+                Get the same automation outcomes creators already want.
+              </motion.p>
 
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.2 }}
-            className="mx-auto mt-6 max-w-2xl text-base font-bold leading-7 text-black/65 sm:text-lg md:text-xl lg:text-2xl"
-          >
-            Without learning complex automation tools. Same features. Same results.{" "}
-            <span className="inline-block relative">
-              10x simpler.
-              <span className="absolute left-0 right-0 bottom-1 h-[3px] bg-black rounded-full" />
-            </span>
-          </motion.p>
-
-          <motion.div
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
-          >
-            <a
-              href="/signup"
-              className="inline-flex w-full items-center justify-center gap-2 border border-black bg-black px-8 py-4.5 text-base font-black text-white hover:bg-white hover:text-black transition sm:w-auto lg:px-10 lg:py-5 lg:text-lg rounded-sm tracking-wider uppercase premium-glow"
-            >
-              Get Founding Access
-              <ArrowRight className="h-4.5 w-4.5" strokeWidth={3} aria-hidden="true" />
-            </a>
-            <a
-              href="#demo"
-              className="inline-flex w-full items-center justify-center gap-2 border border-black px-8 py-4.5 text-base font-black text-black hover:bg-black hover:text-white transition sm:w-auto lg:px-10 lg:py-5 lg:text-lg rounded-sm tracking-wider uppercase bg-white/50 backdrop-blur-sm"
-            >
-              <PlayCircle className="h-4.5 w-4.5" strokeWidth={2.5} aria-hidden="true" />
-              Watch Demo
-            </a>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4 }}
-            className="mt-12 flex flex-col items-center justify-center gap-4 text-xs font-black text-black/75 sm:flex-row sm:gap-10 lg:mt-16"
-          >
-            {trustPoints.map(({ label, icon: Icon }) => (
-              <div key={label} className="flex items-center gap-3 bg-white border border-black/10 px-5 py-2.5 rounded-full shadow-sm hover:border-black/35 transition-colors">
-                <span className="flex h-7 w-7 items-center justify-center border border-black rounded-full" style={{ backgroundColor: LIME }}>
-                  <Icon className="h-3.5 w-3.5 text-black" strokeWidth={3} />
-                </span>
-                <span className="uppercase tracking-wider text-[10px]">{label}</span>
+              {/* Sub-badges row */}
+              <div className="flex flex-wrap gap-1.5 mt-4 justify-center lg:justify-start w-full">
+                {[
+                  { label: "Comment triggers", icon: MessageCircle },
+                  { label: "Lead magnets", icon: FileText },
+                  { label: "FAQs", icon: CircleHelp },
+                  { label: "Broadcasts", icon: BarChart3 },
+                  { label: "Follow-ups", icon: Clock3 }
+                ].map((badge, idx) => {
+                  const Icon = badge.icon;
+                  return (
+                    <div key={idx} className="flex items-center gap-1.5 border border-black/10 bg-black/[0.02] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-sm text-black/60 hover:border-black/20 hover:text-black transition-colors bg-white">
+                      <Icon className="h-3 w-3" strokeWidth={3} />
+                      <span>{badge.label}</span>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </motion.div>
+
+              {/* 10x Simpler Callout */}
+              <div className="mt-6 flex flex-col items-center lg:items-start w-full">
+                <span className="text-3xl font-black text-black">10x simpler</span>
+                <p className="mt-1.5 text-[10px] font-black uppercase tracking-wider text-black/45">
+                  Describe what you want in plain English. TractionFlo builds it.
+                </p>
+              </div>
+
+              {/* Action Call to Action Button */}
+              <div className="mt-6 w-full flex flex-col sm:flex-row justify-center lg:justify-start gap-4">
+                <a
+                  href="/signup"
+                  className="inline-flex w-full items-center justify-center gap-2 border-2 border-black px-8 py-4 text-sm font-black text-black transition-all sm:w-auto rounded-sm tracking-widest uppercase shadow-[4px_4px_0px_#000] hover:shadow-[5px_5px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 active:shadow-[2px_2px_0px_#000]"
+                  style={{ backgroundColor: LIME }}
+                >
+                  <span>Get Founding Access</span>
+                  <ArrowRight className="h-4.5 w-4.5" strokeWidth={3.5} />
+                </a>
+              </div>
+
+              {/* Benefits row */}
+              <div className="mt-4 flex flex-wrap justify-center lg:justify-start gap-x-5 gap-y-2.5 text-[10px] font-black uppercase tracking-wider text-black/50 w-full">
+                <div className="flex items-center gap-1.5">
+                  <Check className="h-3.5 w-3.5 text-green-600" strokeWidth={4} />
+                  <span>Join in 3 seconds</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Check className="h-3.5 w-3.5 text-green-600" strokeWidth={4} />
+                  <span>No credit card</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Check className="h-3.5 w-3.5 text-green-600" strokeWidth={4} />
+                  <span>Limited founding spots</span>
+                </div>
+              </div>
+
+              {/* Bottom logo brand statement */}
+              <div className="mt-6 border-t border-black/10 pt-4 flex items-center gap-3 w-full justify-center lg:justify-start">
+                <div className="h-8.5 w-8.5 rounded-full bg-black flex items-center justify-center text-white text-[11px] font-black shadow-sm shrink-0">
+                  TF
+                </div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-black leading-[1.2] text-left">
+                  Built for creators, <br />
+                  <span className="text-black/45">not automation engineers.</span>
+                </p>
+              </div>
+
+            </div>
+
+            {/* Right Column: High-Fidelity Interactive Chat Simulation */}
+            <div className="lg:col-span-5 w-full max-w-lg mx-auto lg:mx-0">
+              <HeroDemo />
+            </div>
+
+          </div>
         </div>
       </section>
+
+       <section id="workflows" className="scroll-mt-24 overflow-visible border-t border-black/10 px-5 py-24 lg:px-8 bg-[#f5f5f0]">
+        <div className="mx-auto max-w-7xl overflow-visible">
+          <CreatorWorkflows />
+        </div>
+      </section>  
 
       {/* 3. Sliding Testimonials Marquee */}
       <section className="border-y border-black overflow-hidden bg-black py-4.5 shrink-0 select-none">
@@ -377,377 +497,787 @@ export default function LandingPage() {
           ))}
         </div>
       </section>
-      {/* 4. The Real Problem (Setup Pain - Before & After Cards) */}
-      <section id="problem" className="scroll-mt-24 pt-10 pb-2 lg:px-4 bg-black/[0.01]">
+      {/* 4. The Real Problem Section */}
+      <section id="problem" className="scroll-mt-24 border-t border-black/10 px-5 py-24 lg:px-8 bg-[#fafaf9]">
         <div className="mx-auto max-w-7xl">
-          <SectionHeader
-            eyebrow="Your inbox: a before & after"
-            title="Less grind, more pay. Zero complexity."
-            body="We compared typical, rigid automation platforms against the simple, conversational execution engine of TractionFlo."
-          />
-        </div>
-      </section>
-
-       <section 
-        ref={problemRef}
-        className="relative h-[95vh] px-5 bg-black/[0.01]"
-      >
-        <div className="sticky top-28 flex flex-col justify-center py-6">
-          <div className="mx-auto max-w-7xl w-full relative">
+          
+          <div className="grid gap-12 lg:grid-cols-12 lg:items-start">
             
-            {/* Left Legacy Stickers (visible/highlighted when showAfter is false) */}
-            <div className="hidden lg:block">
-              {/* Sticker 1: TRIGGER HELL */}
-              <motion.div
-                animate={{ 
-                  opacity: showAfter ? 0.15 : 1,
-                  scale: showAfter ? 0.95 : 1,
-                  y: [0, -6, 0]
-                }}
-                transition={{ 
-                  opacity: { duration: 0.3 },
-                  scale: { duration: 0.3 },
-                  y: { repeat: Infinity, duration: 4, ease: "easeInOut" }
-                }}
-                className="absolute left-4 xl:left-12 top-[15%] -rotate-12 bg-black text-white border border-red-500 px-4 py-2 text-xs font-black uppercase tracking-wider shadow-[4px_4px_0px_rgba(239,68,68,1)] rounded-md select-none z-20 cursor-default flex items-center gap-1.5"
-              >
-                <Flame className="h-4 w-4 text-red-500 fill-red-500 shrink-0" strokeWidth={2.5} />
-                <span>TRIGGER HELL</span>
-              </motion.div>
-
-              {/* Sticker 2: RIGID FLOWS */}
-              <motion.div
-                animate={{ 
-                  opacity: showAfter ? 0.15 : 1,
-                  scale: showAfter ? 0.95 : 1,
-                  y: [0, -6, 0]
-                }}
-                transition={{ 
-                  opacity: { duration: 0.3 },
-                  scale: { duration: 0.3 },
-                  y: { repeat: Infinity, duration: 4, ease: "easeInOut", delay: 0.5 }
-                }}
-                className="absolute left-8 xl:left-24 top-[45%] rotate-6 bg-amber-400 border-2 border-black text-black px-4 py-2.5 text-xs font-black uppercase tracking-widest shadow-[4px_4px_0px_#000] rounded-sm select-none z-20 cursor-default flex items-center gap-1.5"
-              >
-                <Network className="h-4 w-4 text-black shrink-0" strokeWidth={2.5} />
-                <span>RIGID FLOWS</span>
-              </motion.div>
-
-              {/* Sticker 3: COMPLEX CODE */}
-              <motion.div
-                animate={{ 
-                  opacity: showAfter ? 0.15 : 1,
-                  scale: showAfter ? 0.95 : 1,
-                  y: [0, -6, 0]
-                }}
-                transition={{ 
-                  opacity: { duration: 0.3 },
-                  scale: { duration: 0.3 },
-                  y: { repeat: Infinity, duration: 4, ease: "easeInOut", delay: 1 }
-                }}
-                className="absolute left-2 xl:left-10 top-[75%] -rotate-3 bg-red-500 border border-black text-white px-4 py-2 text-xs font-black uppercase tracking-wider shadow-lg rounded-sm select-none z-20 cursor-default flex items-center gap-1.5"
-              >
-                <Terminal className="h-4 w-4 text-white shrink-0" strokeWidth={2.5} />
-                <span>COMPLEX CODE</span>
-              </motion.div>
-            </div>
-
-            {/* Right Next-Gen Stickers (visible/highlighted when showAfter is true) */}
-            <div className="hidden lg:block">
-              {/* Sticker 1: CHAT-FIRST */}
-              <motion.div
-                animate={{ 
-                  opacity: showAfter ? 1 : 0.15,
-                  scale: showAfter ? 1 : 0.95,
-                  y: [0, -6, 0]
-                }}
-                transition={{ 
-                  opacity: { duration: 0.3 },
-                  scale: { duration: 0.3 },
-                  y: { repeat: Infinity, duration: 4, ease: "easeInOut", delay: 0.2 }
-                }}
-                className="absolute right-4 xl:right-12 top-[15%] rotate-12 bg-black text-white border-2 border-[#d4ff00] px-4 py-2 text-xs font-black uppercase tracking-wider shadow-[4px_4px_0px_#d4ff00] rounded-md select-none z-20 cursor-default flex items-center gap-1.5"
-              >
-                <MessageCircle className="h-4 w-4 text-[#d4ff00] shrink-0" strokeWidth={2.5} />
-                <span>CHAT-FIRST</span>
-              </motion.div>
-
-              {/* Sticker 2: 2-MIN SETUP */}
-              <motion.div
-                animate={{ 
-                  opacity: showAfter ? 1 : 0.15,
-                  scale: showAfter ? 1 : 0.95,
-                  y: [0, -6, 0]
-                }}
-                transition={{ 
-                  opacity: { duration: 0.3 },
-                  scale: { duration: 0.3 },
-                  y: { repeat: Infinity, duration: 4, ease: "easeInOut", delay: 0.7 }
-                }}
-                className="absolute right-8 xl:right-24 top-[45%] -rotate-6 bg-[#007257] text-white border border-[#d4ff00] px-4 py-2.5 text-xs font-black uppercase tracking-widest shadow-lg rounded-sm select-none z-20 cursor-default flex items-center gap-1.5"
-              >
-                <WandSparkles className="h-4 w-4 text-[#d4ff00] shrink-0" strokeWidth={2} />
-                <span>2-MIN SETUP</span>
-              </motion.div>
-
-              {/* Sticker 3: AI AUTOPILOT */}
-              <motion.div
-                animate={{ 
-                  opacity: showAfter ? 1 : 0.15,
-                  scale: showAfter ? 1 : 0.95,
-                  y: [0, -6, 0]
-                }}
-                transition={{ 
-                  opacity: { duration: 0.3 },
-                  scale: { duration: 0.3 },
-                  y: { repeat: Infinity, duration: 4, ease: "easeInOut", delay: 1.2 }
-                }}
-                className="absolute right-2 xl:right-10 top-[75%] rotate-6 text-black px-4 py-2 text-xs font-black uppercase tracking-wider shadow-md border border-black select-none z-20 cursor-default flex items-center gap-1.5"
-                style={{ backgroundColor: LIME }}
-              >
-                <Bot className="h-4 w-4 text-black shrink-0" strokeWidth={2.5} />
-                <span>AI AUTOPILOT</span>
-              </motion.div>
-            </div>
-
-            {/* Carousel Slider Card Wrapper */}
-            <div className="w-full max-w-lg md:max-w-xl mx-auto overflow-hidden border border-black/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.08)] bg-white relative z-10">
+            {/* Left Column: Frustration Copy & List */}
+            <div className="lg:col-span-5 flex flex-col items-start select-none">
               
-               <motion.div 
-                animate={{ x: showAfter ? "-50%" : "0%" }}
-                transition={{ type: "spring", stiffness: 90, damping: 15 }}
-                className="flex w-[200%] h-[440px] md:h-[560px]"
+              {/* Badge */}
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                className="mb-4 inline-flex items-center gap-2 border border-red-500/25 bg-red-500/5 px-3 py-1 text-[9px] font-black uppercase tracking-[0.2em] rounded-full text-red-500 shadow-sm"
               >
-                {/* Card 1: The Old Way */}
-                <div className="w-1/2 h-full flex flex-col justify-between p-8 bg-white relative shrink-0">
-                  <div className="absolute top-0 left-0 w-full h-[4px] bg-black/15" />
-                  
-                  {/* Floating Legacy Stickers */}
-                  <div className="absolute top-24 right-4 rotate-6 bg-black text-white border border-red-500 px-2.5 py-1 text-[8px] md:text-[9px] font-black uppercase tracking-wider shadow-md rounded-sm select-none z-10 flex items-center gap-1">
-                    <Clock3 className="h-3 w-3 text-red-500 shrink-0" strokeWidth={2.5} />
-                    <span>4-8 Hours Setup</span>
-                  </div>
-                  <div className="absolute bottom-24 left-4 -rotate-12 bg-red-500 border border-black text-white px-2.5 py-1 text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-md rounded-sm select-none z-10 flex items-center gap-1">
-                    <X className="h-3 w-3 text-white shrink-0 bg-red-600 rounded-full p-0.5" strokeWidth={3} />
-                    <span>Legacy 1.0</span>
-                  </div>
+                <X className="h-3.5 w-3.5 shrink-0 rounded-full border border-red-500 p-[1.5px]" strokeWidth={3.5} />
+                <span>THE REAL PROBLEM</span>
+              </motion.div>
 
-                  <div>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-black/40">The Old Way</span>
-                    <h3 className="text-2xl font-black text-black mt-2 mb-6">All work and no play</h3>
-                    <ul className="space-y-3.5">
-                      {[
-                        "Copy-pasting the same reply 417 times",
-                        "Wiring together triggers, branches, and nodes",
-                        "Losing premium hot leads in messy comment threads",
-                        "Endless condition boxes for every single FAQ",
-                        "Manually sorting commenter handles and tags",
-                        "Zero sales generated while you sleep"
-                      ].map((text, i) => (
-                        <li key={i} className="flex items-start gap-3.5 border-b border-black/5 pb-2.5">
-                          <span className="flex h-5 w-5 shrink-0 items-center justify-center border border-black bg-black/5 text-black rounded-sm">
-                            <X className="h-3.5 w-3.5" strokeWidth={3} />
+              {/* Title */}
+              <motion.h2
+                initial={{ opacity: 0, y: 15 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.1 }}
+                className="text-3xl font-black leading-[1.0] tracking-tight text-black sm:text-4xl lg:text-5xl"
+              >
+                Creators don't have <br />
+                an automation problem. <br />
+                They have a <span className="relative inline-block text-red-500">
+                  setup
+                  <span className="absolute left-0 right-0 bottom-1 h-[4px] bg-red-500/20 -z-10 rounded-full" />
+                </span> problem.
+              </motion.h2>
+
+              {/* Subtitle */}
+              <motion.p
+                initial={{ opacity: 0 }}
+                whileInView={{ opacity: 1 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.2 }}
+                className="mt-3 text-sm font-bold leading-relaxed text-black/60"
+              >
+                Most tools make creators think like engineers. <br />
+                Too many steps. Too much logic. Too easy to break.
+              </motion.p>
+
+              {/* 5 Frustration Points */}
+              <div className="mt-5 space-y-2 w-full">
+                {[
+                  { title: "Complicated builders", desc: "Drag blocks. Add rules. Connect everything.", icon: Network },
+                  { title: "Endless conditions & logic", desc: "If this, then that, unless this happens...", icon: GitBranch },
+                  { title: "Hours configuring", desc: "What should take minutes turns into hours.", icon: Sliders },
+                  { title: "Test every path", desc: "One tiny change can break everything.", icon: Bug },
+                  { title: "Built for engineers, not creators", desc: "Powerful, but not made for the way you think.", icon: Frown }
+                ].map((item, idx) => {
+                  const Icon = item.icon;
+                  return (
+                    <motion.div 
+                      key={idx}
+                      initial={{ opacity: 0, y: 5 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: 0.1 + idx * 0.04 }}
+                      whileHover={{ y: -1 }}
+                      className="group flex items-center gap-3.5 px-3 py-2 border border-black/5 bg-white rounded-lg shadow-sm hover:border-black/10 hover:shadow transition-all duration-200"
+                    >
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-500 border border-red-500/5 group-hover:scale-105 transition-transform duration-200">
+                        <Icon className="h-4 w-4" strokeWidth={2.5} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-500">
+                            <X className="h-2.5 w-2.5" strokeWidth={4} />
                           </span>
-                          <span className="text-xs md:text-sm font-bold text-black/55">{text}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="mt-6 pt-4 border-t border-black/5">
-                    <p className="text-xs font-semibold text-black/40">Typical setup takes 4-8 hours of testing pathways.</p>
-                  </div>
+                          <h4 className="text-[10px] font-black text-black uppercase tracking-wider truncate">{item.title}</h4>
+                        </div>
+                        <p className="text-[10px] font-semibold text-black/50 leading-none mt-0.5 truncate">{item.desc}</p>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+
+              {/* Warning Banner Callout */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.35 }}
+                className="mt-4 flex items-center gap-3 bg-red-500/5 border border-red-500/10 px-4 py-3 rounded-lg w-full"
+              >
+                <div className="h-8 w-8 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 shrink-0">
+                  <AlertTriangle className="h-4 w-4" strokeWidth={2.5} />
                 </div>
-
-                {/* Card 2: TractionFlo Difference */}
-                <div className="w-1/2 h-full flex flex-col justify-between p-8 bg-[#007257] text-white relative shrink-0">
-                  <div className="absolute top-0 left-0 w-full h-[4px]" style={{ backgroundColor: LIME }} />
-                  
-                  {/* Floating New Method Stickers */}
-                  <div className="absolute top-24 right-4 rotate-12 bg-black text-white border-2 border-[#d4ff00] px-2.5 py-1 text-[8px] md:text-[9px] font-black uppercase tracking-wider shadow-[2px_2px_0px_#d4ff00] rounded-sm select-none z-10">
-                    ✨ 2 Mins Setup
-                  </div>
-                  <div className="absolute bottom-24 left-4 -rotate-6 text-black px-2.5 py-1 text-[9px] md:text-[10px] font-black uppercase tracking-widest shadow-md rounded-sm border border-black select-none z-10" style={{ backgroundColor: LIME }}>
-                    ⚡ AI Copilot
-                  </div>
-
-                  <div>
-                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: LIME }}>TractionFlo difference</span>
-                    <h3 className="text-2xl font-black text-white mt-2 mb-6">Less grind and more pay</h3>
-                    <ul className="space-y-3.5">
-                      {[
-                        "Describe the outcome and replies are instantly ready",
-                        "Connected FAQ documents answer questions natively",
-                        "Organized, categorized, and tagged hot leads",
-                        "No condition boxes or rigid flow wiring required",
-                        "Auto-detect follower languages and reply natively",
-                        "Automated transactions capturing sales 24/7"
-                      ].map((text, i) => (
-                        <li key={i} className="flex items-start gap-3.5 border-b border-white/10 pb-2.5">
-                          <span className="flex h-5 w-5 shrink-0 items-center justify-center border border-black text-black rounded-sm" style={{ backgroundColor: LIME }}>
-                            <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                          </span>
-                          <span className="text-xs md:text-sm font-bold text-white/90">{text}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="mt-6 pt-4 border-t border-white/10">
-                    <p className="text-xs font-semibold" style={{ color: LIME }}>Get outcomes immediately. Setup takes less than 2 minutes.</p>
-                  </div>
+                <div>
+                  <h5 className="text-xs font-black text-red-600 uppercase tracking-wider leading-none">This creates friction.</h5>
+                  <p className="text-[10px] font-semibold text-red-500 mt-1 leading-none">
+                    Friction <span className="relative inline-block font-black text-red-600 border-b border-red-500/40 pb-0.5" style={{ fontFamily: 'var(--font-handwritten)', fontSize: '11px' }}>kills momentum.</span>
+                  </p>
                 </div>
-
               </motion.div>
 
             </div>
+
+            {/* Right Column: Visual Flowbuilder headache canvas */}
+            <div className="lg:col-span-7 w-full flex flex-col items-center">
+              <motion.div
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6 }}
+                whileHover={{ y: -4 }}
+                className="w-full bg-white border border-black/10 rounded-2xl p-6 shadow-md hover:shadow-xl transition-all duration-300 relative"
+              >
+                {/* Header text */}
+                <div className="flex items-center justify-between border-b border-black/5 pb-4 mb-6">
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-black/45">
+                    WHAT IT LOOKS LIKE IN MOST TOOLS
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-red-500" />
+                    <span className="text-[9px] font-black uppercase text-red-500 tracking-wider">Complex Flow</span>
+                  </div>
+                </div>
+
+                {/* Canvas Box */}
+                <div 
+                  className="w-full overflow-x-auto no-scrollbar rounded-xl border border-black/10 bg-slate-50/[0.8] p-6 h-[475px] relative bg-grid-pattern shadow-inner"
+                  style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                >
+                  <style dangerouslySetInnerHTML={{__html: `
+                    .no-scrollbar::-webkit-scrollbar {
+                      display: none;
+                    }
+                    @keyframes flow-dash {
+                      to {
+                        stroke-dashoffset: -20;
+                      }
+                    }
+                    .flow-active {
+                      stroke-dasharray: 6, 4;
+                      animation: flow-dash 1.2s linear infinite;
+                    }
+                  `}} />
+                  {/* Absolute node wrapper to force full flowchart dimensions */}
+                  <div className="w-[635px] h-[430px] relative select-none">
+                    {/* SVG Connector lines */}
+                    <svg className="absolute inset-0 w-[635px] h-[430px] pointer-events-none z-0">
+                      <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                          <path d="M 0 2 L 8 5 L 0 8 z" fill="#cbd5e1" />
+                        </marker>
+                        <marker id="arrow-red" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                          <path d="M 0 2 L 8 5 L 0 8 z" fill="#ef4444" />
+                        </marker>
+                        <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                          <path d="M 0 2 L 8 5 L 0 8 z" fill="#22c55e" />
+                        </marker>
+                      </defs>
+                      
+                      {/* IG Trigger -> Keyword Condition */}
+                      <path d="M 170 45 L 185 45" fill="none" stroke="#cbd5e1" strokeWidth="2" className="flow-active" markerEnd="url(#arrow)" />
+                      
+                      {/* Keyword Condition -> YES -> SendDM */}
+                      <path d="M 335 45 L 350 45" fill="none" stroke="#22c55e" strokeWidth="2" className="flow-active" markerEnd="url(#arrow-green)" />
+                      
+                      {/* Keyword Condition -> NO -> Wait 2 min */}
+                      <path d="M 260 70 L 260 90 L 95 90 L 95 110" fill="none" stroke="#ef4444" strokeWidth="2" className="flow-active" markerEnd="url(#arrow-red)" />
+                      
+                      {/* Wait 2 min -> Add Tag */}
+                      <path d="M 170 135 L 185 135" fill="none" stroke="#cbd5e1" strokeWidth="2" className="flow-active" markerEnd="url(#arrow)" />
+                      
+                      {/* Add Tag -> Condition Subscribed */}
+                      <path d="M 260 160 L 260 180 L 95 180 L 95 200" fill="none" stroke="#cbd5e1" strokeWidth="2" className="flow-active" markerEnd="url(#arrow)" />
+                      
+                      {/* Condition Subscribed -> YES -> Send guide */}
+                      <path d="M 170 225 L 185 225" fill="none" stroke="#22c55e" strokeWidth="2" className="flow-active" markerEnd="url(#arrow-green)" />
+                      
+                      {/* Condition Subscribed -> NO -> Ask to Subscribe */}
+                      <path d="M 95 250 L 95 290" fill="none" stroke="#ef4444" strokeWidth="2" className="flow-active" markerEnd="url(#arrow-red)" />
+                      
+                      {/* Msg DM -> Condition Replied */}
+                      <path d="M 500 45 L 510 45 L 510 90 L 425 90 L 425 110" fill="none" stroke="#cbd5e1" strokeWidth="2" className="flow-active" markerEnd="url(#arrow)" />
+                      
+                      {/* Condition Replied -> YES -> Send Guide */}
+                      <path d="M 350 135 L 340 135 L 340 180 L 260 180 L 260 200" fill="none" stroke="#22c55e" strokeWidth="2" className="flow-active" markerEnd="url(#arrow-green)" />
+                      
+                      {/* Condition Replied -> NO -> End */}
+                      <path d="M 500 135 L 515 135" fill="none" stroke="#ef4444" strokeWidth="2" className="flow-active" markerEnd="url(#arrow-red)" />
+                      
+                      {/* Send Guide -> Wait 1 day */}
+                      <path d="M 335 225 L 350 225" fill="none" stroke="#cbd5e1" strokeWidth="2" className="flow-active" markerEnd="url(#arrow)" />
+                      
+                      {/* Wait 1 day -> Follow up */}
+                      <path d="M 500 225 L 510 225 L 510 270 L 260 270 L 260 290" fill="none" stroke="#cbd5e1" strokeWidth="2" className="flow-active" markerEnd="url(#arrow)" />
+                      
+                      {/* Follow up -> Update source */}
+                      <path d="M 260 340 L 260 380" fill="none" stroke="#cbd5e1" strokeWidth="2" className="flow-active" markerEnd="url(#arrow)" />
+                      
+                      {/* Update source -> Leads */}
+                      <path d="M 335 405 L 350 405" fill="none" stroke="#cbd5e1" strokeWidth="2" className="flow-active" markerEnd="url(#arrow)" />
+                    </svg>
+
+                    {/* YES/NO Path Pill Labels */}
+                    <div className="absolute left-[338px] top-[35px] bg-green-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-sm z-10 select-none">YES</div>
+                    <div className="absolute left-[248px] top-[76px] bg-red-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-sm z-10 select-none">NO</div>
+                    <div className="absolute left-[290px] top-[168px] bg-green-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-sm z-10 select-none">YES</div>
+                    <div className="absolute left-[502px] top-[125px] bg-red-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-sm z-10 select-none">NO</div>
+                    <div className="absolute left-[83px] top-[258px] bg-red-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-sm z-10 select-none">NO</div>
+                    <div className="absolute left-[172px] top-[215px] bg-green-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-sm z-10 select-none">YES</div>
+
+                    {/* Nodes Array Mapping */}
+                    {[
+                      { id: 1, label: "When...", desc: "New comment", icon: MessageCircle, bg: "from-yellow-400 via-pink-500 to-purple-500 text-white", style: "left-[20px] top-[20px] border-l-4 border-l-pink-500" },
+                      { id: 2, label: "Condition", desc: "Keyword is GUIDE", icon: GitBranch, bg: "bg-blue-500/10 text-blue-600 border border-blue-500/10", style: "left-[185px] top-[20px]" },
+                      { id: 3, label: "Send Message", desc: "Send DM", icon: MessageCircle, bg: "bg-green-500/10 text-green-600 border border-green-500/10", style: "left-[350px] top-[20px]" },
+                      
+                      { id: 4, label: "Wait", desc: "Wait 2 min", icon: Clock3, bg: "bg-amber-500/10 text-amber-600 border border-amber-500/10", style: "left-[20px] top-[110px]" },
+                      { id: 5, label: "Add Tag", desc: "Interested", icon: Tag, bg: "bg-blue-500/10 text-blue-600 border border-blue-500/10", style: "left-[185px] top-[110px]" },
+                      { id: 6, label: "Condition", desc: "User replied?", icon: GitBranch, bg: "bg-blue-500/10 text-blue-600 border border-blue-500/10", style: "left-[350px] top-[110px]" },
+                      
+                      { id: 7, label: "Condition", desc: "Subscribed?", icon: GitBranch, bg: "bg-blue-500/10 text-blue-600 border border-blue-500/10", style: "left-[20px] top-[200px]" },
+                      { id: 8, label: "Send Message", desc: "Send guide", icon: MessageCircle, bg: "bg-green-500/10 text-green-600 border border-green-500/10", style: "left-[185px] top-[200px]" },
+                      { id: 9, label: "Wait", desc: "Wait 1 day", icon: Clock3, bg: "bg-amber-500/10 text-amber-600 border border-amber-500/10", style: "left-[350px] top-[200px]" },
+                      
+                      { id: 10, label: "Send Message", desc: "Ask to subscribe", icon: MessageCircle, bg: "bg-green-500/10 text-green-600 border border-green-500/10", style: "left-[20px] top-[290px]" },
+                      { id: 11, label: "Send Message", desc: "Follow up", icon: MessageCircle, bg: "bg-green-500/10 text-green-600 border border-green-500/10", style: "left-[185px] top-[290px]" },
+                      { id: 12, label: "Send Message", desc: "Check this out", icon: MessageCircle, bg: "bg-green-500/10 text-green-600 border border-green-500/10", style: "left-[350px] top-[290px]" },
+                      
+                      { id: 13, label: "Update Field", desc: "Source: Instagram", icon: Database, bg: "bg-purple-500/10 text-purple-600 border border-purple-500/10", style: "left-[185px] top-[380px]" },
+                      { id: 14, label: "Add to List", desc: "Leads", icon: Users, bg: "bg-indigo-500/10 text-indigo-600 border border-indigo-500/10", style: "left-[350px] top-[380px]" },
+                      { id: 15, label: "End", desc: "", icon: CircleHelp, bg: "bg-red-500/10 text-red-600 border border-red-500/10", style: "left-[515px] top-[110px] w-[100px]" }
+                    ].map((node) => {
+                      const Icon = node.icon;
+                      return (
+                        <div
+                          key={node.id}
+                          className={`absolute ${node.style} w-[150px] h-[50px] bg-white border border-black/10 p-2 flex items-center gap-2 rounded-lg shadow-sm hover:border-black/25 hover:shadow transition-all duration-200 z-10`}
+                        >
+                          <div className={`h-6.5 w-6.5 rounded flex items-center justify-center shrink-0 ${node.bg}`}>
+                            <Icon className="h-3.5 w-3.5" strokeWidth={2.5} />
+                          </div>
+                          <div className="overflow-hidden">
+                            <p className="text-[7.5px] font-black uppercase text-black/40 leading-none truncate">{node.label}</p>
+                            {node.desc ? (
+                              <p className="text-[8.5px] font-black text-black leading-none mt-1 truncate">{node.desc}</p>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Bottom Red tags frustration indicators */}
+                <div className="mt-6 pt-5 border-t border-black/5 flex flex-wrap gap-2.5 justify-center">
+                  {[
+                    "Too many steps",
+                    "Hard to maintain",
+                    "Easy to break",
+                    "Impossible to scale"
+                  ].map((tag, idx) => (
+                    <motion.div
+                      key={tag}
+                      initial={{ opacity: 0, y: 5 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: 0.1 + idx * 0.05 }}
+                      whileHover={{ y: -1 }}
+                      className="inline-flex items-center gap-1.5 border border-red-500/15 bg-red-500/5 px-3 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider text-red-500 select-none shadow-sm hover:border-red-500/25 transition-colors"
+                    >
+                      <X className="h-3 w-3 shrink-0 rounded-full border border-red-500 p-[0.5px]" strokeWidth={3.5} />
+                      <span>{tag}</span>
+                    </motion.div>
+                  ))}
+                </div>
+
+              </motion.div>
+            </div>
+
           </div>
+
         </div>
       </section>
  
-      <section id="demo" className="scroll-mt-12 pt-24 pb-20 lg:pb-28 lg:px-2 border-t border-black/10 relative z-10 bg-white">
-        <div className="mx-auto max-w-7xl">
-          <SectionHeader
-            eyebrow="TractionFlo Copilot"
-            title="Describe the outcome. Launch in minutes."
-            body="Type what automation you want in simple English. TractionFlo's generative engine parses the instruction, sets up files, and hooks leads automatically."
-          />
-
-          <div className="max-w-6xl mx-auto mt-10">
-            <CopilotPlayground />
+      {/* 5. Chat-First Automation Section */}
+      <section id="demo" className="scroll-mt-12 pt-24 pb-24 border-t border-black/10 relative z-10 bg-white select-none">
+        <div className="mx-auto max-w-7xl px-5 lg:px-8">
+          
+          {/* Section Header */}
+          <div className="mx-auto mb-14 max-w-4xl text-center">
+            <div className="mb-4 inline-flex items-center gap-2 border border-black bg-[#d4ff00] px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] rounded-full text-black shadow-sm">
+              <Zap className="h-3.5 w-3.5 text-black" />
+              <span>THE NEW WAY</span>
+            </div>
+            <h2 className="text-4xl font-black leading-[0.95] tracking-tight text-black md:text-6xl mt-2">
+              Meet <span className="relative inline-block text-black">
+                Chat-First Automation
+                <span className="absolute left-0 right-0 bottom-2 h-[6px] bg-[#d4ff00]/70 -z-10 rounded-full" />
+              </span>.
+            </h2>
+            <p className="mx-auto mt-6 max-w-2xl text-base font-bold leading-relaxed text-black/60">
+              Stop wiring builders. <br />
+              Just describe what you want.
+            </p>
           </div>
-        </div>
-      </section>
 
-      {/* 7. Creator Workflows Section */}
-      <section id="workflows" className="scroll-mt-24 overflow-visible border-t border-black/10 px-5 py-24 lg:px-8 bg-[#f5f5f0]">
-        <div className="mx-auto max-w-7xl overflow-visible">
-          <CreatorWorkflows />
-        </div>
-      </section>
-
-       <section id="examples" className="scroll-mt-24 border-t border-black/10 px-5 py-24 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <SectionHeader
-            eyebrow="Comparison"
-            title="Same power. Same outcome. 10x simpler."
-            body="Creators already know the results they want. TractionFlo removes the wiring maze so you can jump from concept to active lead capture immediately."
-          />
-          <div className="max-w-4xl mx-auto overflow-hidden border border-black shadow-[0_12px_45px_rgba(0,0,0,0.04)]">
-            <div className="grid grid-cols-2 border-b border-black bg-black text-white">
-              <div className="border-r border-white/20 p-5 flex flex-col justify-between">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">Old Flowbuilders</span>
-                <h3 className="text-lg font-black mt-2">Wiring Maze</h3>
+          {/* Grid Layout */}
+          <div className="grid gap-8 lg:grid-cols-12 lg:items-stretch mt-10 max-w-6xl mx-auto">
+            
+            {/* Left Card: THE OLD WAY */}
+            <div className="lg:col-span-5 flex flex-col justify-between border border-black/10 bg-white p-6 rounded-2xl shadow-sm hover:border-black/20 hover:shadow transition-all duration-300">
+              <div>
+                {/* Badge */}
+                <div className="inline-flex items-center gap-1.5 border border-red-500/25 bg-red-500/5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider text-red-500">
+                  <X className="h-3 w-3 shrink-0 rounded-full border border-red-500 p-[1px]" strokeWidth={3.5} />
+                  <span>THE OLD WAY</span>
+                </div>
+                
+                <h3 className="text-sm font-black text-black/45 mt-3 mb-6 uppercase tracking-wider">Complex. Manual. Time-consuming.</h3>
+                
+                {/* Steps */}
+                <div className="space-y-2 flex flex-col items-center w-full">
+                  {[
+                    { id: 1, title: "Build trigger", icon: Zap },
+                    { id: 2, title: "Add conditions", icon: GitBranch },
+                    { id: 3, title: "Connect FAQs", icon: MessageCircle },
+                    { id: 4, title: "Test flows", icon: Bug },
+                    { id: 5, title: "Fix broken logic", icon: Sliders }
+                  ].map((step, idx) => {
+                    const Icon = step.icon;
+                    const isActive = idx <= autoStepOld;
+                    return (
+                      <div key={idx} className="flex flex-col items-center w-full">
+                        <motion.div 
+                          animate={{
+                            scale: isActive ? 1.01 : 0.99,
+                            borderColor: isActive ? "rgba(239, 68, 68, 0.3)" : "rgba(0, 0, 0, 0.05)",
+                            backgroundColor: isActive ? "rgba(239, 68, 68, 0.04)" : "rgba(0, 0, 0, 0.02)"
+                          }}
+                          className="w-full p-3 border rounded-xl flex items-center gap-3 transition-all duration-300"
+                        >
+                          <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 border transition-all duration-300 ${isActive ? "border-red-500 bg-red-500 text-white" : "border-black/10 bg-black/5 text-black/30"}`}>
+                            <span className="text-[9px] font-black">{step.id}</span>
+                          </div>
+                          <div className={`h-6 w-6 rounded flex items-center justify-center shrink-0 border transition-all duration-300 ${isActive ? "border-red-500/25 bg-red-500/10 text-red-500" : "border-black/10 bg-black/5 text-black/30"}`}>
+                            <Icon className="h-3 w-3" strokeWidth={2.5} />
+                          </div>
+                          <h4 className={`text-[10px] font-black uppercase tracking-wider transition-colors duration-300 ${isActive ? "text-black" : "text-black/30"}`}>{step.title}</h4>
+                        </motion.div>
+                        {idx < 4 ? (
+                          <svg className={`w-4 h-4 my-1 transition-colors duration-300 ${isActive ? "text-red-500/60" : "text-black/15"}`} fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                            <path d="M12,5 L12,19 M5,12 L12,19 L19,12" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="p-5 flex flex-col justify-between" style={{ backgroundColor: '#09090b' }}>
-                <span className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>TractionFlo</span>
-                <h3 className="text-lg font-black mt-2 flex items-center gap-1.5">
-                  Chat & Launch <Sparkles className="h-4.5 w-4.5 text-white" strokeWidth={2.5} />
-                </h3>
+
+              {/* Bottom Tags */}
+              <div className="mt-8">
+                <div className="flex gap-2 justify-center border-t border-black/5 pt-5 flex-wrap">
+                  {[
+                    "Too many steps",
+                    "Hard to maintain"
+                  ].map((tag, tagIdx) => {
+                    const isFlashed = autoStepOld === 4;
+                    return (
+                      <motion.div 
+                        key={tagIdx}
+                        animate={isFlashed ? {
+                          scale: [1, 1.05, 1],
+                          borderColor: ["rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.6)", "rgba(239, 68, 68, 0.15)"],
+                          backgroundColor: ["rgba(239, 68, 68, 0.05)", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.05)"]
+                        } : {}}
+                        transition={isFlashed ? { repeat: Infinity, duration: 1.2, delay: tagIdx * 0.2 } : {}}
+                        className="inline-flex items-center gap-1.5 border border-red-500/15 bg-red-500/5 px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider text-red-500"
+                      >
+                        <X className="h-2.5 w-2.5 shrink-0 rounded-full border border-red-500 p-[0.5px]" strokeWidth={3.5} />
+                        <span>{tag}</span>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 text-center">
+                  <span className="text-sm font-black text-black/45 tracking-wider rotate-[-2deg] inline-block" style={{ fontFamily: 'var(--font-handwritten)' }}>
+                    Setup is the blocker.
+                  </span>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Center Separation Column */}
+            <div className="lg:col-span-2 flex flex-col items-center justify-center py-6 lg:py-0 select-none">
+              {/* Arrow and Text */}
+              <div className="flex flex-col items-center gap-2.5 text-center">
+                {/* Horizontal Arrow on Desktop, Vertical on Mobile */}
+                <svg className="w-12 h-10 text-black hidden lg:block" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 40 24">
+                  <path d="M5,12 L35,12" strokeLinecap="round" />
+                  <polygon points="35,12 28,7 28,17" fill="currentColor" stroke="none" />
+                </svg>
+                <svg className="w-8 h-12 text-black lg:hidden" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 40">
+                  <path d="M12,5 L12,35" strokeLinecap="round" />
+                  <polygon points="12,35 7,28 17,28" fill="currentColor" stroke="none" />
+                </svg>
+                <p className="text-xs font-black text-black tracking-wide max-w-[120px] leading-snug rotate-[-3deg]" style={{ fontFamily: 'var(--font-handwritten)' }}>
+                  TractionFlo removes the setup maze.
+                </p>
               </div>
             </div>
 
-            <div className="divide-y divide-black/10 bg-white">
-              {comparisonRows.map(([oldWay, newWay], i) => (
-                <div key={i} className="grid grid-cols-2 hover:bg-black/[0.01] transition-colors">
-                  <div className="border-r border-black/10 p-5 text-sm font-bold text-black/45">
-                    {oldWay}
-                  </div>
-                  <div className="flex items-center justify-between gap-4 p-5 text-sm font-black text-black">
-                    <span>{newWay}</span>
-                    <span className="flex h-5.5 w-5.5 shrink-0 items-center justify-center border border-black text-black rounded-sm" style={{ backgroundColor: LIME }}>
-                      <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                    </span>
+            {/* Right Card: THE NEW WAY */}
+            <div 
+              className="lg:col-span-5 flex flex-col justify-between border-2 border-black bg-white p-6 rounded-2xl shadow-[6px_6px_0px_#000] hover:shadow-[8px_8px_0px_#000] transition-all duration-300 relative overflow-hidden"
+            >
+              {/* Subtle background glow */}
+              <div className="absolute -top-16 -right-16 w-32 h-32 bg-[#d4ff00]/10 rounded-full blur-2xl pointer-events-none" />
+              
+              {/* Automated Active Stamp Overlay */}
+              {/* <AnimatePresence>
+                {isReady && (
+                  <motion.div
+                    initial={{ scale: 0, rotate: 15, opacity: 0 }}
+                    animate={{ scale: 1.05, rotate: -4, opacity: 1 }}
+                    exit={{ scale: 0, rotate: 15, opacity: 0 }}
+                    className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-[0.5px] z-30"
+                  >
+                    <div 
+                      className="border-4 border-black px-6 py-3.5 text-2xl font-black tracking-widest uppercase shadow-2xl rotate-[-3deg] select-none"
+                      style={{ backgroundColor: LIME, color: 'black', fontFamily: 'var(--font-handwritten)' }}
+                    >
+                      Active & Autopilot!
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence> */}
+              
+              <div>
+                {/* Badge */}
+                <div className="inline-flex items-center gap-1.5 border border-black bg-[#d4ff00] px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider text-black">
+                  <Check className="h-3 w-3 shrink-0 rounded-full border border-black p-[1px]" strokeWidth={3.5} />
+                  <span>THE NEW WAY</span>
+                </div>
+                
+                <h3 className="text-sm font-black text-black mt-3 mb-6 uppercase tracking-wider">Simple. Fast. Built for creators.</h3>
+                
+                {/* Steps Sequence */}
+                <div className="space-y-2.5 flex flex-col items-center w-full relative z-10">
+                  {[
+                    { id: 1, title: "Describe your goal", desc: "In plain English.", icon: Pencil },
+                    { id: 2, title: "AI understands", desc: "TractionFlo figures out the logic, content and flow.", icon: Sparkles },
+                    { id: 3, title: "Automation ready", desc: "Your system is live and working.", icon: Check }
+                  ].map((step, idx) => {
+                    const Icon = step.icon;
+                    const isActive = autoStepNew === idx;
+                    return (
+                      <div key={idx} className="flex flex-col items-center w-full">
+                        <motion.div
+                          animate={{
+                            scale: isActive ? 1.01 : 0.99,
+                            borderColor: isActive ? "#000000" : "rgba(0, 0, 0, 0.08)",
+                            backgroundColor: isActive ? "#ffffff" : "rgba(255, 255, 255, 0.6)"
+                          }}
+                          className={`w-full p-4 border rounded-xl flex items-start gap-4 transition-all duration-300 cursor-pointer ${isActive ? "shadow-[3px_3px_0px_rgba(0,0,0,1)] border-black" : "shadow-sm border-black/10"}`}
+                        >
+                          <div 
+                            className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 border transition-all duration-300 ${isActive ? "border-black text-black" : "border-black/10 text-black/40"}`}
+                            style={isActive ? { backgroundColor: LIME } : undefined}
+                          >
+                            <span className="text-[10px] font-black">{step.id}</span>
+                          </div>
+                          <div 
+                            className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 border transition-all duration-300 ${isActive ? "border-black text-black" : "border-black/10 text-black/40"}`}
+                            style={isActive ? { backgroundColor: LIME } : undefined}
+                          >
+                            <Icon className="h-4.5 w-4.5" strokeWidth={2.5} />
+                          </div>
+                          <div className="flex-1 text-left">
+                            <h4 className={`text-xs font-black uppercase tracking-wider ${isActive ? "text-black" : "text-black/40"}`}>{step.title}</h4>
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ 
+                                height: isActive ? "auto" : 0, 
+                                opacity: isActive ? 1 : 0,
+                                marginTop: isActive ? 4 : 0
+                              }}
+                              className="overflow-hidden"
+                              transition={{ duration: 0.2 }}
+                            >
+                              <p className="text-[10px] font-semibold text-black/50 leading-relaxed">
+                                {step.desc}
+                              </p>
+                              
+                              {/* Step 1 custom text typing simulator */}
+                              {idx === 0 && (
+                                <div className="mt-2.5 border border-black/15 bg-black/[0.02] p-2.5 rounded-lg flex items-center gap-2 shadow-inner">
+                                  <div className="flex-1 text-[10px] font-bold text-black/75 text-left pr-4 min-h-[16px] flex items-center leading-normal">
+                                    {typedText || <span className="text-black/30 font-semibold">Type what you want...</span>}
+                                    {autoStepNew === 0 && (
+                                      <span className="inline-block w-1 h-3 bg-black animate-pulse ml-0.5" />
+                                    )}
+                                  </div>
+                                  <Send className="h-3 w-3 text-black/35 shrink-0" />
+                                </div>
+                              )}
+                              
+                              {/* Step 2 generative analysis bar */}
+                              {idx === 1 && isThinking && (
+                                <div className="mt-2.5 flex items-center gap-2 bg-[#d4ff00]/10 border border-[#d4ff00]/25 p-2 rounded-lg">
+                                  <Sparkles className="h-3.5 w-3.5 text-black animate-spin shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="h-1 w-full bg-black/10 rounded-full overflow-hidden">
+                                      <motion.div 
+                                        initial={{ width: "0%" }}
+                                        animate={{ width: "100%" }}
+                                        transition={{ duration: 1.8, ease: "easeInOut" }}
+                                        className="h-full bg-black" 
+                                      />
+                                    </div>
+                                    <p className="text-[7.5px] font-black uppercase text-black/55 tracking-wider mt-1 leading-none">Generative Engine building...</p>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Step 3 active confirmation pill */}
+                              {idx === 2 && isReady && (
+                                <motion.div 
+                                  initial={{ opacity: 0, y: 3 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="mt-2.5 flex items-center gap-1.5 bg-[#007257]/10 border border-[#007257]/20 text-[#007257] px-2.5 py-1.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider w-fit"
+                                >
+                                  <Check className="h-3 w-3 text-[#007257]" strokeWidth={4} />
+                                  <span>Flow Active & Live ✓</span>
+                                </motion.div>
+                              )}
+                            </motion.div>
+                          </div>
+                        </motion.div>
+                        {idx < 2 ? (
+                          <svg 
+                            className="w-4 h-4 my-1 transition-colors duration-300" 
+                            style={isActive ? { color: LIME } : { color: 'rgba(0,0,0,0.15)' }} 
+                            fill="none" 
+                            stroke="currentColor" 
+                            strokeWidth={2.5} 
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M12,5 L12,19 M5,12 L12,19 L19,12" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Bottom Tags */}
+              <div className="mt-8">
+                <div className="border-t border-black/5 pt-5 text-center">
+                  <div className="inline-flex items-center gap-1.5 border border-black bg-[#d4ff00] px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-wider text-black shadow-sm">
+                    <Check className="h-3 w-3 shrink-0 rounded-full border border-black p-[0.5px]" strokeWidth={3.5} />
+                    <span>No builders. No chaos. Just results.</span>
                   </div>
                 </div>
-              ))}
+                <div className="mt-4 text-center">
+                  <span className="text-sm font-black text-black tracking-wider rotate-[-1deg] inline-block" style={{ fontFamily: 'var(--font-handwritten)' }}>
+                    Talk it. We build it.
+                  </span>
+                </div>
+              </div>
+
             </div>
+
           </div>
 
-          <div className="mt-10 text-center">
-            <div className="inline-flex -rotate-1 items-center px-4 py-2 border border-black bg-black text-white font-extrabold tracking-wider uppercase text-xs" style={{ color: LIME, fontFamily: 'var(--font-handwritten)' }}>
-              10x simpler execution. Zero learning curve.
-            </div>
-          </div>
         </div>
       </section>
 
+      
+
+  
+
       {/* 8. Upload Once, Answer Forever Section */}
-      <section id="knowledge" className="scroll-mt-24 border-t border-black/10 px-5 py-24 lg:px-8">
+      <section id="knowledge" className="scroll-mt-24 border-t border-black/10 px-5 py-5 lg:px-8">
         <div className="mx-auto max-w-7xl">
-          <SectionHeader
-            eyebrow="Knowledge System"
-            title="Train your AI
-with your business."
-            body="Give TractionFlo your content — paste text or upload PDFs — and the AI will parse, index, and answer follower questions using only your files."
-          />
+          <div className="mx-auto max-w-4xl text-center select-none">
+          
+            <h2 className="text-4xl font-black leading-[0.95] tracking-tight text-black md:text-6xl lg:text-7.5rem">
+              Upload once. <br />
+              Answer <span className="inline-block relative">
+                forever
+                <span className="absolute left-0 right-0 bottom-1.5 h-[6px] bg-[#d4ff00]/70 -z-10 rounded-full" />
+              </span>.
+            </h2>
+            <p className="mx-auto mt-6 max-w-2xl text-base font-semibold leading-7 text-black/60">
+              TractionFlo learns your content and replies naturally.
+            </p>
+          </div>
 <KnowledgeUploader/>
         
         </div>
       </section>
 
-      {/* 9. Adaptive Signals & Audience Intelligence */}
- <section className="border-t border-black/10 bg-black/[0.01] px-5 py-24 lg:px-8">
-  <div className="mx-auto max-w-7xl">
-    
-    {/* HEADER */}
-    <motion.div
-      initial={{ opacity: 0, y: 40 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.3 }}
-      transition={{ duration: 0.7 }}
-    >
-      <SectionHeader
-        eyebrow="Audience intelligence"
-        title="Every conversation adapts natively."
-        body="No static, single-message broadcasts. TractionFlo replies dynamically adjust based on previous queries, interest metrics, or context."
-      />
-    </motion.div>
+      {/* 9. Limited Founding Access CTA Section */}
+      <section className="border-t border-black/10 bg-[#f9fafb] px-5 py-24 lg:px-8 relative overflow-hidden select-none">
+        {/* Subtle decorative grid background overlay */}
+        <div className="absolute inset-0 bg-grid-pattern opacity-[0.03] pointer-events-none" />
 
-    {/* CARDS */}
-    <div className="mx-auto mt-14 grid max-w-5xl gap-6 md:grid-cols-2">
-      
-      {adaptiveSignals.map(({ label, icon: Icon }, index) => (
-        <motion.div
-          key={label}
-          initial={{ opacity: 0, y: 40 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.2 }}
-          transition={{
-            duration: 0.6,
-            delay: index * 0.12,
-          }}
-          whileHover={{
-            y: -4,
-          }}
-          className="group flex items-center gap-5 rounded-[22px] border border-black/10 bg-white p-6 shadow-[0_10px_40px_rgba(0,0,0,0.04)] transition-all duration-300 hover:border-black/20 hover:shadow-[0_20px_60px_rgba(0,0,0,0.08)]"
-        >
+        <div className="mx-auto max-w-7xl relative z-10">
           
-          {/* ICON */}
-          <span
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-black/10 bg-black/5 transition-transform duration-300 group-hover:scale-110"
-            style={{ backgroundColor: LIME }}
-          >
-            <Icon
-              className="h-5 w-5 text-black"
-              strokeWidth={2.5}
-            />
-          </span>
-
-          {/* TEXT */}
-          <div>
-            <h3 className="text-lg font-black tracking-tight text-black md:text-xl">
-              {label}
-            </h3>
-
-            <p className="mt-1 text-sm font-semibold leading-6 text-black/50">
-              AI dynamically adapts conversations based on user
-              behavior and message context.
+          {/* Section Header */}
+          <div className="mx-auto mb-14 max-w-4xl text-center">
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              className="mb-4 inline-flex items-center gap-2 border border-black/10 px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] rounded-full bg-white shadow-sm"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-black/60" />
+              <span>LIMITED FOUNDING ACCESS</span>
+            </motion.div>
+            <h2 className="text-4xl font-black leading-[0.95] tracking-tight text-black md:text-6xl lg:text-[clamp(3.5rem,5.5vw,6rem)] mt-2">
+              Be an early founder. <br />
+              <span className="inline-block relative mt-2">
+                Not just another user.
+                <span className="absolute left-0 right-0 bottom-2.5 h-[6px] bg-[#d4ff00]/70 -z-10 rounded-full" />
+              </span>
+            </h2>
+            <p className="mx-auto mt-6 max-w-2xl text-base font-semibold leading-7 text-black/65">
+              Help shape TractionFlo. Get lifetime perks. Only available to the first few hundred creators.
             </p>
           </div>
-        </motion.div>
-      ))}
-    </div>
-  </div>
-</section>
+
+          {/* Core Content Grid */}
+          <div className="grid gap-12 lg:grid-cols-12 lg:items-start mt-16">
+            
+            {/* Left side: Grid of 6 Benefits Cards */}
+            <div className="lg:col-span-7 flex flex-col items-center lg:items-start">
+              {/* Green handwritten layout pointer */}
+              <div className="flex items-center gap-2 mb-4 select-none self-start">
+                <span className="text-[13px] font-black text-green-600 tracking-wider rotate-[-3deg]" style={{ fontFamily: 'var(--font-handwritten)' }}>
+                  Founding members get more
+                </span>
+                <svg className="w-10 h-6 text-green-600 rotate-[-10deg]" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 40 24">
+                  <path d="M5,5 Q20,20 35,8" strokeLinecap="round" />
+                  <polygon points="35,8 28,10 32,5" fill="currentColor" stroke="none" />
+                </svg>
+              </div>
+
+              {/* 3x2 grid of cards */}
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 w-full">
+                {[
+                  { title: "Lifetime Founding Price", desc: "Lock in the lowest price forever.", icon: CircleDollarSign },
+                  { title: "Early Access to New Features", desc: "Try new features before anyone else.", icon: Star },
+                  { title: "Exclusive Founding Perks", desc: "Special bonuses, only for founders.", icon: Gift },
+                  { title: "Direct Access to the Team", desc: "Your feedback shapes the product.", icon: MessageCircle },
+                  { title: "Build for Creators, by Us", desc: "We're building this with you.", icon: Heart },
+                  { title: "Limited Spots Available", desc: "Once this batch is full, it's gone.", icon: Users }
+                ].map((card, idx) => {
+                  const Icon = card.icon;
+                  return (
+                    <div 
+                      key={idx} 
+                      className="group bg-white border border-black/10 rounded-xl p-5 text-left transition-all duration-300 hover:border-black/25 flex flex-col gap-2.5 shadow-sm hover:shadow-md hover:-translate-y-0.5"
+                    >
+                      <div className="h-9 w-9 rounded-full bg-[#d4ff00]/15 flex items-center justify-center text-black shrink-0 transition-transform duration-300 group-hover:scale-105">
+                        <Icon className="h-4.5 w-4.5" strokeWidth={2.5} />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-black leading-tight uppercase tracking-wider">{card.title}</h4>
+                        <p className="mt-1 text-[11px] font-semibold text-black/50 leading-normal">{card.desc}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right side: Sleek Conversion Form Card */}
+            <div className="lg:col-span-5 w-full max-w-md mx-auto lg:mx-0">
+              <div className="bg-white border-2 border-black p-8 shadow-[6px_6px_0px_rgba(0,0,0,1)] rounded-sm relative overflow-hidden flex flex-col justify-center text-left">
+                <div className="absolute top-0 left-0 w-full h-[4px]" style={{ backgroundColor: LIME }} />
+                
+                {/* black category badge */}
+                <div className="inline-block bg-black text-white text-[8px] font-black uppercase tracking-[0.2em] px-3.5 py-1.5 rounded-full select-none mb-4.5 w-fit">
+                  JOIN THE FOUNDING BATCH
+                </div>
+
+                <h3 className="text-xl font-black text-black tracking-tight leading-tight">Join in 3 seconds.</h3>
+                <p className="text-xs font-semibold text-black/45 mt-1 mb-6">No credit card. No hassle.</p>
+
+                {/* Email Form */}
+                <form 
+                  onSubmit={(e) => { e.preventDefault(); alert("Thanks for your interest! We will reach out soon."); }} 
+                  className="space-y-3.5"
+                >
+                  <div className="relative">
+                    <input 
+                      type="email" 
+                      required 
+                      placeholder="Enter your email address" 
+                      className="w-full pl-4 pr-10 py-3 bg-black/[0.02] border border-black/15 focus:border-black rounded-sm text-xs font-bold placeholder-black/35 outline-none transition-colors" 
+                    />
+                    <Mail className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-black/35" />
+                  </div>
+                  <button 
+                    type="submit" 
+                    className="w-full bg-[#d4ff00] hover:bg-black hover:text-white border-2 border-black text-black font-black uppercase text-xs tracking-widest py-3.5 transition-all shadow-[4px_4px_0px_#000] hover:shadow-none active:translate-x-0.5 active:translate-y-0.5 cursor-pointer rounded-sm"
+                  >
+                    Get Founding Access →
+                  </button>
+                </form>
+
+                {/* waitlist row */}
+                <div className="mt-6 pt-5 border-t border-black/5 flex items-center justify-between flex-wrap gap-2.5">
+                  <div className="flex items-center gap-2">
+                    {/* Avatars */}
+                    <div className="flex -space-x-2 shrink-0">
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="h-6 w-6 rounded-full border-2 border-white bg-black/10 flex items-center justify-center text-[7px] font-black shrink-0 overflow-hidden">
+                          <span>U{i}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <span className="text-[10px] font-black text-black/60 uppercase tracking-wide">
+                      1,247+ creators waitlisted
+                    </span>
+                  </div>
+                  
+                  {/* Spots filling handwritten text */}
+                  <div className="flex flex-col items-center rotate-[-3deg] select-none">
+                    <span className="text-xs font-black text-green-600 leading-none" style={{ fontFamily: 'var(--font-handwritten)' }}>
+                      Spots are
+                    </span>
+                    <span className="text-xs font-black text-green-600 mt-0.5 border-b border-green-600/50 pb-0.5 leading-none" style={{ fontFamily: 'var(--font-handwritten)' }}>
+                      filling fast!
+                    </span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+
+          {/* Bottom Security & Info Row */}
+          <div className="mt-16 pt-8 border-t border-black/10 grid grid-cols-1 sm:grid-cols-3 gap-6 text-left select-none max-w-5xl mx-auto">
+            {[
+              { label: "We respect your inbox", desc: "No spam. Only important updates.", icon: Lock },
+              { label: "Built for creators", desc: "Not another complex tool.", icon: Zap },
+              { label: "Your data is safe", desc: "We never share your information.", icon: BadgeCheck }
+            ].map((badge, idx) => {
+              const Icon = badge.icon;
+              return (
+                <div key={idx} className="flex items-center gap-3.5 bg-white border border-black/5 px-5 py-4 rounded-xl shadow-sm">
+                  <div className="h-8.5 w-8.5 rounded-lg border border-black/10 bg-[#d4ff00]/10 flex items-center justify-center text-black shrink-0">
+                    <Icon className="h-4 w-4" strokeWidth={2.5} />
+                  </div>
+                  <div>
+                    <h5 className="text-[11px] font-black text-black uppercase tracking-wider">{badge.label}</h5>
+                    <p className="text-[10px] font-semibold text-black/45 mt-0.5 leading-normal">{badge.desc}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Bottom handwritten curve brand tagline */}
+          <div className="mt-10 flex justify-center items-center gap-2 select-none">
+            <span className="text-sm font-black text-green-600 tracking-wider rotate-[-1deg]" style={{ fontFamily: 'var(--font-handwritten)' }}>
+              Less setup. More conversations.
+            </span>
+          </div>
+
+        </div>
+      </section>
 
       {/* 10. Multi-Language Showcase */}
  
