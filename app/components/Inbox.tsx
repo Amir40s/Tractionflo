@@ -1,202 +1,503 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import {
+  ArrowLeft,
+  Bell,
+  Bookmark,
+  Braces,
+  CalendarDays,
+  ChevronDown,
+  CircleDollarSign,
+  Edit3,
+  ExternalLink,
+  FileText,
+  Heart,
+  MoreHorizontal,
+  Paperclip,
+  Search,
+  Send,
+  Smile,
+  Sparkles,
+  Star,
+  Zap,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-type Message = {
-  id?: string | number;
-  text?: string;
+type Conversation = {
+  name: string;
+  message: string;
+  time: string;
+  avatar: string;
+  channel: "instagram" | "whatsapp";
+  active?: boolean;
+  verified?: boolean;
 };
 
-export default function Inbox() {
-  const [messages, setMessages] = useState<Message[]>([]);
+type Message = {
+  from: "user" | "ai";
+  text: string;
+  time: string;
+};
 
-  useEffect(() => {
-    const fetchMessages = async () => {
-      try {
-        const res = await fetch('/api/messages');
-        if (res.ok) {
-          const data = await res.json();
-          setMessages(Array.isArray(data) ? data : []);
-        }
-      } catch {}
-    };
+type SummaryRow = {
+  label: string;
+  value: string;
+  tone?: string;
+};
 
-    fetchMessages();
-    // Poll every 3 seconds
-    const interval = setInterval(fetchMessages, 3000);
-    return () => clearInterval(interval);
-  }, []);
+type QuickAction = {
+  label: string;
+  icon: LucideIcon;
+};
+
+const filters = [
+  ["All", "128"],
+  ["DMs", "96"],
+  ["Comments", "18"],
+  ["Mentions", "7"],
+  ["Stories", "4"],
+  ["Followers", "3"],
+] as const;
+
+const conversations: Conversation[] = [
+  {
+    name: "Jessica Parker",
+    message: "Hi! I loved your course on content strategy. Do you offer 1:1 coaching?",
+    time: "2m",
+    avatar: "https://i.pravatar.cc/96?img=47",
+    channel: "instagram",
+    active: true,
+  },
+  {
+    name: "GlowSkin",
+    message: "We'd love to discuss a partnership opportunity with you!",
+    time: "1h",
+    avatar: "",
+    channel: "instagram",
+    verified: true,
+  },
+  {
+    name: "Michael Chen",
+    message: "What's included in your coaching program?",
+    time: "3h",
+    avatar: "https://i.pravatar.cc/96?img=12",
+    channel: "instagram",
+  },
+  {
+    name: "Sofia Martinez",
+    message: "Thank you so much! 🙌",
+    time: "5h",
+    avatar: "https://i.pravatar.cc/96?img=32",
+    channel: "instagram",
+  },
+  {
+    name: "Ryan Brown",
+    message: "Do you have any upcoming webinars?",
+    time: "8h",
+    avatar: "https://i.pravatar.cc/96?img=52",
+    channel: "instagram",
+  },
+  {
+    name: "Ava Thompson",
+    message: "Just purchased your course! Excited to start 🎉",
+    time: "1d",
+    avatar: "https://i.pravatar.cc/96?img=48",
+    channel: "instagram",
+  },
+  {
+    name: "Daniel Lewis",
+    message: "Can I get a refund? I didn't realize it was 🦋",
+    time: "1d",
+    avatar: "https://i.pravatar.cc/96?img=68",
+    channel: "whatsapp",
+  },
+];
+
+const messages: Message[] = [
+  {
+    from: "user",
+    text: "Hi! I loved your course on content strategy.\nDo you offer 1:1 coaching?",
+    time: "10:36 AM",
+  },
+  {
+    from: "ai",
+    text: "Yes! I offer 1:1 coaching.\nWould you like me to share more details\nabout the program?",
+    time: "10:37 AM",
+  },
+  {
+    from: "user",
+    text: "Yes please! Also, what's the price?",
+    time: "10:38 AM",
+  },
+  {
+    from: "ai",
+    text: "The 1:1 coaching program is $997.\nIt includes a 90-minute strategy call,\ncustom plan, and 2 follow-up calls.",
+    time: "10:39 AM",
+  },
+  {
+    from: "user",
+    text: "That sounds great. How do I get started?",
+    time: "10:40 AM",
+  },
+  {
+    from: "ai",
+    text: "You can book a call with me here:\ntractionflo.com/coach\nI'd love to learn more about your goals! 🚀",
+    time: "10:40 AM",
+  },
+];
+
+const summaryRows: SummaryRow[] = [
+  { label: "Intent", value: "High Intent", tone: "bg-[#eaf8ef] text-[#147a31]" },
+  { label: "Category", value: "Coaching Inquiry" },
+  { label: "Lead Score", value: "85/100", tone: "bg-[#eaf8ef] text-[#147a31]" },
+  { label: "Status", value: "Open" },
+];
+
+const quickActions: QuickAction[] = [
+  { label: "Book a call", icon: CalendarDays },
+  { label: "Send pricing", icon: CircleDollarSign },
+  { label: "Share program info", icon: FileText },
+];
+
+function Avatar({
+  src,
+  name,
+  size = "h-10 w-10",
+}: {
+  src: string;
+  name: string;
+  size?: string;
+}) {
+  if (!src) {
+    return (
+      <span className={`${size} flex shrink-0 items-center justify-center rounded-full bg-black text-[8px] font-extrabold uppercase leading-[1.1] text-white`}>
+        Glow<br />Skin
+      </span>
+    );
+  }
 
   return (
-    <div className="flex h-full w-full bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden text-sm">
-      
-      {/* Left Panel: Chat List */}
-      <div className="w-80 border-r border-gray-200 flex flex-col bg-white shrink-0">
-        
-        {/* Header */}
-        <div className="h-20 px-5 flex items-center justify-between border-b border-gray-100 shrink-0 pt-2">
-          <div className="flex items-center gap-2 cursor-pointer">
-            <h2 className="text-lg font-bold text-black tracking-tight">mharoon07</h2>
-            <svg className="w-4 h-4 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+    <span
+      aria-label={name}
+      role="img"
+      className={`${size} shrink-0 rounded-full bg-cover bg-center`}
+      style={{ backgroundImage: `url(${src})` }}
+    />
+  );
+}
+
+function ChannelIcon({ channel }: { channel: Conversation["channel"] }) {
+  if (channel === "whatsapp") {
+    return <span className="h-3 w-3 rounded-full border border-[#12b852] text-[8px] leading-[10px] text-[#12b852]">•</span>;
+  }
+
+  return (
+    <span className="relative h-3 w-3 rounded-[3px] bg-gradient-to-tr from-[#ffb000] via-[#ff3e8a] to-[#7b39ff]">
+      <span className="absolute left-[3px] top-[3px] h-[5px] w-[5px] rounded-full border border-white" />
+      <span className="absolute right-[2px] top-[2px] h-[2px] w-[2px] rounded-full bg-white" />
+    </span>
+  );
+}
+
+function InboxList() {
+  return (
+    <section className="hidden h-full min-w-0 flex-col border-r border-[#e7eaf2] bg-white md:flex">
+      <header className="flex h-[58px] shrink-0 items-center justify-between px-5">
+        <h1 className="text-[17px] font-bold text-black">Inbox</h1>
+        <button type="button" aria-label="New conversation" className="text-black">
+          <Edit3 size={18} strokeWidth={2.2} />
+        </button>
+      </header>
+
+      <div className="grid shrink-0 grid-cols-3 gap-x-2 gap-y-2 px-5 pb-3 text-[12px] font-semibold text-black">
+        {filters.map(([label, count], index) => (
+          <button
+            key={label}
+            type="button"
+            className={`flex h-7 items-center justify-center gap-2 rounded-[9px] ${
+              index === 0 ? "bg-[#f0edff] text-[#4b3cff]" : "bg-white text-black"
+            }`}
+          >
+            <span>{label}</span>
+            <span className="rounded-full bg-[#eff1f6] px-2 py-0.5 text-[10px] font-bold text-[#596175]">
+              {count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-2.5 pb-3">
+        {conversations.map((conversation) => (
+          <button
+            key={conversation.name}
+            type="button"
+            className={`relative flex min-h-[64px] w-full items-start gap-3 rounded-[10px] border px-3 py-2 text-left transition ${
+              conversation.active
+                ? "border-[#e2e6f3] bg-[#fbfbff] shadow-[0_16px_35px_rgba(65,74,112,0.045)]"
+                : "border-transparent bg-white hover:bg-[#fafbff]"
+            }`}
+          >
+            {conversation.active ? (
+              <span className="absolute -left-3 top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full bg-[#4b3cff]" />
+            ) : null}
+            <Avatar src={conversation.avatar} name={conversation.name} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5">
+                <span className="truncate text-[13px] font-bold text-black">{conversation.name}</span>
+                {conversation.verified ? <span className="h-1.5 w-1.5 rounded-full bg-[#246bff]" /> : null}
+              </span>
+              <span className="mt-1 block text-[12px] font-medium leading-[1.35] text-[#4f566c]">
+                {conversation.message}
+              </span>
+            </span>
+            <span className="flex h-full shrink-0 flex-col items-end justify-between gap-5">
+              <span className="text-[11px] font-medium text-[#596175]">{conversation.time}</span>
+              <ChannelIcon channel={conversation.channel} />
+            </span>
+          </button>
+        ))}
+
+        <button type="button" className="mx-auto mt-2 flex items-center gap-1 text-[12px] font-bold text-[#4b3cff]">
+          Load more
+          <ChevronDown size={15} strokeWidth={2.6} />
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ChatBubble({ message }: { message: Message }) {
+  const isAi = message.from === "ai";
+
+  return (
+    <div className={`flex w-full items-start gap-2.5 ${isAi ? "justify-end sm:pr-4" : "justify-start"}`}>
+      {!isAi ? <Avatar src="https://i.pravatar.cc/96?img=47" name="Jessica Parker" size="h-8 w-8" /> : null}
+      <div
+        className={`max-w-[82%] rounded-[13px] px-3.5 py-2 text-[12px] font-normal leading-[1.35] shadow-[0_16px_40px_rgba(20,28,53,0.035)] sm:max-w-[70%] ${
+          isAi ? "bg-[#f0efff] text-[#171c33]" : "bg-white text-black"
+        }`}
+      >
+        <p className="whitespace-pre-line">{message.text}</p>
+        <div className={`mt-1 text-[10px] font-medium text-[#596175] ${isAi ? "text-right" : ""}`}>
+          {message.time}
+          {isAi ? <span className="ml-1 text-[#246bff]">✓✓</span> : null}
+        </div>
+      </div>
+      {isAi ? (
+        <span className="mt-8 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#3044ff] text-white">
+          <span className="relative text-[15px] font-extrabold leading-none">
+            T
+            <span className="absolute -right-1 top-0 h-1.5 w-1.5 rounded-full bg-white" />
+          </span>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function ChatThread() {
+  return (
+    <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white">
+      <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#e7eaf2] px-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <button type="button" aria-label="Back" className="text-[#1f2638]">
+            <ArrowLeft size={18} strokeWidth={2.3} />
+          </button>
+          <Avatar src="https://i.pravatar.cc/96?img=47" name="Jessica Parker" size="h-10 w-10" />
+          <div>
+            <h2 className="text-[14px] font-bold leading-tight text-black">Jessica Parker</h2>
+            <p className="text-[11px] font-medium text-[#596175]">@jess.parker</p>
           </div>
-          <button className="text-black hover:opacity-70 transition-opacity">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+          <button
+            type="button"
+            className="ml-4 hidden h-9 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-semibold text-black sm:flex"
+          >
+            View profile
+            <ExternalLink size={14} strokeWidth={2.4} />
           </button>
         </div>
 
-        {/* Search */}
-        <div className="px-5 py-3 shrink-0">
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            </div>
-            <input 
-              type="text" 
-              placeholder="Search" 
-              className="w-full pl-9 pr-3 py-2 bg-gray-100 border-none rounded-lg text-black focus:ring-0 focus:outline-none placeholder-gray-500 font-medium text-[13px]"
-            />
-          </div>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3 xl:hidden">
+          <button type="button" className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee]">
+            <Search size={17} />
+          </button>
+          <button type="button" className="relative flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee]">
+            <Bell size={17} />
+            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#3044ff]" />
+          </button>
+        </div>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-4 py-2 sm:px-6">
+        <div className="mb-1 flex justify-end gap-2">
+          {[Heart, Star, MoreHorizontal].map((Icon, index) => (
+            <button
+              key={index}
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded-[8px] border border-[#dde3ee] bg-white text-black"
+            >
+              <Icon size={15} strokeWidth={2.2} />
+            </button>
+          ))}
         </div>
 
-        {/* Tabs */}
-        <div className="px-5 flex gap-5 border-b border-gray-100 shrink-0 font-bold text-[13px] text-gray-400">
-          <button className="pb-3 text-black border-b border-black">Primary</button>
-          <button className="pb-3 hover:text-gray-600 transition-colors">General</button>
-          <button className="pb-3 hover:text-gray-600 transition-colors">Requests</button>
-        </div>
-
-        {/* Chat List */}
-        <div className="flex-1 overflow-y-auto">
-          {/* Active Chat Item */}
-          <div className="flex items-center gap-3 px-5 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors bg-gray-50">
-            <div className="w-14 h-14 rounded-full overflow-hidden shrink-0 border border-gray-200">
-              <img src="https://i.pravatar.cc/150?img=1" alt="Avatar" className="w-full h-full object-cover" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-black truncate text-[14px]">Sophia O.</h3>
-              <p className="text-gray-500 truncate text-[13px]">s s • 2m</p>
-            </div>
-            <div className="w-2.5 h-2.5 bg-blue-500 rounded-full shrink-0"></div>
-          </div>
-
-          {/* Other Chat Items */}
-          <div className="flex items-center gap-3 px-5 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors">
-            <div className="w-14 h-14 rounded-full overflow-hidden shrink-0 border border-gray-200">
-              <img src="https://i.pravatar.cc/150?img=12" alt="Avatar" className="w-full h-full object-cover" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-medium text-black truncate text-[14px]">Mike F.</h3>
-              <p className="text-gray-500 truncate text-[13px]">Thanks for the guide! • 1h</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 px-5 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors">
-            <div className="w-14 h-14 rounded-full overflow-hidden shrink-0 border border-gray-200">
-              <img src="https://i.pravatar.cc/150?img=33" alt="Avatar" className="w-full h-full object-cover" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-medium text-black truncate text-[14px]">Alex J.</h3>
-              <p className="text-gray-500 truncate text-[13px]">How much is coaching? • 3h</p>
-            </div>
-          </div>
+        <div className="space-y-1.5">
+          {messages.map((message, index) => (
+            <ChatBubble key={`${message.time}-${index}`} message={message} />
+          ))}
         </div>
       </div>
 
-      {/* Right Panel: Active Chat */}
-      <div className="flex-1 flex flex-col bg-white">
-        
-        {/* Chat Header */}
-        <div className="h-20 px-6 flex items-center justify-between border-b border-gray-100 shrink-0 pt-2">
-          <div className="flex items-center gap-3 cursor-pointer">
-            <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200">
-              <img src="https://i.pravatar.cc/150?img=1" alt="Avatar" className="w-full h-full object-cover" />
-            </div>
-            <div>
-              <h3 className="font-bold text-black text-[15px]">Sophia O.</h3>
-              <p className="text-gray-500 text-[12px] font-medium">sophia.online</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-5">
-            <button className="text-black hover:opacity-70 transition-opacity">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
-            </button>
-            <button className="text-black hover:opacity-70 transition-opacity">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-            </button>
-            <button className="text-black hover:opacity-70 transition-opacity">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </button>
-          </div>
+      <footer className="shrink-0 border-t border-transparent px-4 pb-3 sm:px-6">
+        <div className="mb-2 flex flex-nowrap items-center gap-2 overflow-x-auto">
+          {quickActions.map((action) => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.label}
+                type="button"
+                className="flex h-7 items-center gap-2 rounded-[9px] border border-[#dde3ee] bg-white px-3 text-[11px] font-medium text-[#31394f]"
+              >
+                <Icon size={14} strokeWidth={2.2} />
+                {action.label}
+              </button>
+            );
+          })}
+          <button type="button" className="flex h-7 w-7 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white">
+            <MoreHorizontal size={16} strokeWidth={2.4} />
+          </button>
         </div>
 
-        {/* Chat History */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4 flex flex-col">
-          
-          <div className="flex justify-center my-4">
-            <span className="text-[11px] font-semibold text-gray-400">TODAY</span>
+        <div className="rounded-[10px] border border-[#dde3ee] bg-white shadow-[0_18px_40px_rgba(20,28,53,0.04)]">
+          <div className="flex h-8 items-center gap-4 border-b border-[#edf0f6] px-4 text-[12px] font-bold">
+            <span className="text-black">Reply</span>
+            <span className="h-4 w-px bg-[#e1e5ee]" />
+            <span className="text-[#596175]">Note</span>
           </div>
-
-          {messages.length === 0 ? (
-            <div className="text-center text-gray-400 text-sm mt-10">
-              Waiting for new messages from Instagram...
+          <div className="px-4 py-2">
+            <p className="text-[12px] font-medium text-[#9aa1b5]">Type your message or let AI reply for you...</p>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-4 text-[#31394f]">
+                <Zap size={15} />
+                <Smile size={15} />
+                <Paperclip size={15} />
+                <Bookmark size={15} />
+                <Braces size={15} />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" className="flex h-8 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-[#f3f4ff] px-3.5 text-[12px] font-semibold text-[#3044ff]">
+                  <Sparkles size={15} />
+                  AI Reply
+                </button>
+                <button type="button" className="flex h-8 items-center gap-2 rounded-[8px] bg-[#3044ff] px-3.5 text-[12px] font-semibold text-white shadow-[0_16px_30px_rgba(48,68,255,0.24)]">
+                  <Send size={15} />
+                  Send
+                  <ChevronDown size={14} />
+                </button>
+              </div>
             </div>
-          ) : (
-            messages.map((msg, index) => (
-              <div key={msg.id || index} className="flex flex-col gap-1 w-full">
-                {/* Received Bubble */}
-                <div className="flex items-end gap-2 self-start max-w-[70%]">
-                  <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 border border-gray-200 mb-1">
-                    <img src="https://i.pravatar.cc/150?img=1" alt="Avatar" className="w-full h-full object-cover" />
-                  </div>
-                  <div className="bg-[#efefef] text-black px-4 py-2.5 rounded-2xl rounded-bl-sm font-medium text-[14px]">
-                    {msg.text}
-                  </div>
-                </div>
+          </div>
+        </div>
+      </footer>
+    </main>
+  );
+}
 
-                {/* Sent Bubble (AI Automation Mock) */}
-                <div className="flex items-end gap-2 self-end max-w-[70%] mt-2">
-                  <div className="bg-[#0095f6] text-white px-4 py-2.5 rounded-2xl rounded-br-sm font-medium text-[14px]">
-                    Hey there! Thanks for your message. This is an automated reply from TractionFlo 🚀
-                  </div>
-                </div>
-                
-                <div className="flex justify-end pr-2 -mt-1 mb-3">
-                  <span className="text-[11px] font-semibold text-gray-400 flex items-center gap-1">
-                     <svg className="w-3 h-3 text-[#d4ff00]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg>
-                     AI Responded
+function SummaryPanel() {
+  return (
+    <aside className="hidden h-full min-w-0 flex-col overflow-hidden border-l border-[#e7eaf2] bg-white xl:flex">
+      <header className="flex h-[58px] shrink-0 items-center justify-end gap-4 border-b border-[#e7eaf2] px-5">
+        <div className="flex h-8 w-[150px] items-center gap-3 rounded-[9px] border border-[#dde3ee] bg-white px-3 text-[#596175]">
+          <Search size={16} />
+          <span className="flex-1 text-[12px] font-medium">Search</span>
+          <span className="rounded bg-[#eff1f6] px-1.5 py-0.5 text-[11px] font-extrabold text-[#8b92a6]">⌘K</span>
+        </div>
+        <button type="button" className="relative flex h-8 w-8 items-center justify-center rounded-[9px] border border-[#dde3ee]">
+          <Bell size={17} />
+          <span className="absolute right-2 top-1.5 h-2.5 w-2.5 rounded-full bg-[#3044ff]" />
+        </button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-3">
+        <section className="rounded-[14px] bg-white p-1 shadow-[0_22px_60px_rgba(20,28,53,0.055)]">
+          <div className="p-2.5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-[13px] font-bold text-black">
+                <Sparkles size={16} className="text-[#77809b]" />
+                AI Summary
+              </h2>
+              <span className="text-[10px] font-medium text-[#596175]">Generated 2m ago</span>
+            </div>
+            <p className="text-[12px] font-normal leading-[1.4] text-[#252c41]">
+              Jessica is interested in 1:1 coaching. She loved your content and is asking about pricing and how to get started.
+            </p>
+
+            <div className="mt-3 divide-y divide-[#edf0f6]">
+              {summaryRows.map((row) => (
+                <div key={row.label} className="flex h-[34px] items-center justify-between gap-3">
+                  <span className="text-[12px] font-normal text-black">{row.label}</span>
+                  <span className="flex items-center gap-2">
+                    <span className={`max-w-[142px] truncate rounded-[8px] px-2.5 py-0.5 text-[12px] font-normal text-black ${row.tone ?? "border border-[#e7eaf2] bg-white"}`}>
+                      {row.value}
+                    </span>
+                    <span className="h-3 w-3 rounded-full border border-[#72809d]" />
                   </span>
                 </div>
+              ))}
+            </div>
+
+            <div className="mt-3">
+              <h3 className="text-[13px] font-bold text-black">Recommended next step</h3>
+              <div className="mt-2 rounded-[8px] bg-[#f0efff] p-2.5 text-[12px] font-normal leading-[1.35] text-[#252c41]">
+                Jessica is showing strong buying signals. Recommend booking a call.
               </div>
-            ))
-          )}
+            </div>
 
-        </div>
-
-        {/* Input Area */}
-        <div className="p-5 pt-2 shrink-0">
-          <div className="border border-gray-200 rounded-full flex items-center px-4 py-2 bg-white gap-3 focus-within:border-gray-400 transition-colors">
-            <button className="text-black hover:opacity-70 transition-opacity">
-               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </button>
-            <input 
-              type="text" 
-              placeholder="Message..." 
-              className="flex-1 bg-transparent border-none focus:ring-0 focus:outline-none text-[14px] font-medium text-black placeholder-gray-400"
-            />
-            <button className="text-black hover:opacity-70 transition-opacity font-semibold text-[14px]">
-               Send
-            </button>
-            <button className="text-black hover:opacity-70 transition-opacity">
-               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            </button>
-            <button className="text-black hover:opacity-70 transition-opacity">
-               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
-            </button>
+            <div className="mt-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-[13px] font-bold text-black">Suggested reply</h3>
+                <button type="button" className="text-[11px] font-bold text-[#3044ff]">Customize</button>
+              </div>
+              <div className="rounded-[8px] border border-[#dde3ee] bg-white p-2.5 text-[12px] font-normal leading-[1.35] text-[#252c41]">
+                Perfect! You can book a call with me using the link I shared above. Can’t wait to chat with you and learn more about your goals! 🙌
+              </div>
+              <button type="button" className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded-[7px] bg-[#0d1118] text-[12px] font-semibold text-white">
+                <Send size={15} />
+                Send this reply
+              </button>
+              <button type="button" className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded-[7px] border border-[#dde3ee] bg-white text-[12px] font-semibold text-black">
+                <Edit3 size={15} />
+                Edit reply
+              </button>
+            </div>
           </div>
-        </div>
+        </section>
 
+        <section className="mt-2 rounded-[14px] bg-white p-3 shadow-[0_22px_60px_rgba(20,28,53,0.055)]">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-[13px] font-bold text-black">Customer history</h2>
+            <button type="button" className="text-[11px] font-bold text-[#3044ff]">View all</button>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0efff] text-[#3044ff]">
+              <FileText size={16} />
+            </span>
+            <span className="flex-1 text-[11px] font-semibold text-black">Course purchase</span>
+            <span className="text-[11px] font-semibold text-black">$297</span>
+            <span className="text-[10px] font-medium text-[#596175]">May 2, 2025</span>
+          </div>
+        </section>
       </div>
-      
+    </aside>
+  );
+}
+
+export default function Inbox() {
+  return (
+    <div className="grid h-full min-h-0 w-full justify-start overflow-hidden bg-white text-black grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[332px_minmax(0,608px)_344px] 2xl:grid-cols-[332px_608px_344px]">
+      <InboxList />
+      <ChatThread />
+      <SummaryPanel />
     </div>
   );
 }
