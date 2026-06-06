@@ -11,12 +11,16 @@ import {
   BrainCircuit,
   BriefcaseBusiness,
   CalendarDays,
+  Check,
   Clock,
   ChartPie,
   ChevronDown,
   ChevronRight,
   CircleDollarSign,
   CircleHelp,
+  Code2,
+  Copy,
+  CreditCard,
   Crown,
   DollarSign,
   ExternalLink,
@@ -27,11 +31,15 @@ import {
   Handshake,
   Heart,
   Home,
+  LogOut,
+  Mail,
   MessageSquare,
   MoreHorizontal,
+  Palette,
   Play,
   Plus,
   PencilLine,
+  RefreshCw,
   Search,
   Send,
   Settings,
@@ -50,8 +58,9 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Inbox from "../components/Inbox";
+import { signout } from "../login/actions";
 
-type DashboardTab = "dashboard" | "inbox" | "opportunities" | "audience" | "knowledge" | "escalations";
+type DashboardTab = "dashboard" | "inbox" | "opportunities" | "audience" | "knowledge" | "escalations" | "settings";
 
 const dashboardTabUrlValues: Record<DashboardTab, string> = {
   dashboard: "/dashboard",
@@ -60,6 +69,7 @@ const dashboardTabUrlValues: Record<DashboardTab, string> = {
   audience: "/audience",
   knowledge: "/knowledge-base",
   escalations: "/escalations",
+  settings: "/settings",
 };
 
 function getDashboardTabFromUrl(): DashboardTab {
@@ -89,6 +99,10 @@ function getDashboardTabFromUrl(): DashboardTab {
     return "escalations";
   }
 
+  if (pathname === "/settings" || pathname === "/setting") {
+    return "settings";
+  }
+
   const view = new URLSearchParams(window.location.search).get("view");
 
   if (view === "conversations" || view === "conversation" || view === "inbox") {
@@ -109,6 +123,10 @@ function getDashboardTabFromUrl(): DashboardTab {
 
   if (view === "escalations" || view === "esclations") {
     return "escalations";
+  }
+
+  if (view === "settings" || view === "setting") {
+    return "settings";
   }
 
   return "dashboard";
@@ -262,6 +280,26 @@ type EscalationDetailRow = {
   valueTone?: string;
 };
 
+type SettingsMenuItem = {
+  label: string;
+  detail: string;
+  icon: LucideIcon;
+  active?: boolean;
+};
+
+type SettingsRule = {
+  label: string;
+  value: string;
+  tone: string;
+  icon: LucideIcon;
+};
+
+type SettingsNotification = {
+  label: string;
+  value: string;
+  icon: LucideIcon;
+};
+
 const navItems: NavItem[] = [
   { label: "Dashboard", icon: Home, tab: "dashboard" },
   { label: "Conversations", count: "128", icon: MessageSquare, tab: "inbox" },
@@ -270,7 +308,7 @@ const navItems: NavItem[] = [
   { label: "Knowledge Base", icon: BookOpen, tab: "knowledge" },
   { label: "Escalations", count: "3", icon: TriangleAlert, tab: "escalations" },
   { label: "Analytics", icon: BarChart3 },
-  { label: "Settings", icon: Settings },
+  { label: "Settings", icon: Settings, tab: "settings" },
 ];
 
 const opportunities: Opportunity[] = [
@@ -878,6 +916,33 @@ const escalationDetailRows: EscalationDetailRow[] = [
   { label: "Risk level", value: "High", icon: TriangleAlert, valueTone: "bg-[#fff0f3] text-[#df405b]" },
 ];
 
+const settingsMenuItems: SettingsMenuItem[] = [
+  { label: "Account", detail: "Profile, plan and billing", icon: User, active: true },
+  { label: "Instagram", detail: "Connect & manage", icon: MessageSquare },
+  { label: "AI Assistant", detail: "Behavior & permissions", icon: Sparkles },
+  { label: "Escalation Rules", detail: "When to escalate", icon: TriangleAlert },
+  { label: "Notifications", detail: "Alerts & preferences", icon: Bell },
+  { label: "Team", detail: "Manage collaborators", icon: Users },
+  { label: "Billing", detail: "Subscription & invoices", icon: CreditCard },
+  { label: "API & Webhooks", detail: "Developers", icon: Code2 },
+  { label: "Security", detail: "Password & access", icon: Shield },
+  { label: "Brand Settings", detail: "Your brand & voice", icon: Palette },
+];
+
+const settingsRules: SettingsRule[] = [
+  { label: "Refund requests", value: "Always escalate", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+  { label: "Complaints", value: "High priority", tone: "bg-[#fff3e6] text-[#ff850d]", icon: Sparkles },
+  { label: "Partnership deals > $2,500", value: "Escalate for approval", tone: "bg-[#f0edff] text-[#6d3cff]", icon: Handshake },
+  { label: "VIP leads", value: "Escalate immediately", tone: "bg-[#eef4ff] text-[#3044ff]", icon: Star },
+];
+
+const settingsNotifications: SettingsNotification[] = [
+  { label: "Email notifications", value: "All important updates", icon: Mail },
+  { label: "Push notifications", value: "On", icon: Bell },
+  { label: "Daily digest", value: "Every morning", icon: CalendarDays },
+  { label: "Escalation alerts", value: "Instant", icon: TriangleAlert },
+];
+
 const toneClasses = {
   purple: {
     tile: "bg-[#f0edff] text-[#4b3cff]",
@@ -960,6 +1025,20 @@ function BrandMark() {
   );
 }
 
+function LogoutButton() {
+  return (
+    <form action={signout}>
+      <button
+        type="submit"
+        className="flex h-10 w-full items-center justify-center gap-2 rounded-[10px] border border-[#ffd5dd] bg-[#fff7f9] px-3 text-[12px] font-extrabold text-[#df405b] shadow-[0_14px_28px_rgba(223,64,91,0.06)] transition hover:bg-[#fff0f3]"
+      >
+        <LogOut size={15} strokeWidth={2.35} />
+        Logout
+      </button>
+    </form>
+  );
+}
+
 function Sidebar({ activeTab, onChangeTab }: { activeTab: string; onChangeTab: (tab: DashboardTab) => void }) {
   return (
     <aside className="sticky top-0 hidden h-screen min-h-screen w-[228px] shrink-0 flex-col overflow-hidden border-r border-[#e7eaf2] bg-white px-[18px] py-6 lg:flex">
@@ -1030,6 +1109,8 @@ function Sidebar({ activeTab, onChangeTab }: { activeTab: string; onChangeTab: (
           </span>
           <ChevronRight size={16} className="text-[#4b3cff]" strokeWidth={2.6} />
         </button>
+
+        <LogoutButton />
       </div>
     </aside>
   );
@@ -1042,11 +1123,12 @@ function MobileNavigation({ activeTab, onChangeTab }: { activeTab: DashboardTab;
     item.tab === "opportunities" ||
     item.tab === "audience" ||
     item.tab === "knowledge" ||
-    item.tab === "escalations"
+    item.tab === "escalations" ||
+    item.tab === "settings"
   );
 
   return (
-    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-6 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur lg:hidden">
+    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-7 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur lg:hidden">
       {mobileItems.map((item) => {
         const Icon = item.icon;
         const isActive = item.tab === activeTab;
@@ -1061,6 +1143,8 @@ function MobileNavigation({ activeTab, onChangeTab }: { activeTab: DashboardTab;
                 ? "KB"
                 : item.label === "Escalations"
                   ? "Alerts"
+                  : item.label === "Settings"
+                    ? "Set"
                 : item.label;
 
         return (
@@ -1068,12 +1152,12 @@ function MobileNavigation({ activeTab, onChangeTab }: { activeTab: DashboardTab;
             key={item.label}
             type="button"
             onClick={() => onChangeTab(item.tab)}
-            className={`flex h-12 flex-col items-center justify-center gap-1 rounded-[10px] text-[10px] font-extrabold transition ${
+            className={`flex h-12 min-w-0 flex-col items-center justify-center gap-1 rounded-[10px] text-[9px] font-extrabold transition sm:text-[10px] ${
               isActive ? "bg-[#f0edff] text-[#4b3cff]" : "text-[#596175]"
             }`}
           >
             <Icon size={18} strokeWidth={isActive ? 2.7 : 2.2} />
-            <span>{label}</span>
+            <span className="max-w-full truncate">{label}</span>
           </button>
         );
       })}
@@ -1406,7 +1490,7 @@ function InstagramDot() {
 function EscalationTabs() {
   return (
     <div className="-mx-4 mt-8 overflow-x-auto px-4 no-scrollbar sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
-      <div className="grid w-max grid-flow-col auto-cols-max">
+      <div className="grid w-max grid-flow-col auto-cols-max lg:grid-cols-[88px_142px_162px_178px_180px_160px]">
         {escalationTabs.map((tab, index) => {
           const Icon = tab.icon;
           const isActive = index === 0;
@@ -1415,7 +1499,7 @@ function EscalationTabs() {
             <button
               key={tab.label}
               type="button"
-              className={`relative flex h-11 items-center gap-2 border-r border-[#e2e6f0] px-3 text-[12px] font-extrabold last:border-r-0 ${
+              className={`relative flex h-11 items-center justify-center gap-2 border-r border-[#e2e6f0] px-3 text-[12px] font-extrabold last:border-r-0 ${
                 isActive ? "text-[#3044ff]" : "text-black"
               }`}
             >
@@ -1439,7 +1523,7 @@ function EscalationCard({ escalation }: { escalation: EscalationItem }) {
   const Icon = escalation.icon;
 
   return (
-    <article className={`relative overflow-hidden rounded-[13px] border ${escalation.borderTone} ${escalation.glowTone} p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:p-5`}>
+    <article className={`relative overflow-hidden rounded-[13px] border ${escalation.borderTone} ${escalation.glowTone} p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:p-5 lg:p-6`}>
       <span className={`absolute right-6 top-7 h-2.5 w-2.5 rounded-full ${escalation.dotTone}`} />
 
       <div className="grid gap-5 md:grid-cols-[176px_minmax(0,1fr)]">
@@ -1478,7 +1562,7 @@ function EscalationCard({ escalation }: { escalation: EscalationItem }) {
             </div>
             <button
               type="button"
-              className="flex h-10 w-[128px] items-center justify-center gap-4 rounded-[8px] border border-[#dde3ee] bg-white text-[12px] font-extrabold text-black shadow-[0_12px_28px_rgba(20,28,53,0.035)]"
+              className="flex h-10 w-full items-center justify-center gap-4 rounded-[8px] border border-[#dde3ee] bg-white text-[12px] font-extrabold text-black shadow-[0_12px_28px_rgba(20,28,53,0.035)] sm:w-[128px]"
             >
               View details
               <ArrowRight size={15} strokeWidth={2.5} />
@@ -1500,20 +1584,20 @@ function EscalationDetailPanel() {
         </button>
       </div>
 
-      <div className="mt-7 flex items-center gap-4">
+      <div className="mt-7 grid grid-cols-[52px_minmax(0,1fr)] items-center gap-4 sm:grid-cols-[52px_minmax(0,1fr)_118px]">
         <span
           aria-label="Ava Thompson"
           role="img"
           className="h-[52px] w-[52px] shrink-0 rounded-full bg-cover bg-center"
           style={{ backgroundImage: "url(https://i.pravatar.cc/96?img=47)" }}
         />
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[14px] font-extrabold text-black">Ava Thompson</h3>
+        <div className="min-w-0">
+          <h3 className="whitespace-nowrap text-[14px] font-extrabold text-black">Ava Thompson</h3>
           <p className="mt-1 truncate text-[12px] font-medium text-[#46506a]">@ava.thompson</p>
         </div>
         <button
           type="button"
-          className="flex h-9 shrink-0 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black"
+          className="col-span-2 flex h-9 w-full items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black sm:col-span-1 sm:w-[118px]"
         >
           View profile
           <ExternalLink size={13} strokeWidth={2.4} />
@@ -1615,7 +1699,7 @@ function EscalationsPage() {
 
         <EscalationTabs />
 
-        <div className="mt-6 grid gap-7 xl:grid-cols-[minmax(0,1fr)_344px]">
+        <div className="mt-6 grid gap-7 xl:grid-cols-[minmax(0,1fr)_380px]">
           <section className="space-y-5">
             {escalationItems.map((escalation) => (
               <EscalationCard key={escalation.title} escalation={escalation} />
@@ -1624,6 +1708,399 @@ function EscalationsPage() {
           </section>
 
           <EscalationDetailPanel />
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function InstagramLogoTile() {
+  return (
+    <div className="relative flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[14px] bg-gradient-to-tr from-[#ffbd00] via-[#ff2d85] to-[#6d3cff] shadow-[0_14px_26px_rgba(255,61,129,0.2)]">
+      <div className="h-[31px] w-[31px] rounded-[9px] border-[3px] border-white" />
+      <div className="absolute h-[12px] w-[12px] rounded-full border-[3px] border-white" />
+      <div className="absolute right-[14px] top-[14px] h-[5px] w-[5px] rounded-full bg-white" />
+    </div>
+  );
+}
+
+function SettingsSelect({ label }: { label: string }) {
+  return (
+    <button
+      type="button"
+      className="inline-flex h-8 min-w-[118px] shrink-0 items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black"
+    >
+      <span className="whitespace-nowrap">{label}</span>
+      <ChevronDown size={13} strokeWidth={2.4} />
+    </button>
+  );
+}
+
+function SettingsToggle() {
+  return (
+    <button
+      type="button"
+      aria-label="Toggle proactive outreach"
+      className="relative h-[22px] w-10 rounded-full bg-[#3044ff] shadow-[0_10px_18px_rgba(48,68,255,0.22)]"
+    >
+      <span className="absolute right-0.5 top-0.5 h-[18px] w-[18px] rounded-full bg-white" />
+    </button>
+  );
+}
+
+function SettingsMenuCard() {
+  return (
+    <aside className="self-start rounded-[12px] border border-[#e5e8f0] bg-white p-3 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <div className="space-y-1">
+        {settingsMenuItems.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <button
+              key={item.label}
+              type="button"
+              className={`flex min-h-[58px] w-full items-center gap-3 rounded-[9px] px-3 text-left transition ${
+                item.active ? "bg-[#f0edff] text-[#3044ff]" : "text-black hover:bg-[#f8f9fc]"
+              }`}
+            >
+              <Icon size={17} strokeWidth={item.active ? 2.45 : 2.15} className="shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className={`block truncate text-[12px] font-extrabold ${item.active ? "text-[#3044ff]" : "text-black"}`}>
+                  {item.label}
+                </span>
+                <span className="mt-1 block truncate text-[11px] font-medium text-[#46506a]">{item.detail}</span>
+              </span>
+              <ChevronRight size={15} strokeWidth={2.35} className="shrink-0 text-black" />
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-3 border-t border-[#edf0f6] pt-3 lg:hidden">
+        <LogoutButton />
+      </div>
+    </aside>
+  );
+}
+
+function SettingsAccountCard() {
+  const rows = [
+    ["Time zone", "(GMT-5) Eastern Time"],
+    ["Language", "English"],
+    ["Currency", "USD ($)"],
+  ];
+
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <h2 className="text-[15px] font-extrabold text-black">Account Information</h2>
+
+      <div className="mt-7 flex flex-wrap items-center gap-4">
+        <span
+          aria-label="Sarah Creates"
+          role="img"
+          className="h-[58px] w-[58px] shrink-0 rounded-full bg-cover bg-center"
+          style={{ backgroundImage: "url(https://i.pravatar.cc/96?img=47)" }}
+        />
+        <div className="min-w-[180px] flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-[14px] font-extrabold text-black">Sarah Creates</h3>
+            <span className="rounded-[7px] bg-[#f0edff] px-2 py-1 text-[10px] font-extrabold text-[#6d3cff]">Creator</span>
+          </div>
+          <p className="mt-1 text-[12px] font-medium text-[#46506a]">sarah@creates.com</p>
+          <button
+            type="button"
+            className="mt-3 flex h-8 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black"
+          >
+            <PencilLine size={14} strokeWidth={2.3} />
+            Edit profile
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-6 divide-y divide-[#edf0f6] border-t border-[#edf0f6]">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex min-h-[46px] items-center justify-between gap-4 text-[12px]">
+            <span className="font-medium text-black">{label}</span>
+            <button type="button" className="flex min-w-0 items-center gap-2 text-right font-medium text-black">
+              <span className="truncate">{value}</span>
+              <ChevronDown size={13} strokeWidth={2.35} />
+            </button>
+          </div>
+        ))}
+        <div className="flex min-h-[46px] items-center justify-between gap-4 text-[12px]">
+          <span className="font-medium text-black">Account ID</span>
+          <button type="button" className="flex min-w-0 items-center gap-2 text-right font-medium text-[#253049]">
+            <span className="truncate">acct_7f15da2e88</span>
+            <Copy size={14} strokeWidth={2.25} />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function InstagramConnectionCard() {
+  const permissions = [
+    ["Read messages & comments", "Monitor DMs, comments, and mentions"],
+    ["Manage messages", "Send replies and interact on your behalf"],
+    ["Access insights", "View audience and engagement data"],
+  ];
+
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <h2 className="text-[15px] font-extrabold text-black">Instagram Connection</h2>
+
+      <div className="mt-8 grid grid-cols-[52px_minmax(0,1fr)] items-center gap-5 sm:grid-cols-[52px_minmax(0,1fr)_110px]">
+        <InstagramLogoTile />
+        <div className="min-w-0">
+          <h3 className="text-[14px] font-extrabold text-black">@sarah.creates</h3>
+          <span className="mt-3 inline-flex h-6 items-center gap-1.5 rounded-[8px] bg-[#e7f8ed] px-2.5 text-[10px] font-extrabold text-[#0a9b3f]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#0a9b3f]" />
+            Connected
+          </span>
+          <p className="mt-3 text-[11px] font-medium text-[#46506a]">Connected on May 12, 2025</p>
+        </div>
+        <button
+          type="button"
+          className="col-span-2 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black sm:col-span-1 sm:w-[110px]"
+        >
+          Manage
+          <ExternalLink size={13} strokeWidth={2.4} />
+        </button>
+      </div>
+
+      <div className="mt-6 border-t border-[#edf0f6] pt-5">
+        <h3 className="text-[12px] font-extrabold text-black">Permissions</h3>
+        <div className="mt-4 space-y-4">
+          {permissions.map(([title, detail]) => (
+            <div key={title} className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#eef0ff] text-[#3044ff]">
+                <Check size={13} strokeWidth={2.8} />
+              </span>
+              <div>
+                <p className="text-[12px] font-extrabold text-[#253049]">{title}</p>
+                <p className="mt-1 text-[11px] font-medium text-[#46506a]">{detail}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button type="button" className="mt-5 flex items-center gap-2 text-[12px] font-extrabold text-[#df405b]">
+        <RefreshCw size={14} strokeWidth={2.3} />
+        Reconnect Instagram
+      </button>
+    </section>
+  );
+}
+
+function SettingsAssistantCard() {
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <div className="flex items-center gap-2">
+        <Sparkles size={17} className="text-[#3044ff]" strokeWidth={2.35} />
+        <h2 className="text-[15px] font-extrabold text-black">AI Assistant</h2>
+      </div>
+
+      <div className="mt-5 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[11px] font-extrabold text-black">Personality</span>
+          <SettingsSelect label="Professional" />
+        </div>
+        <p className="text-[11px] font-medium text-[#46506a]">Your AI matches your brand voice and tone.</p>
+        <div className="flex items-center justify-between gap-4">
+          <span className="max-w-[92px] text-[11px] font-extrabold leading-tight text-black">Response style</span>
+          <SettingsSelect label="Helpful & Friendly" />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[11px] font-extrabold text-black">Knowledge usage</span>
+          <SettingsSelect label="Always" />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-[11px] font-extrabold text-black">Proactive outreach</span>
+          <SettingsToggle />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        className="mt-5 flex h-10 w-full items-center justify-between rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black"
+      >
+        Configure AI Assistant
+        <ArrowRight size={15} strokeWidth={2.5} />
+      </button>
+    </section>
+  );
+}
+
+function SettingsRulesCard() {
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <div className="flex items-center gap-2">
+        <TriangleAlert size={17} strokeWidth={2.35} />
+        <h2 className="text-[15px] font-extrabold text-black">Escalation Rules</h2>
+      </div>
+      <p className="mt-3 text-[11px] font-medium text-[#46506a]">Your AI knows when to escalate to you.</p>
+
+      <div className="mt-4 space-y-3">
+        {settingsRules.map((rule) => {
+          const Icon = rule.icon;
+          return (
+            <button key={rule.label} type="button" className="grid w-full grid-cols-[28px_minmax(0,1fr)_auto_14px] items-center gap-2 text-left">
+              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] ${rule.tone}`}>
+                <Icon size={15} strokeWidth={2.35} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[11px] font-extrabold leading-tight text-black">{rule.label}</span>
+              </span>
+              <span className="max-w-[116px] truncate text-right text-[10px] font-medium text-[#46506a]">{rule.value}</span>
+              <ChevronRight size={14} strokeWidth={2.4} />
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        className="mt-5 flex h-10 w-full items-center justify-between rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black"
+      >
+        Manage rules
+        <ArrowRight size={15} strokeWidth={2.5} />
+      </button>
+    </section>
+  );
+}
+
+function SettingsNotificationsCard() {
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <div className="flex items-center gap-2">
+        <Bell size={17} strokeWidth={2.35} />
+        <h2 className="text-[15px] font-extrabold text-black">Notifications</h2>
+      </div>
+      <p className="mt-3 text-[11px] font-medium text-[#46506a]">Choose how and when you are notified.</p>
+
+      <div className="mt-4 space-y-3">
+        {settingsNotifications.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button key={item.label} type="button" className="grid w-full grid-cols-[28px_minmax(0,1fr)_auto_14px] items-center gap-2 text-left">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] bg-[#f3f4f8] text-[#31394f]">
+                <Icon size={15} strokeWidth={2.25} />
+              </span>
+              <span className="min-w-0 text-[11px] font-extrabold leading-tight text-black">{item.label}</span>
+              <span className="max-w-[136px] truncate text-right text-[10px] font-medium text-[#46506a]">{item.value}</span>
+              <ChevronRight size={14} strokeWidth={2.4} />
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        className="mt-5 flex h-10 w-full items-center justify-between rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black"
+      >
+        Manage notifications
+        <ArrowRight size={15} strokeWidth={2.5} />
+      </button>
+    </section>
+  );
+}
+
+function SettingsBillingCard() {
+  return (
+    <section className="flex flex-col gap-4 rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)] md:flex-row md:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-5">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[15px] bg-[#f0edff] text-[#3044ff]">
+          <Crown size={24} strokeWidth={2.25} />
+        </span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-[16px] font-extrabold text-black">Pro Plan</h2>
+            <span className="rounded-[8px] bg-[#e7f8ed] px-2.5 py-1 text-[10px] font-extrabold text-[#0a9b3f]">Active</span>
+          </div>
+          <p className="mt-2 text-[12px] font-medium text-[#46506a]">$249 / month &middot; Next billing date: June 24, 2025</p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 md:w-[354px]">
+        <button
+          type="button"
+          className="flex h-10 items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black"
+        >
+          <FileText size={14} strokeWidth={2.3} />
+          View invoices
+        </button>
+        <button
+          type="button"
+          className="flex h-10 items-center justify-center gap-3 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.24)]"
+        >
+          Manage billing
+          <ArrowRight size={15} strokeWidth={2.4} />
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SettingsPage() {
+  return (
+    <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
+      <div className="mx-auto max-w-[1286px]">
+        <div className="mb-5 lg:hidden">
+          <BrandMark />
+        </div>
+
+        <header className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:gap-8">
+          <div>
+            <h1 className="text-[30px] font-extrabold leading-none text-black sm:text-[32px]">Settings</h1>
+            <p className="mt-3 text-[12px] font-medium leading-[1.4] text-[#46506a]">
+              Manage your account, integrations, and AI assistant.
+            </p>
+          </div>
+
+          <div className="grid w-full grid-cols-[1fr_1fr_auto] items-center gap-3 sm:flex sm:w-auto sm:gap-5">
+            <button
+              type="button"
+              className="flex h-10 items-center justify-center gap-2 rounded-[9px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] sm:w-[128px]"
+            >
+              <Sparkles size={15} className="text-[#3044ff]" strokeWidth={2.35} />
+              <span className="whitespace-nowrap">What&apos;s new</span>
+            </button>
+            <button
+              type="button"
+              className="flex h-10 items-center justify-center gap-2 rounded-[9px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] sm:w-[92px]"
+            >
+              <CircleHelp size={15} strokeWidth={2.35} />
+              Help
+            </button>
+            <button
+              type="button"
+              className="relative flex h-10 w-10 items-center justify-center rounded-[9px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.025)]"
+              aria-label="Notifications"
+            >
+              <Bell size={18} strokeWidth={2.25} />
+              <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[#3044ff]" />
+            </button>
+          </div>
+        </header>
+
+        <div className="mt-7 grid items-start gap-5 xl:grid-cols-[252px_minmax(0,1fr)]">
+          <SettingsMenuCard />
+
+          <div className="grid gap-5">
+            <div className="grid gap-5 lg:grid-cols-2">
+              <SettingsAccountCard />
+              <InstagramConnectionCard />
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-3">
+              <SettingsAssistantCard />
+              <SettingsRulesCard />
+              <SettingsNotificationsCard />
+            </div>
+
+            <SettingsBillingCard />
+          </div>
         </div>
       </div>
     </main>
@@ -2435,6 +2912,8 @@ function DashboardContent() {
         <KnowledgeBasePage />
       ) : activeTab === "escalations" ? (
         <EscalationsPage />
+      ) : activeTab === "settings" ? (
+        <SettingsPage />
       ) : (
         <main className="flex h-dvh max-h-dvh flex-1 flex-col overflow-hidden bg-white pb-20 lg:pb-0">
           <div className="shrink-0 border-b border-[#e7eaf2] px-4 py-4 lg:hidden">
