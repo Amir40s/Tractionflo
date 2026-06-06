@@ -8,7 +8,6 @@ import {
   CalendarDays,
   ChevronDown,
   CircleDollarSign,
-  Edit3,
   ExternalLink,
   FileText,
   Heart,
@@ -45,9 +44,16 @@ type IGConversation = {
   messages: IGMessage[];
 };
 
+type IGAccount = {
+  id: string;
+  username?: string;
+  name?: string;
+};
+
 type APIResponse = {
   conversations: IGConversation[];
   ig_user_id?: string;
+  account?: IGAccount;
   error?: string;
 };
 
@@ -77,10 +83,9 @@ function msgTime(iso: string): string {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Avatar({ src, name, size = "h-10 w-10" }: { src: string; name: string; size?: string }) {
-  const [err, setErr] = useState(false);
   const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
 
-  if (!src || err) {
+  if (!src) {
     return (
       <span className={`${size} flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-white text-[11px] font-extrabold`}>
         {initials}
@@ -115,35 +120,68 @@ function ConvList({
   onSelect,
   loading,
   error,
+  account,
   onRefresh,
+  onDisconnect,
+  onConnectNew,
+  disconnecting,
+  connectingNew,
 }: {
   convs: IGConversation[];
   activeId: string | null;
   onSelect: (id: string) => void;
   loading: boolean;
   error: string | null;
+  account: IGAccount | null;
   onRefresh: () => void;
+  onDisconnect: () => void;
+  onConnectNew: () => void;
+  disconnecting: boolean;
+  connectingNew: boolean;
 }) {
+  const isConnected = Boolean(account || convs.length > 0 || (error && error !== "No Instagram account connected"));
+  const needsConnection = error === "No Instagram account connected";
+
   return (
     <section className="hidden h-full min-w-0 flex-col border-r border-[#e7eaf2] bg-white md:flex">
-      <header className="flex h-[58px] shrink-0 items-center justify-between px-5">
+      <header className="flex h-[58px] shrink-0 items-center justify-between gap-3 px-5">
         <div className="flex items-center gap-2.5">
           <h1 className="text-[17px] font-bold text-black">Inbox</h1>
-          {!loading && !error && convs.length > 0 && (
+          {isConnected && !loading && (
             <span className="flex items-center gap-1 rounded-full bg-[#e7f8ed] px-2 py-0.5 text-[10px] font-extrabold text-[#0a9b3f]">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#0a9b3f]" />
               Live
             </span>
           )}
         </div>
-        <button
-          type="button"
-          aria-label="Refresh"
-          onClick={onRefresh}
-          className="flex h-8 w-8 items-center justify-center rounded-[8px] text-[#596175] hover:bg-[#f3f4f8] transition"
-        >
-          <RefreshCw size={15} strokeWidth={2.2} className={loading ? "animate-spin" : ""} />
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onConnectNew}
+            disabled={disconnecting || connectingNew}
+            className="flex h-7 items-center rounded-[7px] border border-[#dfe4f1] bg-white px-2 text-[10px] font-extrabold text-[#3044ff] transition hover:bg-[#f6f7ff] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {connectingNew ? "Opening" : "New account"}
+          </button>
+          {isConnected && (
+            <button
+              type="button"
+              onClick={onDisconnect}
+              disabled={disconnecting}
+              className="flex h-7 items-center rounded-[7px] border border-[#ffd6dd] bg-[#fff8fa] px-2 text-[10px] font-extrabold text-[#df405b] transition hover:bg-[#fff0f3] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {disconnecting ? "Disconnecting" : "Disconnect"}
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="Refresh"
+            onClick={onRefresh}
+            className="flex h-8 w-8 items-center justify-center rounded-[8px] text-[#596175] transition hover:bg-[#f3f4f8]"
+          >
+            <RefreshCw size={15} strokeWidth={2.2} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto px-2.5 pb-3">
@@ -151,6 +189,24 @@ function ConvList({
           <div className="flex flex-col items-center justify-center gap-3 pt-16 text-center">
             <Loader2 size={22} className="animate-spin text-[#4b3cff]" />
             <p className="text-[12px] font-medium text-[#596175]">Loading Instagram DMs…</p>
+          </div>
+        ) : needsConnection ? (
+          <div className="flex flex-col items-center justify-center gap-3 px-4 pt-16 text-center">
+            <div className="relative flex h-14 w-14 items-center justify-center rounded-[18px] bg-gradient-to-tr from-[#ffbd00] via-[#ff2d85] to-[#6d3cff]">
+              <div className="h-8 w-8 rounded-[9px] border-[3px] border-white" />
+              <div className="absolute h-3.5 w-3.5 rounded-full border-[3px] border-white" />
+              <div className="absolute right-3 top-3 h-1.5 w-1.5 rounded-full bg-white" />
+            </div>
+            <p className="text-[13px] font-bold text-black">Instagram disconnected</p>
+            <p className="text-[11px] font-medium leading-[1.5] text-[#596175]">
+              Connect an Instagram Business account to load conversations.
+            </p>
+            <a
+              href="/api/auth/instagram?next=/conversations"
+              className="mt-1 flex h-8 items-center justify-center rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-semibold text-white"
+            >
+              Connect Instagram
+            </a>
           </div>
         ) : error ? (
           <div className="mx-3 mt-6 rounded-[10px] border border-[#ffd5dd] bg-[#fff7f9] p-4 text-center">
@@ -177,6 +233,12 @@ function ConvList({
             <p className="text-[11px] font-medium leading-[1.5] text-[#596175]">
               Instagram conversations will appear here as they arrive via your connected account.
             </p>
+            <a
+              href="/api/auth/instagram?next=/conversations"
+              className="mt-1 flex h-8 items-center justify-center rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-semibold text-white"
+            >
+              Connect Instagram
+            </a>
           </div>
         ) : (
           convs.map((conv) => {
@@ -484,7 +546,10 @@ function SummaryPanel({ conv, igUserId }: { conv: IGConversation | null; igUserI
 export default function Inbox() {
   const [convs, setConvs] = useState<IGConversation[]>([]);
   const [igUserId, setIgUserId] = useState("");
+  const [account, setAccount] = useState<IGAccount | null>(null);
   const [loading, setLoading] = useState(true);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [connectingNew, setConnectingNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -496,10 +561,15 @@ export default function Inbox() {
       const data: APIResponse = await res.json();
 
       if (data.error && data.conversations.length === 0) {
+        setConvs([]);
+        setActiveId(null);
+        setIgUserId("");
+        setAccount(data.account ?? null);
         setError(data.error);
       } else {
         setConvs(data.conversations);
         if (data.ig_user_id) setIgUserId(data.ig_user_id);
+        setAccount(data.account ?? null);
         if (data.conversations.length > 0 && !activeId) {
           setActiveId(data.conversations[0].id);
         }
@@ -511,10 +581,66 @@ export default function Inbox() {
     }
   }, [activeId]);
 
+  const disconnectInstagram = useCallback(async () => {
+    setDisconnecting(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/auth/instagram/disconnect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data: { error?: string } = await res.json();
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Could not disconnect Instagram");
+      }
+
+      setConvs([]);
+      setActiveId(null);
+      setIgUserId("");
+      setAccount(null);
+      setError("No Instagram account connected");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not disconnect Instagram");
+    } finally {
+      setDisconnecting(false);
+      setLoading(false);
+    }
+  }, []);
+
+  const connectNewInstagram = useCallback(async () => {
+    setConnectingNew(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/auth/instagram/disconnect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data: { error?: string } = await res.json();
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Could not prepare Instagram reconnect");
+      }
+
+      window.location.href = "/api/auth/instagram?next=/conversations";
+    } catch (err) {
+      setConnectingNew(false);
+      setError(err instanceof Error ? err.message : "Could not prepare Instagram reconnect");
+    }
+  }, []);
+
   useEffect(() => {
-    fetchConvs();
+    const timeout = window.setTimeout(() => {
+      fetchConvs();
+    }, 0);
     const interval = setInterval(fetchConvs, 15_000);
-    return () => clearInterval(interval);
+
+    return () => {
+      window.clearTimeout(timeout);
+      clearInterval(interval);
+    };
   }, [fetchConvs]);
 
   const activeConv = convs.find(c => c.id === activeId) ?? null;
@@ -527,7 +653,12 @@ export default function Inbox() {
         onSelect={setActiveId}
         loading={loading}
         error={error}
+        account={account}
         onRefresh={fetchConvs}
+        onDisconnect={disconnectInstagram}
+        onConnectNew={connectNewInstagram}
+        disconnecting={disconnecting}
+        connectingNew={connectingNew}
       />
       <ChatThread conv={activeConv} igUserId={igUserId} />
       <SummaryPanel conv={activeConv} igUserId={igUserId} />

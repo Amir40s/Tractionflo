@@ -20,9 +20,18 @@ export async function GET() {
     const { ig_user_id, access_token } = accounts[0];
 
     // 2. Fetch real Instagram ID for this token
-    const meRes = await fetch(`https://graph.instagram.com/v21.0/me?access_token=${access_token}`);
+    const meUrl = new URL('https://graph.instagram.com/v21.0/me');
+    meUrl.searchParams.set('fields', 'id,username,name');
+    meUrl.searchParams.set('access_token', access_token);
+
+    const meRes = await fetch(meUrl.toString());
     const meData = await meRes.json();
     const real_ig_user_id = meData.id || ig_user_id;
+    const account = {
+      id: real_ig_user_id,
+      username: meData.username,
+      name: meData.name,
+    };
 
     // 3. Fetch conversations from Instagram Graph API
     const convsUrl = new URL(`https://graph.instagram.com/v21.0/me/conversations`);
@@ -73,7 +82,7 @@ export async function GET() {
       })
     );
 
-    return NextResponse.json({ conversations, ig_user_id: real_ig_user_id });
+    return NextResponse.json({ conversations, ig_user_id: real_ig_user_id, account });
   } catch (err) {
     console.error('Instagram conversations fetch error:', err);
     return NextResponse.json({ error: 'Failed to fetch conversations', conversations: [] }, { status: 200 });

@@ -1850,12 +1850,89 @@ function InstagramLogoIcon() {
 
 function InstagramConnectionCard() {
   const [isConnected, setIsConnected] = useState(true);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isConnectingNew, setIsConnectingNew] = useState(false);
+  const [connectionError, setConnectionError] = useState("");
 
   const permissions = [
     ["Read messages & comments", "Monitor DMs, comments, and mentions"],
     ["Manage messages", "Send replies and interact on your behalf"],
     ["Access insights", "View audience and engagement data"],
   ];
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadInstagramStatus() {
+      try {
+        const response = await fetch("/api/auth/instagram/status", {
+          headers: { Accept: "application/json" },
+        });
+        const data: { connected?: boolean; error?: string } = await response.json();
+
+        if (!isActive) {
+          return;
+        }
+
+        if (response.ok) {
+          setIsConnected(Boolean(data.connected));
+        }
+      } catch {
+        // Keep the current optimistic state when status cannot be loaded.
+      }
+    }
+
+    loadInstagramStatus();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  async function disconnectInstagram() {
+    setIsDisconnecting(true);
+    setConnectionError("");
+
+    try {
+      const response = await fetch("/api/auth/instagram/disconnect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data: { error?: string } = await response.json();
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Could not disconnect Instagram");
+      }
+
+      setIsConnected(false);
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : "Could not disconnect Instagram");
+    } finally {
+      setIsDisconnecting(false);
+    }
+  }
+
+  async function connectNewInstagram() {
+    setIsConnectingNew(true);
+    setConnectionError("");
+
+    try {
+      const response = await fetch("/api/auth/instagram/disconnect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data: { error?: string } = await response.json();
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Could not prepare Instagram reconnect");
+      }
+
+      window.location.href = "/api/auth/instagram?next=/settings";
+    } catch (error) {
+      setIsConnectingNew(false);
+      setConnectionError(error instanceof Error ? error.message : "Could not prepare Instagram reconnect");
+    }
+  }
 
   if (!isConnected) {
     return (
@@ -1871,24 +1948,18 @@ function InstagramConnectionCard() {
           <div>
             <p className="text-[14px] font-extrabold text-black">Connect your Instagram</p>
             <p className="mt-2 text-[12px] font-medium leading-[1.5] text-[#46506a]">
-              Link your Instagram Business account to start automating DMs, comments, and monetizing your audience.
+              Link a new Instagram Business account to start automating DMs, comments, and monetizing your audience.
             </p>
           </div>
           <a
-            href="/api/auth/instagram"
+            href="/api/auth/instagram?next=/settings"
             id="connect-instagram-btn"
             className="flex h-11 w-full max-w-[260px] items-center justify-center gap-2.5 rounded-[9px] bg-gradient-to-r from-[#f0004a] via-[#c026d3] to-[#7c3aed] text-[13px] font-extrabold text-white shadow-[0_14px_28px_rgba(192,38,211,0.22)] transition hover:opacity-90"
           >
             <InstagramLogoIcon />
-            Connect Instagram
+            Connect new account
           </a>
-          <button
-            type="button"
-            onClick={() => setIsConnected(true)}
-            className="text-[11px] font-medium text-[#46506a] underline underline-offset-2 hover:text-black"
-          >
-            Already connected? Preview
-          </button>
+          {connectionError && <p className="text-[11px] font-semibold text-[#df405b]">{connectionError}</p>}
         </div>
 
         <div className="mt-5 border-t border-[#edf0f6] pt-4">
@@ -1952,26 +2023,27 @@ function InstagramConnectionCard() {
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <a
-          href="/api/auth/instagram"
+        <button
+          type="button"
+          onClick={connectNewInstagram}
+          disabled={isDisconnecting || isConnectingNew}
           id="connect-instagram-btn"
-          className="flex h-10 items-center gap-2 rounded-[8px] bg-gradient-to-r from-[#f0004a] via-[#c026d3] to-[#7c3aed] px-4 text-[12px] font-extrabold text-white shadow-[0_14px_28px_rgba(192,38,211,0.22)] transition hover:opacity-90"
+          className="flex h-10 items-center gap-2 rounded-[8px] bg-gradient-to-r from-[#f0004a] via-[#c026d3] to-[#7c3aed] px-4 text-[12px] font-extrabold text-white shadow-[0_14px_28px_rgba(192,38,211,0.22)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <InstagramLogoIcon />
-          Connect Instagram
-        </a>
-        <button type="button" className="flex items-center gap-2 text-[12px] font-extrabold text-[#df405b]">
-          <RefreshCw size={14} strokeWidth={2.3} />
-          Reconnect
+          {isConnectingNew ? "Opening Instagram" : "Connect new account"}
         </button>
         <button
           type="button"
-          onClick={() => setIsConnected(false)}
-          className="ml-auto text-[11px] font-medium text-[#46506a] underline underline-offset-2 hover:text-black"
+          onClick={disconnectInstagram}
+          disabled={isDisconnecting || isConnectingNew}
+          className="flex h-10 items-center gap-2 rounded-[8px] border border-[#ffd6dd] bg-[#fff8fa] px-4 text-[12px] font-extrabold text-[#df405b] transition hover:bg-[#fff0f3] disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Preview disconnected
+          <RefreshCw size={14} strokeWidth={2.3} className={isDisconnecting ? "animate-spin" : ""} />
+          {isDisconnecting ? "Disconnecting" : "Disconnect"}
         </button>
       </div>
+      {connectionError && <p className="mt-3 text-[11px] font-semibold text-[#df405b]">{connectionError}</p>}
     </section>
   );
 }
