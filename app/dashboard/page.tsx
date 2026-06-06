@@ -1831,19 +1831,85 @@ function SettingsAccountCard() {
           <button type="button" className="flex min-w-0 items-center gap-2 text-right font-medium text-[#253049]">
             <span className="truncate">acct_7f15da2e88</span>
             <Copy size={14} strokeWidth={2.25} />
-          </button>
+</button>
         </div>
       </div>
     </section>
   );
 }
 
+function InstagramLogoIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="2" y="2" width="20" height="20" rx="5" stroke="currentColor" strokeWidth="2.2" />
+      <circle cx="12" cy="12" r="4.5" stroke="currentColor" strokeWidth="2.2" />
+      <circle cx="17.5" cy="6.5" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
 function InstagramConnectionCard() {
+  const [isConnected, setIsConnected] = useState(true);
+
   const permissions = [
     ["Read messages & comments", "Monitor DMs, comments, and mentions"],
     ["Manage messages", "Send replies and interact on your behalf"],
     ["Access insights", "View audience and engagement data"],
   ];
+
+  if (!isConnected) {
+    return (
+      <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+        <h2 className="text-[15px] font-extrabold text-black">Instagram Connection</h2>
+
+        <div className="mt-6 flex flex-col items-center gap-4 rounded-[10px] border border-dashed border-[#e0d9ff] bg-[#faf9ff] py-8 px-4 text-center">
+          <div className="relative flex h-[56px] w-[56px] items-center justify-center rounded-[16px] bg-gradient-to-tr from-[#ffbd00] via-[#ff2d85] to-[#6d3cff] shadow-[0_14px_26px_rgba(255,61,129,0.22)]">
+            <div className="h-[33px] w-[33px] rounded-[9px] border-[3px] border-white" />
+            <div className="absolute h-[13px] w-[13px] rounded-full border-[3px] border-white" />
+            <div className="absolute right-[14px] top-[14px] h-[5px] w-[5px] rounded-full bg-white" />
+          </div>
+          <div>
+            <p className="text-[14px] font-extrabold text-black">Connect your Instagram</p>
+            <p className="mt-2 text-[12px] font-medium leading-[1.5] text-[#46506a]">
+              Link your Instagram Business account to start automating DMs, comments, and monetizing your audience.
+            </p>
+          </div>
+          <a
+            href="/api/auth/instagram"
+            id="connect-instagram-btn"
+            className="flex h-11 w-full max-w-[260px] items-center justify-center gap-2.5 rounded-[9px] bg-gradient-to-r from-[#f0004a] via-[#c026d3] to-[#7c3aed] text-[13px] font-extrabold text-white shadow-[0_14px_28px_rgba(192,38,211,0.22)] transition hover:opacity-90"
+          >
+            <InstagramLogoIcon />
+            Connect Instagram
+          </a>
+          <button
+            type="button"
+            onClick={() => setIsConnected(true)}
+            className="text-[11px] font-medium text-[#46506a] underline underline-offset-2 hover:text-black"
+          >
+            Already connected? Preview
+          </button>
+        </div>
+
+        <div className="mt-5 border-t border-[#edf0f6] pt-4">
+          <h3 className="text-[12px] font-extrabold text-black">Permissions that will be granted</h3>
+          <div className="mt-3 space-y-3">
+            {permissions.map(([title, detail]) => (
+              <div key={title} className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#eef0ff] text-[#3044ff]">
+                  <Check size={13} strokeWidth={2.8} />
+                </span>
+                <div>
+                  <p className="text-[12px] font-extrabold text-[#253049]">{title}</p>
+                  <p className="mt-1 text-[11px] font-medium text-[#46506a]">{detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
@@ -1885,10 +1951,27 @@ function InstagramConnectionCard() {
         </div>
       </div>
 
-      <button type="button" className="mt-5 flex items-center gap-2 text-[12px] font-extrabold text-[#df405b]">
-        <RefreshCw size={14} strokeWidth={2.3} />
-        Reconnect Instagram
-      </button>
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <a
+          href="/api/auth/instagram"
+          id="connect-instagram-btn"
+          className="flex h-10 items-center gap-2 rounded-[8px] bg-gradient-to-r from-[#f0004a] via-[#c026d3] to-[#7c3aed] px-4 text-[12px] font-extrabold text-white shadow-[0_14px_28px_rgba(192,38,211,0.22)] transition hover:opacity-90"
+        >
+          <InstagramLogoIcon />
+          Connect Instagram
+        </a>
+        <button type="button" className="flex items-center gap-2 text-[12px] font-extrabold text-[#df405b]">
+          <RefreshCw size={14} strokeWidth={2.3} />
+          Reconnect
+        </button>
+        <button
+          type="button"
+          onClick={() => setIsConnected(false)}
+          className="ml-auto text-[11px] font-medium text-[#46506a] underline underline-offset-2 hover:text-black"
+        >
+          Preview disconnected
+        </button>
+      </div>
     </section>
   );
 }

@@ -13,8 +13,7 @@ export async function GET(request: Request) {
   }
   const state = Math.random().toString(36).substring(7);
 
-  // Requested scopes for Instagram Messaging and Comments
-  const scopes = [
+   const scopes = [
     'instagram_business_basic',
     'instagram_business_manage_messages',
     'instagram_business_manage_comments',
