@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/utils/supabase/server'
 
@@ -61,6 +62,36 @@ export async function signup(formData: FormData) {
 
   revalidatePath('/', 'layout')
   redirect('/login?message=Check your email to continue sign in process')
+}
+
+export async function loginWithGoogle() {
+  const supabase = await createClient().catch((error) => redirectToAuthConfigError('/login', error))
+  const origin = (await headers()).get('origin')
+
+  if (!origin) {
+    redirect('/login?error=' + encodeURIComponent('Could not determine app URL for Google sign in'))
+  }
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${origin}/auth/callback?next=/dashboard`,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+      },
+    },
+  })
+
+  if (error) {
+    redirect('/login?error=' + encodeURIComponent(error.message))
+  }
+
+  if (!data.url) {
+    redirect('/login?error=' + encodeURIComponent('Could not start Google sign in'))
+  }
+
+  redirect(data.url)
 }
 
 export async function signout() {
