@@ -6,7 +6,7 @@ import {
   getSupabasePublicEnv,
 } from './env'
 
-const PUBLIC_PATHS = ['/', '/login', '/signup', '/auth']
+const PUBLIC_PATHS = ['/', '/login', '/signup', '/privacy', '/terms', '/contact', '/auth']
 
 function isPublicPath(pathname: string) {
   return (

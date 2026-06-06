@@ -2,22 +2,24 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence, useScroll, useMotionValueEvent } from "framer-motion";
+import Link from "next/link";
 import {
   ArrowRight,
   BadgeCheck,
   BarChart3,
+  BriefcaseBusiness,
   BookOpenCheck,
   Bot,
   Check,
   CircleDollarSign,
   CircleHelp,
   Clock3,
+  CreditCard,
   Database,
   EyeOff,
   FileText,
   Files,
   Flame,
-  Globe2,
   GraduationCap,
   Heart,
   History,
@@ -29,6 +31,8 @@ import {
   PanelsTopLeft,
   PlayCircle,
   Rocket,
+  RefreshCw,
+  Search,
   Sparkles,
   Target,
   Terminal,
@@ -38,8 +42,8 @@ import {
   WandSparkles,
   Zap,
   X,
-  ChevronDown,
   Gift,
+  Handshake,
   Users,
   Mail,
   Lock,
@@ -54,11 +58,7 @@ import {
   Send,
   MessageSquare,
 } from "lucide-react";
-import BrandLogo from "./components/BrandLogo";
 import CopilotPlayground from "./components/CopilotPlayground";
-import KnowledgeUploader from "./components/KnowledgeUploader";
-import CreatorWorkflows from "./components/CreatorWorkflows";
-import HeroDemo from "./components/HeroDemo";
 const LIME = '#d4ff00';
 const trustPoints = [
   { label: 'No flow builders', icon: PanelsTopLeft },
@@ -111,44 +111,6 @@ const finalCtaItems = [
   { label: 'Build by chatting', icon: MessageCircle },
 ];
 
-const faqs = [
-  {
-    question: 'Is this only for Instagram?',
-    answer:
-      'TractionFlo starts with Instagram. TikTok and YouTube are on the roadmap so creators can keep the same simple workflow across more channels.',
-  },
-  {
-    question: 'Does it answer PDFs?',
-    answer:
-      'Yes. Upload PDFs, pricing sheets, guides, FAQs, docs, or course material, and TractionFlo can use that knowledge inside replies.',
-  },
-  {
-    question: 'Is this another chatbot?',
-    answer:
-      'No. It is an automation copilot for creator growth outcomes: comment replies, DMs, lead magnets, FAQs, broadcasts, and follow-ups.',
-  },
-  {
-    question: 'Can I edit replies?',
-    answer:
-      'Yes. The goal is to generate the automation for you, then let you review and refine the replies before launch.',
-  },
-  {
-    question: 'Can I use multiple languages?',
-    answer:
-      'Yes. TractionFlo is designed to understand the follower language and respond in that language automatically.',
-  },
-  {
-    question: 'How fast can I launch?',
-    answer:
-      'Describe the outcome, attach the needed knowledge, review the generated setup, and launch without building a giant flow.',
-  },
-  {
-    question: 'Do I need technical skills?',
-    answer:
-      'No. You build by chatting instead of wiring triggers, conditions, branches, and contact rules by hand.',
-  },
-];
-
 function SectionHeader({
   eyebrow,
   title,
@@ -171,8 +133,963 @@ function SectionHeader({
   );
 }
 
+function HeroSalesSection() {
+  const interestSignals = [
+    "Questions.",
+    "Comments.",
+    "Story replies.",
+    "Collaboration requests.",
+    "Interested followers.",
+  ];
+
+  const valueSteps = [
+    {
+      title: "Offer Recommended",
+      subtitle: "Coaching Program",
+      amount: "$497",
+      time: "10:31 AM",
+    },
+    {
+      title: "Payment Received",
+      subtitle: "Paid securely via",
+      amount: "$497",
+      time: "10:32 AM",
+      stripe: true,
+    },
+    {
+      title: "Customer Onboarded",
+      subtitle: "Welcome Sarah! You're all set.",
+      time: "10:35 AM",
+    },
+  ];
+
+  return (
+    <section id="product" className="w-full scroll-mt-[68px] overflow-hidden bg-white pt-8 pb-10 lg:pt-10 lg:pb-12">
+      <div className="flex w-full bg-white px-5 sm:px-8 lg:px-8">
+        <div className="grid w-full gap-6 lg:grid-cols-[0.62fr_0.38fr] lg:items-center">
+          <div className="select-none">
+            <motion.h1
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 }}
+              className="max-w-[720px] text-[3rem] font-black uppercase leading-[1.02] tracking-normal text-black sm:text-[4.2rem] lg:text-[4rem] xl:text-[4.45rem]"
+              style={{ fontFamily: 'Impact, Haettenschweiler, "Arial Narrow", sans-serif' }}
+            >
+              Your audience is
+              <br />
+              already trying
+              <br />
+              to <span className="text-[#9fe800]">buy from you.</span>
+            </motion.h1>
+
+            <div className="mt-6 space-y-3">
+              {interestSignals.map((signal) => (
+                <div key={signal} className="flex items-center gap-4 text-base font-semibold leading-none text-black sm:text-lg">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[#9be600] bg-[#f4ffd6] text-[#82d800]">
+                    <Check className="h-3.5 w-3.5" strokeWidth={3.2} />
+                  </span>
+                  <span>{signal}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 max-w-[610px] space-y-3 text-base font-semibold leading-7 text-black">
+              <p>
+                TractionFlo acts like a digital salesperson for your audience.
+                It identifies interested people, starts conversations, answers
+                questions, recommends offers, collects payments and onboards customers.
+              </p>
+              <p>From first interaction to loyal customer.</p>
+            </div>
+
+            <a
+              href="/signup"
+              className="mt-5 inline-flex h-12 w-full max-w-[330px] items-center justify-center gap-3 rounded-[4px] bg-[#d4ff00] px-7 text-lg font-black text-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)] transition hover:bg-[#b8e600]"
+            >
+              <span>Join Founding Access</span>
+              <ArrowRight className="h-5 w-5" strokeWidth={3} />
+            </a>
+
+            <div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[12px] font-semibold text-black">
+              {["90 Days Free", "Founder Pricing Forever", "First 100 Founders Only"].map((item) => (
+                <div key={item} className="flex items-center gap-2">
+                  <span className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full border border-[#9be600] bg-[#f4ffd6] text-[#82d800]">
+                    <Check className="h-3 w-3" strokeWidth={3.2} />
+                  </span>
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
+            className="mx-auto -mt-3 w-full max-w-[420px] lg:-mt-8 lg:max-w-[360px]"
+          >
+            <div className="rounded-[46px] bg-black p-2 shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+              <div className="relative min-h-[570px] overflow-hidden rounded-[36px] bg-white px-5 pb-4 pt-7">
+                <div className="absolute left-1/2 top-0 h-7 w-36 -translate-x-1/2 rounded-b-[20px] bg-black" />
+
+                <div className="mb-4 flex items-center justify-between text-sm font-black text-black">
+                  <span>9:41</span>
+                  <svg
+                    aria-hidden="true"
+                    className="h-[13px] w-7 text-black"
+                    fill="none"
+                    viewBox="0 0 28 14"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <rect x="1" y="2.5" width="23" height="9" rx="4.5" stroke="currentColor" strokeWidth="1.8" />
+                    <rect x="3.5" y="4.5" width="13.5" height="5" rx="2.5" fill="currentColor" />
+                    <path d="M25 5.1h1.1c.7 0 1.2.6 1.2 1.9s-.5 1.9-1.2 1.9H25V5.1Z" fill="currentColor" />
+                  </svg>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <img
+                    src="https://i.pravatar.cc/96?img=47"
+                    alt="Sarah avatar"
+                    className="h-10 w-10 rounded-full border border-black/10 object-cover"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-2 text-lg font-black leading-none">Sarah</div>
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-[9px] border border-black/10 bg-white px-3 py-2 text-[14px] font-semibold text-black/80">
+                        Do you have pricing?
+                      </div>
+                      <span className="text-xs font-semibold text-black/35">10:31 AM</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="my-2.5 flex justify-center text-[#9fe800]">
+                  <ArrowRight className="h-5 w-5 rotate-90" strokeWidth={2.8} />
+                </div>
+
+                <div className="rounded-[16px] border border-black/10 bg-white p-3 shadow-[0_8px_24px_rgba(0,0,0,0.04)]">
+                  <div className="flex gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#d4ff00] text-sm font-black italic text-black">
+                      TF
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="mb-3 text-base font-black">TractionFlo</p>
+                      <p className="text-[14px] font-semibold leading-6 text-black">
+                        Yes Sarah!<br />
+                        Here&apos;s the best option for you.
+                      </p>
+                      <button className="mt-3 h-9 w-full rounded-[4px] border border-black/10 bg-white text-sm font-black" type="button">
+                        View Offer
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {valueSteps.map((step) => (
+                  <div key={step.title}>
+                    <div className="my-2 flex justify-center text-[#9fe800]">
+                      <ArrowRight className="h-5 w-5 rotate-90" strokeWidth={2.8} />
+                    </div>
+                    <div className="grid grid-cols-[44px_1fr] gap-3">
+                      <span className="mt-1 flex h-10 w-10 items-center justify-center rounded-full border border-[#9be600] bg-[#f4ffd6] text-[#82d800]">
+                        <Check className="h-5 w-5" strokeWidth={2.2} />
+                      </span>
+                      <div className="border-b border-black/[0.04] pb-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-[14px] font-black leading-tight">{step.title}</p>
+                            <p className="mt-1 text-[13px] font-semibold text-black/60">{step.subtitle}</p>
+                          </div>
+                          <span className="text-[11px] font-semibold text-black/30">{step.time}</span>
+                        </div>
+                        {step.amount ? <p className="mt-1 text-xl font-black leading-none">{step.amount}</p> : null}
+                        {step.stripe ? (
+                          <div className="mt-1.5 flex items-center gap-2 text-[13px] font-semibold text-black/55">
+                            <span>Stripe</span>
+                            <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-black text-white">stripe</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RealProblemSection() {
+  const problemMessages = [
+    { name: "Marcus", avatar: "https://i.pravatar.cc/160?img=12", text: "Can you share pricing?", width: "lg:w-[315px]" },
+    { name: "David", avatar: "https://i.pravatar.cc/160?img=33", text: "Loved your story!", width: "lg:w-[265px]" },
+    { name: "Jon", avatar: "https://i.pravatar.cc/160?img=11", text: "Let's work together", width: "lg:w-[300px]" },
+    { name: "Ava", avatar: "https://i.pravatar.cc/160?img=47", text: "I'm ready to buy", width: "lg:w-[260px]" },
+    { name: "Follower", text: "...", width: "w-[76px] lg:w-[88px]" },
+  ];
+
+  return (
+    <section id="problem" className="w-full scroll-mt-[68px] overflow-hidden bg-white pt-8 pb-10 lg:pt-10 lg:pb-12">
+      <div className="flex w-full flex-col bg-white px-5 sm:px-8 lg:px-10">
+        <div className="mb-8 flex justify-center">
+          <div className="rounded-[8px] border border-[#d4ff00]/55 bg-[#fbffe9] px-3 py-1.5 text-[12px] font-black uppercase leading-none tracking-tight text-[#7ed600] shadow-[0_0_0_4px_rgba(212,255,0,0.08)] sm:text-[13px]">
+            The real problem
+          </div>
+        </div>
+
+        <div className="grid w-full gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
+          <div className="select-none">
+            <motion.h2
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.05 }}
+              className="max-w-[650px] text-[2.05rem] font-black leading-[1.08] tracking-tight text-black sm:text-5xl lg:text-[2.85rem]"
+            >
+              Most businesses don&apos;t
+              <br />
+              have a traffic problem.
+              <br />
+              <span className="mt-3 inline-block text-[#95e600] lg:whitespace-nowrap">They have a follow-up problem.</span>
+            </motion.h2>
+
+            <div className="mt-7 space-y-3 text-base font-semibold leading-none text-black/75 sm:text-lg">
+              {[
+                "Someone asks for pricing.",
+                "Someone replies to a story.",
+                "Someone wants to collaborate.",
+                "Someone is ready to buy.",
+                "Nobody follows up.",
+              ].map((item) => (
+                <div key={item} className="flex items-center gap-5">
+                  <ArrowRight className="h-4 w-4 shrink-0 text-black/35" strokeWidth={2.5} />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.15 }}
+              className="mt-8 flex items-center gap-5 text-[1.65rem] font-black leading-none text-red-600 sm:text-[1.7rem]"
+            >
+              <ArrowRight className="h-6 w-6 shrink-0" strokeWidth={2.8} />
+              <span>Revenue walks away.</span>
+            </motion.div>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="mx-auto w-full max-w-[500px] select-none"
+          >
+            <div className="relative overflow-visible py-2">
+              <div className="space-y-5">
+                {problemMessages.map((message) => (
+                  <div key={message.text} className="grid grid-cols-[56px_38px_minmax(0,1fr)] items-center sm:grid-cols-[70px_70px_minmax(0,1fr)] lg:grid-cols-[76px_70px_1fr]">
+                    <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-black/10 bg-white text-black/35 shadow-[0_4px_12px_rgba(0,0,0,0.12)] sm:h-16 sm:w-16 lg:h-[70px] lg:w-[70px]">
+                      {message.avatar ? (
+                        <img src={message.avatar} alt={`${message.name} avatar`} className="h-full w-full object-cover" />
+                      ) : (
+                        <Users className="h-7 w-7 text-black/35 sm:h-9 sm:w-9" strokeWidth={1.8} />
+                      )}
+                    </div>
+                    <div className="relative h-px border-t-2 border-dashed border-black/20">
+                      <ArrowRight
+                        className="absolute right-[-8px] top-1/2 h-4 w-4 -translate-y-1/2 text-black/28"
+                        strokeWidth={2.8}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div className={`${message.width} max-w-full justify-self-start rounded-[12px] border border-black/10 bg-white px-4 py-3 text-base font-semibold leading-none text-black/80 shadow-[0_8px_20px_rgba(0,0,0,0.04)] sm:rounded-[14px] sm:px-6 sm:py-4 sm:text-xl lg:rounded-[16px] lg:px-6 lg:py-4 lg:text-[1.35rem]`}>
+                      {message.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="relative ml-6 mt-3 h-14 w-px border-l-2 border-dashed border-black/20 sm:ml-8 sm:h-20 lg:ml-[35px] lg:h-9">
+                <ArrowRight
+                  className="absolute bottom-[-8px] left-1/2 h-4 w-4 -translate-x-1/2 rotate-90 text-black/28"
+                  strokeWidth={2.8}
+                  aria-hidden="true"
+                />
+              </div>
+              <div className="ml-0 flex h-14 w-14 items-center justify-center rounded-full border border-red-500/15 bg-red-50 text-[2.35rem] font-black leading-none text-red-600 shadow-[0_0_0_10px_rgba(239,68,68,0.06)] sm:h-20 sm:w-20 sm:text-[2.8rem] lg:ml-[7px] lg:h-14 lg:w-14 lg:text-[2.1rem]">
+                $
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CustomerJourneySection() {
+  const journeySteps = [
+    { label: "Interested\nFollower", icon: Users },
+    { label: "Conversation", icon: MessageCircle },
+    { label: "Questions\nAnswered", icon: CircleHelp },
+    { label: "Offer\nRecommended", icon: Tag },
+    { label: "Payment", icon: CreditCard },
+    { label: "Customer", icon: UserRoundCheck },
+    { label: "Onboarding", icon: RefreshCw },
+  ];
+
+  return (
+    <section id="workflows" className="w-full scroll-mt-[68px] overflow-hidden bg-white pt-8 pb-10 lg:pt-10 lg:pb-12">
+      <div className="flex w-full flex-col justify-center bg-white px-5 sm:px-8 lg:px-8">
+        <div className="mb-8 flex justify-center">
+          <div className="rounded-[8px] border border-[#d4ff00]/55 bg-[#fbffe9] px-3 py-1.5 text-[12px] font-black uppercase leading-none tracking-tight text-[#7ed600] shadow-[0_0_0_4px_rgba(212,255,0,0.08)] sm:text-[13px]">
+            One tool. Entire customer journey.
+          </div>
+        </div>
+
+        <div className="overflow-x-auto pb-3 no-scrollbar">
+          <div className="grid min-w-[760px] grid-cols-[repeat(13,auto)] items-start gap-x-3">
+            {journeySteps.map((step, index) => {
+              const Icon = step.icon;
+              const lines = step.label.split("\n");
+
+              return (
+                <div key={step.label} className="contents">
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: index * 0.04 }}
+                    className="flex w-[88px] flex-col items-center text-center"
+                  >
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full border border-[#d4ff00]/20 bg-[#f4ffd6] text-black shadow-[0_0_0_8px_rgba(212,255,0,0.08)]">
+                      <Icon className="h-6 w-6" strokeWidth={2.2} />
+                    </div>
+                    <div className="mt-4 min-h-[44px] text-[13px] font-semibold leading-[1.35] text-black">
+                      {lines.map((line) => (
+                        <span key={line} className="block">
+                          {line}
+                        </span>
+                      ))}
+                    </div>
+                  </motion.div>
+
+                  {index < journeySteps.length - 1 ? (
+                    <div className="mt-7 flex w-9 items-center justify-center" aria-hidden="true">
+                      <div className="h-px w-full border-t border-dashed border-black/25" />
+                      <ArrowRight className="-ml-2 h-3.5 w-3.5 shrink-0 text-black/45" strokeWidth={2.5} />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.15 }}
+          className="mt-8 select-none"
+        >
+          <h2 className="text-2xl font-black leading-tight tracking-tight text-black sm:text-3xl">
+            Every opportunity moves forward.
+          </h2>
+
+          <div className="mt-7 space-y-3 text-base font-semibold text-black/75">
+            {[
+              "No more dropped conversations.",
+              "No more missed buyers.",
+              "No more opportunities disappearing.",
+            ].map((item) => (
+              <div key={item} className="flex items-center gap-3">
+                <span className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full border border-[#9be600] bg-[#f4ffd6] text-[#82d800]">
+                  <Check className="h-3 w-3" strokeWidth={3.2} />
+                </span>
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+function ProductShowcaseSection() {
+  const sidebarItems = [
+    { label: "Inbox", icon: MessageCircle, active: true },
+    { label: "Opportunities", icon: Target },
+    { label: "Conversations", icon: MessageSquare },
+    { label: "Offers", icon: Tag },
+    { label: "Payments", icon: CreditCard },
+    { label: "Customers", icon: Users },
+    { label: "Broadcasts", icon: Send },
+    { label: "Analytics", icon: BarChart3 },
+    { label: "Settings", icon: Sliders },
+  ];
+
+  const inboxRows = [
+    { name: "Sarah", preview: "Do you have pricing?", time: "2m", active: true, avatar: "https://i.pravatar.cc/96?img=47" },
+    { name: "James", preview: "I'm interested in working together", time: "5m", avatar: "https://i.pravatar.cc/96?img=33" },
+    { name: "Priya", preview: "Loved your content!", time: "15m", avatar: "https://i.pravatar.cc/96?img=32" },
+    { name: "Miko", preview: "Can you tell me more?", time: "30m", avatar: "https://i.pravatar.cc/96?img=11" },
+    { name: "Anna", preview: "I'm ready to get started", time: "1h", avatar: "https://i.pravatar.cc/96?img=49" },
+  ];
+  const sarahAvatar = inboxRows[0].avatar;
+
+  return (
+    <section id="showcase" className="w-full scroll-mt-[68px] overflow-hidden bg-white pt-8 pb-10 lg:pt-10 lg:pb-12">
+      <div className="flex w-full flex-col overflow-hidden bg-white">
+        <div className="mb-8 flex justify-center px-5 sm:px-8 lg:px-8">
+          <div className="rounded-[8px] border border-[#d4ff00]/55 bg-[#fbffe9] px-3 py-1.5 text-[12px] font-black uppercase leading-none tracking-tight text-[#7ed600] shadow-[0_0_0_4px_rgba(212,255,0,0.08)] sm:text-[13px]">
+            Product showcase
+          </div>
+        </div>
+
+        <div className="grid w-full gap-7 px-5 sm:px-8 lg:grid-cols-[0.3fr_0.7fr] lg:gap-8 lg:pr-0">
+          <div className="flex flex-col justify-center select-none">
+            <motion.h2
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.05 }}
+              className="max-w-[430px] text-[2rem] font-black leading-[1.2] tracking-tight text-black sm:text-[2.35rem] lg:text-[1.85rem]"
+            >
+              Everything you need to turn conversations into customers.
+            </motion.h2>
+
+            <motion.p
+              initial={{ opacity: 0, y: 10 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.1 }}
+              className="mt-6 max-w-[360px] text-[15px] font-semibold leading-7 text-black/70"
+            >
+              Manage conversations, recommend offers, collect payments and onboard customers. All in one place.
+            </motion.p>
+
+            <motion.a
+              initial={{ opacity: 0, y: 10 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.15 }}
+              href="#demo"
+              className="mt-6 inline-flex h-11 w-fit items-center justify-center gap-3 rounded-[4px] bg-[#d4ff00] px-6 text-sm font-black text-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)] transition hover:bg-[#b8e600]"
+            >
+              <span>See TractionFlo in Action</span>
+              <ArrowRight className="h-4 w-4" strokeWidth={3} />
+            </motion.a>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.45 }}
+            className="min-w-0 overflow-x-auto pb-2 no-scrollbar lg:flex lg:items-stretch lg:overflow-hidden lg:py-0"
+          >
+            <div className="lg:w-full lg:overflow-hidden">
+            <div className="min-h-[520px] overflow-hidden rounded-[16px] border border-black/10 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.05)] lg:w-full lg:rounded-none lg:border-y-0 lg:border-r-0">
+              <div className="grid min-h-[520px] min-w-[860px] grid-cols-[115px_205px_minmax(320px,1fr)_220px] text-black">
+                <aside className="border-r border-black/10 bg-[#fbfbf8] px-4 py-4">
+                  <div className="mb-6 flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#d4ff00] text-[9px] font-black text-black">TF</span>
+                    <span className="text-[11px] font-black">Traction<span className="text-[#8fdc00]">Flo</span></span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {sidebarItems.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <div
+                          key={item.label}
+                          className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-[9px] font-bold ${
+                            item.active ? "bg-[#eefcc2] text-black" : "text-black/55"
+                          }`}
+                        >
+                          <Icon className="h-3 w-3" strokeWidth={2.4} />
+                          <span>{item.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </aside>
+
+                <section className="border-r border-black/10 bg-white">
+                  <div className="border-b border-black/10 px-4 py-4">
+                    <h3 className="text-lg font-black leading-none">Inbox</h3>
+                    <div className="mt-5 flex gap-5 text-[9px] font-black text-black/45">
+                      {["All", "Unread", "DMs", "Comments", "Story Replies"].map((tab, index) => (
+                        <span key={tab} className={index === 0 ? "text-[#85d600]" : ""}>
+                          {tab}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="divide-y divide-black/[0.04]">
+                    {inboxRows.map((row) => (
+                      <div key={row.name} className={`flex items-center gap-3 px-4 py-3 ${row.active ? "bg-[#f8fde8]" : "bg-white"}`}>
+                        <img
+                          src={row.avatar}
+                          alt={`${row.name} profile`}
+                          className="h-7 w-7 shrink-0 rounded-full border border-black/10 object-cover"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-black leading-none">{row.name}</p>
+                          <p className="mt-1 truncate text-[9px] font-semibold text-black/45">{row.preview}</p>
+                        </div>
+                        <span className="text-[9px] font-bold text-black/35">{row.time}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="border-r border-black/10 bg-white">
+                  <div className="flex min-h-[64px] items-center gap-3 border-b border-black/10 px-4">
+                    <img
+                      src={sarahAvatar}
+                      alt="Sarah profile"
+                      className="h-8 w-8 rounded-full border border-black/10 object-cover"
+                    />
+                    <div>
+                      <p className="text-[12px] font-black leading-none">Sarah</p>
+                      <p className="mt-1 text-[9px] font-bold text-black/40">10:31 AM</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 px-5 py-5">
+                    <div className="w-fit rounded-[9px] border border-black/10 bg-white px-4 py-2 text-[11px] font-semibold text-black/75">
+                      Do you have pricing?
+                    </div>
+                    <div className="ml-auto max-w-[230px] rounded-[10px] bg-[#f0f8cb] px-4 py-3 text-[11px] font-semibold leading-5 text-black">
+                      Yes Sarah!<br />
+                      Here&apos;s the best option for you.
+                    </div>
+                    <div className="ml-auto w-[210px] rounded-[10px] border border-black/10 bg-white p-4 shadow-sm">
+                      <p className="text-[11px] font-black">Coaching Program</p>
+                      <p className="mt-2 text-xl font-black">$497</p>
+                      <div className="mt-3 space-y-1.5 text-[9px] font-bold text-black/45">
+                        <p className="flex items-center gap-1.5"><Check className="h-3 w-3 text-black/45" strokeWidth={3} /> 6 Weeks Program</p>
+                        <p className="flex items-center gap-1.5"><Check className="h-3 w-3 text-black/45" strokeWidth={3} /> 1:1 Sessions</p>
+                        <p className="flex items-center gap-1.5"><Check className="h-3 w-3 text-black/45" strokeWidth={3} /> Community Access</p>
+                      </div>
+                      <button className="mt-4 h-8 w-full rounded-[4px] bg-[#9fe800] text-[10px] font-black text-black" type="button">
+                        View Offer
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <aside className="bg-white px-4 py-4">
+                  <div className="mb-4 flex items-center justify-end gap-4">
+                    <button className="inline-flex h-7 items-center gap-2 rounded-[4px] bg-[#d4ff00] px-3 text-[9px] font-black text-black" type="button">
+                      <MessageCircle className="h-3 w-3" strokeWidth={2.5} />
+                      New Message
+                    </button>
+                    <span className="text-[10px] font-black text-black/35">4</span>
+                    <img
+                      src={sarahAvatar}
+                      alt="Sarah profile"
+                      className="h-7 w-7 rounded-full border border-black/10 object-cover"
+                    />
+                  </div>
+
+                  <div className="rounded-[10px] border border-black/10 p-4">
+                    <p className="text-[10px] font-black text-black/55">Customer Overview</p>
+                    <div className="mt-4 flex items-center gap-3">
+                      <img
+                        src={sarahAvatar}
+                        alt="Sarah profile"
+                        className="h-8 w-8 rounded-full border border-black/10 object-cover"
+                      />
+                      <div>
+                        <p className="text-[11px] font-black leading-none">Sarah</p>
+                        <p className="mt-1 text-[9px] font-semibold text-black/40">New Customer</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-[10px] border border-black/10 p-4">
+                    <p className="text-[10px] font-black text-black/55">Coaching Program</p>
+                    <div className="mt-4 flex items-center justify-between">
+                      <p className="text-lg font-black">$497</p>
+                      <span className="rounded-full bg-[#e7ffd2] px-2 py-1 text-[9px] font-black text-green-700">Paid</span>
+                    </div>
+                    <p className="mt-2 text-[10px] font-black text-violet-600">Stripe</p>
+                  </div>
+
+                  <div className="mt-3 rounded-[10px] border border-black/10 p-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-black text-black/55">Onboarding</p>
+                      <p className="text-[9px] font-bold text-black/35">In Progress</p>
+                    </div>
+                    <p className="mt-5 text-[10px] font-black">Next Step</p>
+                    <p className="mt-2 text-[10px] font-semibold text-black/55">Welcome Email</p>
+                    <button className="mt-4 h-8 w-full rounded-[4px] border border-black/10 bg-white text-[10px] font-black" type="button">
+                      Send Welcome
+                    </button>
+                  </div>
+                </aside>
+              </div>
+            </div>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function OldWayVsTractionFloSection() {
+  const oldTools = [
+    {
+      label: "Instagram",
+      icon: (
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] bg-gradient-to-br from-[#f58529] via-[#dd2a7b] to-[#8134af] text-white">
+          <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" aria-hidden="true">
+            <rect x="4.2" y="4.2" width="11.6" height="11.6" rx="3.4" fill="none" stroke="currentColor" strokeWidth="2" />
+            <circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" strokeWidth="2" />
+            <circle cx="13.7" cy="6.5" r=".8" fill="currentColor" />
+          </svg>
+        </span>
+      ),
+    },
+    {
+      label: "ManyChat",
+      icon: (
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-black">
+          <svg viewBox="0 0 20 20" className="h-5 w-5" aria-hidden="true">
+            <path
+              d="M7.6 3.2c2.3-1.8 5.8-1.3 7.4 1.3 1.4 2.3.6 5.3-1.8 6.8-.7.4-1.3.7-2.1.8l-.2 2.1c-.1.7-.9 1-1.4.5l-1.8-1.9H7.2a4.8 4.8 0 0 1-4.6-5.7 4.9 4.9 0 0 1 5-3.9Z"
+              fill="currentColor"
+            />
+            <path
+              d="M5.3 9.2a4.6 4.6 0 0 0 5.6 4.5c-.5 1.4-1.9 2.5-3.6 2.5h-.9l-1.4 1.4c-.4.4-1 .2-1.1-.4l-.2-1.5a3.7 3.7 0 0 1-2-3.2 3.8 3.8 0 0 1 3.6-3.3Z"
+              fill="currentColor"
+            />
+            <circle cx="8.1" cy="7.9" r="1" fill="white" />
+            <circle cx="11.5" cy="7.9" r="1" fill="white" />
+          </svg>
+        </span>
+      ),
+    },
+    {
+      label: "CRM",
+      icon: (
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#d9ffe4] text-[#23a455]">
+          <Database className="h-3.5 w-3.5" strokeWidth={2.4} />
+        </span>
+      ),
+    },
+    {
+      label: "Calendly",
+      icon: (
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#dff1ff] text-[#2f91ff]">
+          <span className="text-[14px] font-black leading-none">C</span>
+        </span>
+      ),
+    },
+    {
+      label: "Stripe",
+      icon: (
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] bg-[#6c45ff] text-white">
+          <span className="text-[13px] font-black leading-none">S</span>
+        </span>
+      ),
+    },
+    {
+      label: "Email",
+      icon: (
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] border border-slate-200 bg-slate-50 text-slate-400">
+          <Mail className="h-3.5 w-3.5" strokeWidth={2.2} />
+        </span>
+      ),
+    },
+  ];
+
+  const newFlow = [
+    { label: "Find", icon: Search },
+    { label: "Reach", icon: MessageCircle },
+    { label: "Follow Up", icon: Send },
+    { label: "Convert", icon: Check },
+    { label: "Onboard", icon: Users },
+  ];
+
+  return (
+    <section id="demo" className="w-full scroll-mt-[68px] overflow-hidden bg-white pt-8 pb-10 lg:pt-10 lg:pb-12">
+      <div className="flex w-full flex-col bg-white px-5 sm:px-8 lg:px-8">
+        <div className="mb-8 flex justify-center">
+          <div className="rounded-[8px] border border-[#d4ff00]/55 bg-[#fbffe9] px-3 py-1.5 text-[12px] font-black uppercase leading-none tracking-tight text-[#7ed600] shadow-[0_0_0_4px_rgba(212,255,0,0.08)] sm:text-[13px]">
+            Old way vs TractionFlo
+          </div>
+        </div>
+
+        <div className="grid w-full gap-6 lg:grid-cols-[minmax(0,0.43fr)_minmax(72px,0.07fr)_minmax(0,0.5fr)] lg:items-center">
+          <motion.div
+            initial={{ opacity: 0, x: -16 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            className="w-full select-none"
+          >
+            <p className="mb-3 text-sm font-black uppercase tracking-tight text-black">THE OLD WAY</p>
+
+            <div className="grid w-full gap-5 sm:grid-cols-[170px_minmax(0,1fr)] sm:items-end">
+              <div className="w-full rounded-[8px] border border-black/10 bg-white p-3.5 shadow-[0_2px_10px_rgba(0,0,0,0.02)]">
+                <div className="space-y-2.5">
+                  {oldTools.map((tool) => (
+                    <div key={tool.label} className="flex items-center gap-3 text-[13px] font-semibold text-black">
+                      {tool.icon}
+                      <span>{tool.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2 text-[11px] font-semibold text-black/75">
+                {[
+                  "Too many tools.",
+                  "Too many logins.",
+                  "Too many handoffs.",
+                  "Too many opportunities lost.",
+                ].map((item) => (
+                  <div key={item} className="flex items-center gap-2 whitespace-nowrap">
+                    <X className="h-3.5 w-3.5 shrink-0 text-red-500" strokeWidth={3} />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+
+          <div className="relative flex h-12 items-center justify-center lg:h-32 lg:w-24" aria-hidden="true">
+            <div className="absolute inset-y-0 left-1/2 hidden w-px -translate-x-1/2 bg-black/10 lg:block" />
+            <div className="relative flex h-14 w-14 items-center justify-center rounded-full border border-black/10 bg-white text-sm font-black text-black shadow-[0_4px_18px_rgba(0,0,0,0.04)]">
+              VS
+            </div>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 16 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            className="w-full select-none"
+          >
+            <p className="mb-4 text-sm font-black uppercase tracking-tight text-black">THE NEW WAY</p>
+
+            <div className="mb-6 flex items-center gap-4">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#d4ff00] text-lg font-black italic text-black shadow-[0_0_0_6px_rgba(212,255,0,0.12)]">
+                TF
+              </span>
+              <span className="text-[1.85rem] font-extrabold leading-none tracking-tight text-black">
+                Traction<span className="text-[#8dde00]">Flo</span>
+              </span>
+            </div>
+
+            <div className="overflow-x-auto pb-2 no-scrollbar">
+              <div className="flex w-full min-w-[500px] items-start justify-between gap-3 lg:min-w-0">
+                {newFlow.map((step, index) => {
+                  const Icon = step.icon;
+                  return (
+                    <div key={step.label} className="contents">
+                      <div className="flex w-[78px] flex-col items-center text-center">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-[#d4ff00]/20 bg-[#f4ffd6] text-black shadow-[0_0_0_8px_rgba(212,255,0,0.08)]">
+                          <Icon className="h-5.5 w-5.5" strokeWidth={2.3} />
+                        </div>
+                        <span className="mt-3 text-[13px] font-semibold leading-none text-black">{step.label}</span>
+                      </div>
+                      {index < newFlow.length - 1 ? (
+                        <div className="mt-6 flex w-5 items-center justify-center" aria-hidden="true">
+                          <ArrowRight className="h-3.5 w-3.5 text-black/35" strokeWidth={2.5} />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <p className="mt-5 text-lg font-black leading-tight text-black">
+              One platform. Everything in one place.
+            </p>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function WhoItsForSection() {
+  const audiences = [
+    { label: "Creators", icon: UserRoundCheck },
+    { label: "Coaches", icon: Heart },
+    { label: "Consultants", icon: BriefcaseBusiness },
+    { label: "Agencies", icon: Handshake },
+    { label: "Service Businesses", icon: Users },
+    { label: "Course Creators", icon: GraduationCap },
+    { label: "Digital Product Sellers", icon: CircleDollarSign },
+    { label: "& More", icon: Sparkles },
+  ];
+
+  return (
+    <section id="knowledge" className="w-full scroll-mt-[68px] overflow-hidden bg-white pt-8 pb-10 lg:pt-10 lg:pb-12">
+      <div className="w-full bg-white px-5 sm:px-8 lg:px-8">
+        <div className="mb-9 flex justify-center">
+          <div className="rounded-[8px] border border-[#d4ff00]/55 bg-[#fbffe9] px-3 py-1.5 text-[12px] font-black uppercase leading-none tracking-tight text-[#7ed600] shadow-[0_0_0_4px_rgba(212,255,0,0.08)]">
+            Who it&apos;s for
+          </div>
+        </div>
+        <div className="grid w-full grid-cols-2 gap-x-8 gap-y-12 sm:grid-cols-4 lg:gap-y-14">
+          {audiences.map((audience, index) => {
+            const Icon = audience.icon;
+            return (
+              <motion.div
+                key={audience.label}
+                initial={{ opacity: 0, y: 12 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.035 }}
+                className="flex flex-col items-center text-center"
+              >
+                <Icon className="h-9 w-9 text-black" strokeWidth={1.8} />
+                <span className="mt-4 text-[15px] font-semibold leading-tight text-black">{audience.label}</span>
+              </motion.div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FoundingAccessSection() {
+  const leftPerks = [
+    "90 Days Free",
+    "Founder Pricing Forever",
+    "Every Future Feature Included",
+  ];
+  const rightPerks = [
+    "Direct Access To Product Feedback",
+    "First 100 Founders Only",
+  ];
+
+  const perkClass = "flex items-center gap-3 text-base font-medium leading-tight text-white sm:text-lg lg:text-xl";
+
+  return (
+    <section id="pricing" className="w-full scroll-mt-[68px] overflow-hidden bg-black pt-10 pb-12 lg:pt-12 lg:pb-14">
+      <div className="flex w-full flex-col justify-center bg-black px-6 text-white sm:px-10 lg:px-14 xl:px-16">
+        <motion.h2
+          initial={{ opacity: 0, y: 10 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.05 }}
+          className="max-w-[1280px] text-[clamp(3.4rem,5.4vw,6.1rem)] font-extrabold uppercase leading-[0.94] tracking-normal text-white"
+        >
+          Join before we launch.
+        </motion.h2>
+
+        <div className="mt-8 grid w-full max-w-[1120px] gap-x-16 gap-y-4 sm:grid-cols-2 xl:gap-x-24">
+          {[leftPerks, rightPerks].map((group, groupIndex) => (
+            <div key={groupIndex} className="space-y-4">
+              {group.map((perk) => (
+                <div key={perk} className={perkClass}>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-[#9be600] text-[#9be600]">
+                    <Check className="h-4 w-4" strokeWidth={3} />
+                  </span>
+                  <span>{perk}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-9 flex flex-col gap-5 sm:flex-row sm:items-center">
+          <a
+            href="/signup"
+            className="inline-flex h-14 w-full max-w-[380px] items-center justify-center gap-4 rounded-[4px] bg-[#d4ff00] px-8 text-lg font-extrabold text-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)] transition hover:bg-[#b8e600] sm:text-xl"
+          >
+            <span>Join Founding Access</span>
+            <ArrowRight className="h-5 w-5" strokeWidth={3} />
+          </a>
+          <p className="text-base font-medium text-white sm:text-lg">No credit card required.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FinalCtaSection() {
+  return (
+    <section id="final-cta" className="w-full scroll-mt-[68px] overflow-hidden bg-white pt-8 pb-10 sm:pt-10 sm:pb-12 lg:pt-12 lg:pb-14">
+      <div className="flex w-full items-center bg-white px-5 sm:px-10 lg:px-14 xl:px-16">
+        <div className="grid w-full min-w-0 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(190px,21vw)] md:items-center xl:gap-14">
+          <div className="min-w-0 select-none">
+            <motion.h2
+              initial={{ opacity: 0, y: 10 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.05 }}
+              className="max-w-none whitespace-nowrap text-[1.6rem] font-extrabold uppercase leading-none tracking-normal text-black sm:text-[2.3rem] md:text-[clamp(2.6rem,4.35vw,5.05rem)]"
+            >
+              Stop losing customers.
+            </motion.h2>
+
+            <div className="mt-5 max-w-full space-y-2 text-base font-medium leading-snug text-black sm:mt-6 sm:space-y-3 sm:text-xl md:text-[clamp(1.1rem,1.5vw,1.8rem)]">
+              <p>Your audience is already trying to buy from you.</p>
+              <p>TractionFlo helps every opportunity move forward.</p>
+            </div>
+
+            <div className="mt-7 flex flex-col gap-4 sm:mt-8 sm:flex-row sm:items-center sm:gap-5">
+              <a
+                href="/signup"
+                className="inline-flex h-14 w-full max-w-[380px] items-center justify-center gap-4 rounded-[4px] bg-[#d4ff00] px-6 text-base font-extrabold text-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)] transition hover:bg-[#b8e600] sm:px-8 sm:text-xl"
+              >
+                <span>Join Founding Access</span>
+                <ArrowRight className="h-5 w-5" strokeWidth={3} />
+              </a>
+              <p className="text-sm font-medium text-black sm:text-lg">No credit card required.</p>
+            </div>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.08 }}
+            className="mx-auto flex h-44 w-64 items-center justify-center overflow-hidden sm:h-52 sm:w-72 md:h-[clamp(11rem,17vw,21rem)] md:w-[clamp(16rem,23vw,30rem)] md:justify-self-end"
+            aria-hidden="true"
+          >
+            <svg className="h-full w-full" fill="none" viewBox="0 0 210 150" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M7 31C42 17 83 9 168 9C147 21 125 33 94 37L31 136L58 40C35 40 19 37 7 31Z"
+                fill="black"
+              />
+              <path
+                d="M99 52H183L140 79H83L99 52Z"
+                fill="#9FE800"
+              />
+              <path
+                d="M81 91H146L45 139L81 91Z"
+                fill="#9FE800"
+              />
+            </svg>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function LandingPage() {
-  const [activeFaq, setActiveFaq] = useState<number | null>(null);
   const [autoStepOld, setAutoStepOld] = useState(-1);
   const [autoStepNew, setAutoStepNew] = useState(0);
   const [typedText, setTypedText] = useState("");
@@ -239,15 +1156,7 @@ export default function LandingPage() {
     };
   }, []);
 
-
-  const toggleFaq = (index: number) => {
-    setActiveFaq(activeFaq === index ? null : index);
-  };
-
   useEffect(() => {
-    const header = document.querySelector('header');
-    const headerOffset = header ? header.getBoundingClientRect().height : 64;
-
     const easeInOutCubic = (t: number) =>
       t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
@@ -280,7 +1189,7 @@ export default function LandingPage() {
       if (el) {
         e.preventDefault();
         const rect = el.getBoundingClientRect();
-        const targetY = window.scrollY + rect.top - headerOffset - 12;
+        const targetY = window.scrollY + rect.top - 68;
         smoothScroll(targetY, 850);
         history.pushState(null, '', '#' + id);
       }
@@ -291,214 +1200,62 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <main className="min-h-screen overflow-x-clip bg-white text-black font-sans antialiased selection:bg-black selection:text-white">
+    <main className="min-h-screen overflow-x-clip bg-white pt-[68px] text-black font-sans antialiased selection:bg-black selection:text-white">
 
       {/* 1. Header / Navigation Bar */}
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-black/10 bg-white/70 backdrop-blur-md">
-        <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 lg:px-8">
-          <a href="#" className="inline-flex shrink-0 items-center">
-            <BrandLogo className="h-9 w-36" preload sizes="144px" />
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-black/[0.06] bg-white">
+        <nav className="grid h-[68px] w-full grid-cols-[auto_1fr_auto] items-center gap-4 px-6 sm:px-10 lg:px-14 xl:px-20">
+          <a href="#" className="inline-flex shrink-0 items-center gap-2" aria-label="TractionFlo home">
+            <svg
+              aria-hidden="true"
+              className="h-8 w-10 shrink-0"
+              fill="none"
+              viewBox="0 0 46 32"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M2 8.2C13.8 4.1 27.7 2.6 44 2.1C35.6 7.2 27.2 10.5 17.9 10.7L8.2 30L13.8 11C8.9 10.9 5.1 10 2 8.2Z"
+                fill="black"
+              />
+              <path d="M19.8 14.4H36.8L27.8 20.4H15.2L19.8 14.4Z" fill="#9FE800" />
+              <path d="M14.7 22.2H28.5L9.9 30.2L14.7 22.2Z" fill="#9FE800" />
+            </svg>
+            <span className="text-[21px] font-extrabold leading-none tracking-normal text-black">
+              Traction<span className="text-[#9FE800]">Flo</span>
+            </span>
           </a>
 
-          <div className="hidden items-center gap-8 text-xs font-black uppercase tracking-wider text-black/65 lg:flex">
-            <a href="#product" className="hover:text-black transition-colors">Product</a>
-            <a href="#problem" className="hover:text-black transition-colors">Inbox Difference</a>
-            <a href="#demo" className="hover:text-black transition-colors">Demo</a>
-            <a href="#workflows" className="hover:text-black transition-colors">Workflows</a>
-            <a href="#examples" className="hover:text-black transition-colors">Outcomes</a>
-            <a href="#knowledge" className="hover:text-black transition-colors">Knowledge</a>
-            <a href="#faq" className="hover:text-black transition-colors">FAQ</a>
+          <div className="hidden items-center justify-center gap-9 text-[11px] font-bold normal-case tracking-normal text-black lg:flex">
+            <a href="#product" className="transition-colors hover:text-black/55">Features</a>
+            <a href="#demo" className="transition-colors hover:text-black/55">How It Works</a>
+            <a href="#workflows" className="transition-colors hover:text-black/55">Use Cases</a>
+            <a href="#pricing" className="transition-colors hover:text-black/55">Pricing</a>
+            <a href="#footer" className="transition-colors hover:text-black/55">About</a>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              aria-label="Language selector"
-              className="hidden h-9 w-9 items-center justify-center border border-black/15 bg-white text-black transition hover:border-black hover:bg-black hover:text-white md:inline-flex rounded-sm"
-              type="button"
-            >
-              <Globe2 className="h-4.5 w-4.5" strokeWidth={2.5} aria-hidden="true" />
-            </button>
-            <a
-              href="/signup"
-              className="shrink-0 items-center gap-2 border border-black bg-black px-4 py-2 text-xs font-black text-white hover:bg-white hover:text-black transition sm:inline-flex rounded-sm tracking-wider uppercase premium-glow"
-            >
-              <span>Get Founding Access</span>
-              <ArrowRight className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
-            </a>
-          </div>
+          <a
+            href="/signup"
+            className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-[3px] bg-[#d4ff00] px-4 text-[11px] font-black tracking-normal text-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] transition hover:bg-[#b8e600] sm:px-5"
+          >
+            <span className="hidden sm:inline">Join Founding Access</span>
+            <span className="sm:hidden">Join Access</span>
+            <ArrowRight className="h-3.5 w-3.5" strokeWidth={3} aria-hidden="true" />
+          </a>
         </nav>
       </header> 
 
+      <HeroSalesSection />
 
-      
+      <RealProblemSection />
 
-      {/* 2. Hero Section */}
-      <section
-        id="product"
-        className="relative min-h-screen flex flex-col justify-center overflow-hidden px-5 pb-8 pt-20 lg:pt-20 lg:pb-8 lg:px-8 bg-grid-pattern"
-      >
-        {/* Floating gradient circles in background */}
-        <div className="absolute top-[20%] left-[10%] w-[350px] h-[350px] bg-primary/10 rounded-full blur-[100px] pointer-events-none" />
-        <div className="absolute bottom-[20%] right-[10%] w-[350px] h-[350px] bg-black/[0.02] rounded-full blur-[100px] pointer-events-none" />
+      <CustomerJourneySection />
 
-        <div className="mx-auto max-w-7xl z-10 w-full">
-          <div className="grid gap-12 lg:grid-cols-12 lg:items-start lg:text-left text-center lg:pt-4">
-            
-            {/* Left Column: Core Branding & Call to Actions */}
-            <div className="lg:col-span-7 flex flex-col items-center lg:items-start text-center lg:text-left select-none">
-              
-              {/* Rounded Tag Badge */}
-              <motion.div
-                initial={{ opacity: 0, y: -15 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mb-4 inline-flex items-center gap-2 border border-black/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.2em] rounded-full shadow-sm bg-white"
-              >
-                <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-black">Starting with Instagram</span>
-                <div className="h-3 w-px bg-black/15 mx-1" />
-                <span className="text-black/50">TikTok + YouTube coming next</span>
-              </motion.div>
+      <ProductShowcaseSection />
 
-              {/* Main Heading */}
-              <motion.h1
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
-                className="text-[2.75rem] font-black leading-[0.95] tracking-tight text-black sm:text-6xl lg:text-[clamp(3.2rem,4.8vw,4.8rem)] text-center lg:text-left"
-              >
-                Stop building flows. <br />
-                Start getting <br className="hidden lg:block" />
-                <span className="inline-block relative">
-                  conversations
-                  <span className="absolute left-0 right-0 bottom-1.5 h-[6px] bg-[#d4ff00]/70 -z-10 rounded-full" />
-                </span>.
-              </motion.h1>
+      <OldWayVsTractionFloSection />
 
-              {/* Description */}
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="mt-4 max-w-xl text-base font-bold leading-7 text-black/65 sm:text-lg md:text-xl"
-              >
-                Get the same automation outcomes creators already want.
-              </motion.p>
-
-              {/* Sub-badges row */}
-              <div className="flex flex-wrap gap-1.5 mt-4 justify-center lg:justify-start w-full">
-                {[
-                  { label: "Comment triggers", icon: MessageCircle },
-                  { label: "Lead magnets", icon: FileText },
-                  { label: "FAQs", icon: CircleHelp },
-                  { label: "Broadcasts", icon: BarChart3 },
-                  { label: "Follow-ups", icon: Clock3 }
-                ].map((badge, idx) => {
-                  const Icon = badge.icon;
-                  return (
-                    <div key={idx} className="flex items-center gap-1.5 border border-black/10 bg-black/[0.02] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-sm text-black/60 hover:border-black/20 hover:text-black transition-colors bg-white">
-                      <Icon className="h-3 w-3" strokeWidth={3} />
-                      <span>{badge.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* 10x Simpler Callout */}
-              <div className="mt-6 flex flex-col items-center lg:items-start w-full">
-                <span className="text-3xl font-black text-black">10x simpler</span>
-                <p className="mt-1.5 text-[10px] font-black uppercase tracking-wider text-black/45">
-                  Describe what you want in plain English. TractionFlo builds it.
-                </p>
-              </div>
-
-              {/* Action Call to Action Button */}
-              <div className="mt-6 w-full flex flex-col sm:flex-row justify-center lg:justify-start gap-4">
-                <a
-                  href="/signup"
-                  className="inline-flex w-full items-center justify-center gap-2 border-2 border-black px-8 py-4 text-sm font-black text-black transition-all sm:w-auto rounded-sm tracking-widest uppercase shadow-[4px_4px_0px_#000] hover:shadow-[5px_5px_0px_#000] active:translate-x-0.5 active:translate-y-0.5 active:shadow-[2px_2px_0px_#000]"
-                  style={{ backgroundColor: LIME }}
-                >
-                  <span>Get Founding Access</span>
-                  <ArrowRight className="h-4.5 w-4.5" strokeWidth={3.5} />
-                </a>
-              </div>
-
-              {/* Benefits row */}
-              <div className="mt-4 flex flex-wrap justify-center lg:justify-start gap-x-5 gap-y-2.5 text-[10px] font-black uppercase tracking-wider text-black/50 w-full">
-                <div className="flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5 text-green-600" strokeWidth={4} />
-                  <span>Join in 3 seconds</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5 text-green-600" strokeWidth={4} />
-                  <span>No credit card</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5 text-green-600" strokeWidth={4} />
-                  <span>Limited founding spots</span>
-                </div>
-              </div>
-
-              {/* Bottom logo brand statement */}
-              <div className="mt-6 border-t border-black/10 pt-4 flex items-center gap-3 w-full justify-center lg:justify-start">
-                <div className="h-8.5 w-8.5 rounded-full bg-black flex items-center justify-center text-white text-[11px] font-black shadow-sm shrink-0">
-                  TF
-                </div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-black leading-[1.2] text-left">
-                  Built for creators, <br />
-                  <span className="text-black/45">not automation engineers.</span>
-                </p>
-              </div>
-
-            </div>
-
-            {/* Right Column: High-Fidelity Interactive Chat Simulation */}
-            <div className="lg:col-span-5 w-full max-w-lg mx-auto lg:mx-0">
-              <HeroDemo />
-            </div>
-
-          </div>
-        </div>
-      </section>
-
-       <section id="workflows" className="scroll-mt-24 overflow-visible border-t border-black/10 px-5 py-24 lg:px-8 bg-[#f5f5f0]">
-        <div className="mx-auto max-w-7xl overflow-visible">
-          <CreatorWorkflows />
-        </div>
-      </section>  
-
-      {/* 3. Sliding Testimonials Marquee */}
-      <section className="border-y border-black overflow-hidden bg-black py-4.5 shrink-0 select-none">
-        <div className="animate-marquee flex gap-12 text-white">
-          {[1, 2].map((groupIndex) => (
-            <div key={groupIndex} className="flex gap-16 items-center shrink-0">
-              <div className="flex items-center gap-3">
-                <span className="h-2 w-2 rounded-full bg-primary" style={{ backgroundColor: LIME }} />
-                <span className="text-xs font-black uppercase tracking-widest text-white/50">Used by 1M+ creators</span>
-              </div>
-              <p className="text-sm font-bold uppercase tracking-wider">
-                “We used TractionFlo to deliver 65,000+ lead PDFs in days...”
-              </p>
-              <div className="flex items-center gap-3">
-                <span className="h-2 w-2 rounded-full bg-primary" style={{ backgroundColor: LIME }} />
-                <span className="text-xs font-black uppercase tracking-widest text-white/50">Natasha Willis</span>
-              </div>
-              <p className="text-sm font-bold uppercase tracking-wider">
-                “My account grew by 15,000 active followers without flowbuilders!”
-              </p>
-              <div className="flex items-center gap-3">
-                <span className="h-2 w-2 rounded-full bg-primary" style={{ backgroundColor: LIME }} />
-                <span className="text-xs font-black uppercase tracking-widest text-white/50">Giovanni Begossi</span>
-              </div>
-              <p className="text-sm font-bold uppercase tracking-wider">
-                “No condition boxes or wires. I set up my giveaway inside DMs in 2 minutes.”
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
       {/* 4. The Real Problem Section */}
-      <section id="problem" className="scroll-mt-24 border-t border-black/10 px-5 py-24 lg:px-8 bg-[#fafaf9]">
+      <section aria-hidden="true" className="hidden">
         <div className="mx-auto max-w-7xl">
           
           <div className="grid gap-12 lg:grid-cols-12 lg:items-start">
@@ -785,7 +1542,7 @@ export default function LandingPage() {
       </section>
  
       {/* 5. Chat-First Automation Section */}
-      <section id="demo" className="scroll-mt-12 pt-24 pb-24 border-t border-black/10 relative z-10 bg-white select-none">
+      <section aria-hidden="true" className="hidden">
         <div className="mx-auto max-w-7xl px-5 lg:px-8">
           
           {/* Section Header */}
@@ -1084,29 +1841,14 @@ export default function LandingPage() {
 
   
 
-      {/* 8. Upload Once, Answer Forever Section */}
-      <section id="knowledge" className="scroll-mt-24 border-t border-black/10 px-5 py-5 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <div className="mx-auto max-w-4xl text-center select-none">
-          
-            <h2 className="text-4xl font-black leading-[0.95] tracking-tight text-black md:text-6xl lg:text-7.5rem">
-              Upload once. <br />
-              Answer <span className="inline-block relative">
-                forever
-                <span className="absolute left-0 right-0 bottom-1.5 h-[6px] bg-[#d4ff00]/70 -z-10 rounded-full" />
-              </span>.
-            </h2>
-            <p className="mx-auto mt-6 max-w-2xl text-base font-semibold leading-7 text-black/60">
-              TractionFlo learns your content and replies naturally.
-            </p>
-          </div>
-<KnowledgeUploader/>
-        
-        </div>
-      </section>
+      <WhoItsForSection />
 
-      {/* 9. Limited Founding Access CTA Section */}
-      <section className="border-t border-black/10 bg-[#f9fafb] px-5 py-24 lg:px-8 relative overflow-hidden select-none">
+      <FoundingAccessSection />
+
+      <FinalCtaSection />
+
+      {/* Old founding access block retained off-canvas while the reference-matched section replaces it. */}
+      <section aria-hidden="true" className="hidden">
         {/* Subtle decorative grid background overlay */}
         <div className="absolute inset-0 bg-grid-pattern opacity-[0.03] pointer-events-none" />
 
@@ -1312,48 +2054,8 @@ export default function LandingPage() {
         </div>
       </section> */}
 
-      {/* 13. Accordion FAQ Section */}
-      <section id="faq" className="scroll-mt-24 px-5 py-24 lg:px-8 bg-black text-white">
-        <div className="mx-auto max-w-4xl">
-          <div className="mx-auto mb-14 max-w-4xl text-center text-white">
-            <p className="mb-4 text-xs font-black uppercase tracking-[0.22em] text-white/60">FAQ</p>
-            <h2 className="text-4xl font-black leading-[0.95] tracking-tight text-white md:text-6xl">
-              Questions creators ask before switching
-            </h2>
-          </div>
-
-          <div className="mt-6 bg-transparent shadow-none">
-            {faqs.map((faq, index) => {
-              const isOpen = activeFaq === index;
-              return (
-                <div key={index} className="group mb-2">
-                  <button
-                    onClick={() => toggleFaq(index)}
-                    className="flex w-full cursor-pointer items-center justify-between gap-6 px-4 py-5 text-left text-lg md:text-xl font-black text-white bg-white/0 hover:bg-white/5 transition-colors duration-300 rounded-sm"
-                  >
-                    <span className="text-left">{faq.question}</span>
-                    <ChevronDown className={`h-5 w-5 text-white transition-transform duration-300 ${isOpen ? 'rotate-180' : 'rotate-0'}`} strokeWidth={3} />
-                  </button>
-
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: isOpen ? 'auto' : 0, opacity: isOpen ? 1 : 0 }}
-                    className="overflow-hidden"
-                    transition={{ duration: 0.35, ease: "easeInOut" }}
-                  >
-                    <div className="px-4 pb-5 pt-0 text-sm font-semibold leading-7 text-white/75">
-                      <p className="mt-4">{faq.answer}</p>
-                    </div>
-                  </motion.div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* 14. Final Founding CTA Section */}
-      <section className="px-5 py-24 lg:px-8 bg-black text-white relative overflow-hidden">
+      {/* Old final CTA retained off-canvas while the reference-matched section replaces it. */}
+      <section aria-hidden="true" className="hidden">
         <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-white/[0.01] rounded-full blur-[120px] pointer-events-none" />
 
         <div className="mx-auto max-w-5xl border border-white/20 p-8 text-center md:p-16 bg-[#09090b] relative z-10 overflow-hidden shadow-2xl">
@@ -1405,45 +2107,37 @@ export default function LandingPage() {
     
 
       {/* 15. Footer */}
-      <footer id="footer" className="border-t border-white/10 bg-black text-white">
-        <div className="mx-auto max-w-7xl px-5 py-12 lg:px-8">
-          <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
-            <div className="flex flex-col gap-4">
-              <a href="#" className="inline-flex items-center">
-             <img src="/footer.png" alt="" className="w-20 h-10" />
-              </a>
-              <p className="max-w-md text-sm text-white/70">
-                TractionFlo — Simple conversational automations for creators. Upload your knowledge, answer followers, and grow.
-              </p>
-              <p className="mt-4 text-xs text-white/40">© {new Date().getFullYear()} TractionFlo. All rights reserved.</p>
-            </div>
+      <footer id="footer" className="border-t border-black/10 bg-white text-black">
+        <div className="mx-auto grid min-h-12 max-w-[1180px] grid-cols-1 items-center gap-4 px-5 py-4 text-center sm:px-8 md:grid-cols-[1fr_auto_1fr] md:py-3">
+          <a href="#" className="inline-flex items-center justify-center gap-2 md:justify-self-start" aria-label="TractionFlo home">
+            <svg
+              aria-hidden="true"
+              className="h-5 w-7 shrink-0"
+              fill="none"
+              viewBox="0 0 46 32"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M2 8.2C13.8 4.1 27.7 2.6 44 2.1C35.6 7.2 27.2 10.5 17.9 10.7L8.2 30L13.8 11C8.9 10.9 5.1 10 2 8.2Z"
+                fill="black"
+              />
+              <path d="M19.8 14.4H36.8L27.8 20.4H15.2L19.8 14.4Z" fill="#9FE800" />
+              <path d="M14.7 22.2H28.5L9.9 30.2L14.7 22.2Z" fill="#9FE800" />
+            </svg>
+            <span className="text-[15px] font-extrabold leading-none text-black">
+              Traction<span className="text-[#9FE800]">Flo</span>
+            </span>
+          </a>
 
-            <div className="grid grid-cols-2 gap-6 md:grid-cols-3">
-              <div>
-                <h4 className="mb-3 text-xs font-black uppercase text-white/70">Product</h4>
-                <ul className="space-y-2 text-sm">
-                  <li><a href="#product" className="text-white/60 hover:text-white">Overview</a></li>
-                  <li><a href="#demo" className="text-white/60 hover:text-white">Demo</a></li>
-                  <li><a href="#knowledge" className="text-white/60 hover:text-white">Knowledge</a></li>
-                </ul>
-              </div>
-              <div>
-                <h4 className="mb-3 text-xs font-black uppercase text-white/70">Resources</h4>
-                <ul className="space-y-2 text-sm">
-                  <li><a href="#faq" className="text-white/60 hover:text-white">FAQ</a></li>
-                  <li><a href="/signup" className="text-white/60 hover:text-white">Sign up</a></li>
-                  <li><a href="/login" className="text-white/60 hover:text-white">Log in</a></li>
-                </ul>
-              </div>
-              <div>
-                <h4 className="mb-3 text-xs font-black uppercase text-white/70">Contact</h4>
-                <ul className="space-y-2 text-sm">
-                  <li className="text-white/60">support@tractionflo.com</li>
-                  <li className="text-white/60">Twitter: @TractionFlo</li>
-                </ul>
-              </div>
-            </div>
-          </div>
+          <p className="text-[11px] font-semibold text-black/55">
+            © 2024 TractionFlo. All rights reserved.
+          </p>
+
+          <nav className="flex flex-wrap items-center justify-center gap-x-10 gap-y-2 text-[11px] font-semibold text-black md:justify-self-end">
+            <Link href="/privacy" className="transition-colors hover:text-black/55">Privacy Policy</Link>
+            <Link href="/terms" className="transition-colors hover:text-black/55">Terms of Service</Link>
+            <Link href="/contact" className="transition-colors hover:text-black/55">Contact</Link>
+          </nav>
         </div>
       </footer>
 
