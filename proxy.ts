@@ -12,8 +12,10 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * Feel free to modify this pattern to include more paths.
+     * - api/messages (public API — no auth required)
+     * - api/auth (Instagram OAuth — no auth required)
+     * - api/webhooks (Meta webhook — no auth required)
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/messages|api/auth|api/webhooks|api/instagram|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
