@@ -18,8 +18,10 @@ function isAllowedReturnOrigin(origin: string, callbackOrigin: string, appBaseUr
   const allowedOrigins = new Set([callbackOrigin, new URL(appBaseUrl).origin]);
 
   if (process.env.NODE_ENV !== 'production') {
+    allowedOrigins.add('http://localhost:3000');
     allowedOrigins.add('http://localhost:3001');
     allowedOrigins.add('http://localhost:3002');
+    allowedOrigins.add('http://127.0.0.1:3000');
     allowedOrigins.add('http://127.0.0.1:3001');
     allowedOrigins.add('http://127.0.0.1:3002');
   }
