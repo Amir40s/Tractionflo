@@ -21,6 +21,7 @@ import {
   Smile,
   Sparkles,
   Star,
+  Target,
   TriangleAlert,
   X,
   Zap,

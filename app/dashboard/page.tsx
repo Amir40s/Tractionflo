@@ -3682,6 +3682,49 @@ function SettingsAiIntegrationSection({
               );
             })}
           </div>
+
+          <div className="mt-5 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-[13px] font-extrabold text-black">Workflow test</h3>
+                <p className="mt-1 text-[11px] font-medium leading-relaxed text-[#46506a]">
+                  Runs opener, answer, lead qualification, and CTA against a sample Instagram thread.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void testAllWorkflows()}
+                disabled={isTestingWorkflows || !draft.apiKeySaved}
+                className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-[8px] bg-[#0d1118] px-3 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                {isTestingWorkflows ? <RefreshCw size={13} className="animate-spin" /> : <Sparkles size={13} strokeWidth={2.35} />}
+                Test all jobs
+              </button>
+            </div>
+
+            {workflowTest && (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-[8px] bg-white p-3">
+                  <p className="text-[10px] font-extrabold uppercase text-[#596175]">Opener</p>
+                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">{workflowTest.starter || "Off"}</p>
+                </div>
+                <div className="rounded-[8px] bg-white p-3">
+                  <p className="text-[10px] font-extrabold uppercase text-[#596175]">Answer</p>
+                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">{workflowTest.reply || "Off"}</p>
+                </div>
+                <div className="rounded-[8px] bg-white p-3">
+                  <p className="text-[10px] font-extrabold uppercase text-[#596175]">Lead</p>
+                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">
+                    {workflowTest.lead ? `${workflowTest.lead.score}/100 ${workflowTest.lead.stage}: ${workflowTest.lead.summary}` : "Off"}
+                  </p>
+                </div>
+                <div className="rounded-[8px] bg-white p-3">
+                  <p className="text-[10px] font-extrabold uppercase text-[#596175]">CTA</p>
+                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">{workflowTest.cta || "Off"}</p>
+                </div>
+              </div>
+            )}
+          </div>
         </section>
       </div>
 
