@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { canAccessConversation, canAccessPage, getUserPermissionProfile } from '@/lib/agent-permissions';
+import { getFreshInstagramAccount } from '@/lib/instagram-token';
 import { createSupabaseServiceClient } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -129,18 +132,29 @@ async function uploadAttachment(
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createSupabaseServiceClient();
-    const { data: accounts, error: dbError } = await supabase
-      .from('instagram_accounts')
-      .select('access_token')
-      .order('created_at', { ascending: false })
-      .limit(1);
+    const authSupabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await authSupabase.auth.getUser();
 
-    if (dbError) {
-      throw dbError;
+    if (authError) {
+      throw authError;
     }
 
-    const accessToken = accounts?.[0]?.access_token;
+    if (!user) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const permissions = getUserPermissionProfile((user.user_metadata || {}) as Record<string, unknown>);
+
+    if (!canAccessPage(permissions, 'inbox')) {
+      return NextResponse.json({ error: 'Conversations are not enabled for this agent.' }, { status: 403 });
+    }
+
+    const supabase = createSupabaseServiceClient();
+    const account = await getFreshInstagramAccount(supabase);
+    const accessToken = account?.access_token;
 
     if (!accessToken) {
       return NextResponse.json({ error: 'No Instagram account connected' }, { status: 400 });
@@ -148,17 +162,20 @@ export async function POST(request: NextRequest) {
 
     const contentType = request.headers.get('content-type') || '';
     let recipientId = '';
+    let conversationId = '';
     let text = '';
     let files: File[] = [];
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData();
       recipientId = String(formData.get('recipientId') || '').trim();
+      conversationId = String(formData.get('conversationId') || '').trim();
       text = String(formData.get('text') || '').trim();
       files = formData.getAll('files').filter(isUploadFile);
     } else {
-      const body = (await request.json()) as { recipientId?: string; text?: string };
+      const body = (await request.json()) as { recipientId?: string; conversationId?: string; text?: string };
       recipientId = String(body.recipientId || '').trim();
+      conversationId = String(body.conversationId || '').trim();
       text = String(body.text || '').trim();
     }
 
@@ -168,6 +185,10 @@ export async function POST(request: NextRequest) {
 
     if (!text && files.length === 0) {
       return NextResponse.json({ error: 'Type a message or attach an image/video.' }, { status: 400 });
+    }
+
+    if (!canAccessConversation(permissions, conversationId)) {
+      return NextResponse.json({ error: 'This conversation is not assigned to this agent.' }, { status: 403 });
     }
 
     const sent: InstagramSendResult[] = [];

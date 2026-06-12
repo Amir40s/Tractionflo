@@ -7,6 +7,7 @@ import {
   Bookmark,
   Braces,
   CalendarDays,
+  Check,
   ChevronDown,
   CircleDollarSign,
   ExternalLink,
@@ -23,6 +24,7 @@ import {
   Star,
   Target,
   TriangleAlert,
+  Users,
   X,
   Zap,
 } from "lucide-react";
@@ -85,6 +87,22 @@ type APIResponse = {
   error?: string;
 };
 
+type AgentAccount = {
+  id: string;
+  name: string;
+  email: string;
+  status: "Active" | "Suspended";
+  allowedPages: string[];
+  assignedConversationIds: string[];
+  humanEscalation: boolean;
+};
+
+type AgentsResponse = {
+  agents?: AgentAccount[];
+  agent?: AgentAccount;
+  error?: string;
+};
+
 type SendAPIResponse = {
   ok?: boolean;
   sent?: {
@@ -113,6 +131,7 @@ const quickActions: QuickAction[] = [
 ];
 
 type ComposerMode = "reply" | "note";
+type ConversationTakeoverMode = "ai" | "human";
 
 type ComposerAttachment = {
   id: string;
@@ -246,6 +265,29 @@ function getSearchableMessageText(message: IGMessage) {
     message.sender_id,
     getMessagePreview(message),
   ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function getConversationsSignature(conversations: IGConversation[]) {
+  return conversations
+    .map((conversation) =>
+      [
+        conversation.id,
+        conversation.messages
+          .map((message) =>
+            [
+              message.id,
+              message.time,
+              message.text,
+              message.status || "",
+              message.attachments
+                ?.map((attachment) => `${attachment.type}:${attachment.name || ""}:${attachment.mime_type || ""}`)
+                .join(",") || "",
+            ].join("~")
+          )
+          .join("|"),
+      ].join(":")
+    )
+    .join("||");
 }
 
 function getConversationAiMessages(conv: IGConversation) {
@@ -546,7 +588,7 @@ function ChatBubble({ msg, igUserId }: { msg: IGMessage; igUserId: string }) {
               if (attachment.type === "image") {
                 return (
                   <a
-                    key={`${attachment.url}-${index}`}
+                    key={`${msg.id}-image-${index}`}
                     href={attachment.url}
                     target="_blank"
                     rel="noreferrer"
@@ -566,7 +608,7 @@ function ChatBubble({ msg, igUserId }: { msg: IGMessage; igUserId: string }) {
               if (attachment.type === "video") {
                 return (
                   <video
-                    key={`${attachment.url}-${index}`}
+                    key={`${msg.id}-video-${index}`}
                     src={attachment.url}
                     className="max-h-[320px] w-full min-w-[180px] rounded-[10px] border border-[#edf0f6] bg-black"
                     controls
@@ -576,7 +618,7 @@ function ChatBubble({ msg, igUserId }: { msg: IGMessage; igUserId: string }) {
 
               return (
                 <a
-                  key={`${attachment.url}-${index}`}
+                  key={`${msg.id}-attachment-${index}`}
                   href={attachment.url}
                   target="_blank"
                   rel="noreferrer"
@@ -613,12 +655,14 @@ function ChatComposer({
   conv,
   initialDraft,
   status,
+  takeoverMode,
   onSubmit,
   onGenerateAiReply,
 }: {
   conv: IGConversation | null;
   initialDraft: ComposerDraft | null;
   status: ComposerStatus;
+  takeoverMode: ConversationTakeoverMode;
   onSubmit: (payload: ComposerSubmitPayload) => Promise<void>;
   onGenerateAiReply: () => Promise<string>;
 }) {
@@ -633,6 +677,8 @@ function ChatComposer({
   const [aiReplying, setAiReplying] = useState(false);
 
   const isReply = mode === "reply";
+  const isHumanTakeover = takeoverMode === "human";
+  const canUseAiTools = takeoverMode === "ai";
   const canAttach = Boolean(conv && isReply && !status.sending);
   const canSubmit = Boolean(
     conv &&
@@ -688,7 +734,7 @@ function ChatComposer({
   };
 
   const generateAiReply = async () => {
-    if (!conv || aiReplying) return;
+    if (!conv || aiReplying || !canUseAiTools) return;
 
     setMode("reply");
     setAiReplying(true);
@@ -769,7 +815,13 @@ function ChatComposer({
           }}
           disabled={!conv || status.sending}
           rows={2}
-          placeholder={isReply ? "Type your message or let AI reply for you..." : "Write a private note for your team..."}
+          placeholder={
+            isReply
+              ? isHumanTakeover
+                ? "Human takeover is active. Type your manual reply..."
+                : "Type your message or let AI reply for you..."
+              : "Write a private note for your team..."
+          }
           className="min-h-[48px] w-full resize-none bg-transparent text-[13px] font-medium leading-[1.45] text-[#20273b] outline-none placeholder:text-[#9aa1b5] disabled:cursor-not-allowed disabled:opacity-60"
         />
 
@@ -873,14 +925,14 @@ function ChatComposer({
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={!conv || status.sending || aiReplying}
+              disabled={!conv || status.sending || aiReplying || !canUseAiTools}
               onClick={() => {
                 void generateAiReply();
               }}
               className="flex h-8 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-[#f3f4ff] px-3.5 text-[12px] font-semibold text-[#3044ff] transition hover:bg-[#eceeff] disabled:cursor-not-allowed disabled:opacity-55"
             >
               {aiReplying ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-              {aiReplying ? "Thinking" : "AI Reply"}
+              {isHumanTakeover ? "AI Paused" : aiReplying ? "Thinking" : "AI Reply"}
             </button>
             <div className="relative flex">
               <button
@@ -978,6 +1030,14 @@ function ChatThread({
   composerDraft,
   onComposerSubmit,
   onGenerateAiReply,
+  takeoverMode,
+  onToggleTakeoverMode,
+  agents,
+  loadingAgents,
+  canManageAgents,
+  assignmentSavingAgentId,
+  assignmentStatus,
+  onToggleAgentAssignment,
 }: {
   conv: IGConversation | null;
   igUserId: string;
@@ -985,22 +1045,41 @@ function ChatThread({
   composerDraft: ComposerDraft | null;
   onComposerSubmit: (payload: ComposerSubmitPayload) => Promise<void>;
   onGenerateAiReply: () => Promise<string>;
+  takeoverMode: ConversationTakeoverMode;
+  onToggleTakeoverMode: () => void;
+  agents: AgentAccount[];
+  loadingAgents: boolean;
+  canManageAgents: boolean;
+  assignmentSavingAgentId: string;
+  assignmentStatus: string;
+  onToggleAgentAssignment: (agent: AgentAccount) => Promise<void>;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const messages = conv ? [...conv.messages].reverse() : [];
   const [lovedConversationIds, setLovedConversationIds] = useState<string[]>([]);
   const [starredConversationIds, setStarredConversationIds] = useState<string[]>([]);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conv?.id, messages.length]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setAssignmentOpen(false);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [conv?.id]);
 
   const name = conv ? getParticipantName(conv) : "Select a conversation";
   const avatarSrc = conv?.participant.profile_pic || "";
   const profileUrl = getInstagramProfileUrl(conv);
   const isLoved = Boolean(conv && lovedConversationIds.includes(conv.id));
   const isStarred = Boolean(conv && starredConversationIds.includes(conv.id));
+  const assignedAgents = conv ? agents.filter((agent) => agent.assignedConversationIds.includes(conv.id)) : [];
+  const isHumanTakeover = takeoverMode === "human";
 
   const toggleConversationId = (id: string, setter: Dispatch<SetStateAction<string[]>>) => {
     setter((ids) => (ids.includes(id) ? ids.filter((existingId) => existingId !== id) : [...ids, id]));
@@ -1040,6 +1119,109 @@ function ChatThread({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {conv && (
+            <button
+              type="button"
+              onClick={onToggleTakeoverMode}
+              className={`hidden h-10 items-center gap-2 rounded-[8px] px-3 text-[12px] font-extrabold transition sm:flex xl:hidden ${
+                isHumanTakeover
+                  ? "border border-[#dde3ee] bg-white text-black hover:bg-[#f6f7fb]"
+                  : "bg-[#3044ff] text-white shadow-[0_16px_30px_rgba(48,68,255,0.22)] hover:bg-[#2638f0]"
+              }`}
+            >
+              {isHumanTakeover ? <Sparkles size={15} strokeWidth={2.4} /> : <Users size={15} strokeWidth={2.4} />}
+              {isHumanTakeover ? "Take over AI" : "Take over human"}
+            </button>
+          )}
+          {conv && canManageAgents && (
+            <div className="relative hidden sm:block">
+              <button
+                type="button"
+                onClick={() => setAssignmentOpen((open) => !open)}
+                className="flex h-10 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black transition hover:bg-[#f6f7fb]"
+              >
+                <Users size={16} strokeWidth={2.3} />
+                Assign
+                <span className="rounded-full bg-[#f0edff] px-2 py-0.5 text-[10px] text-[#3044ff]">
+                  {assignedAgents.length}
+                </span>
+                <ChevronDown size={14} strokeWidth={2.4} />
+              </button>
+
+              {assignmentOpen && (
+                <div className="absolute right-0 top-12 z-30 w-[292px] rounded-[10px] border border-[#dde3ee] bg-white p-2 shadow-[0_22px_60px_rgba(20,28,53,0.16)]">
+                  <div className="flex items-center justify-between px-2 py-1">
+                    <p className="text-[11px] font-extrabold uppercase text-[#596175]">Assign to agent</p>
+                    <button
+                      type="button"
+                      aria-label="Close assignment menu"
+                      onClick={() => setAssignmentOpen(false)}
+                      className="flex h-6 w-6 items-center justify-center rounded-[6px] text-[#596175] hover:bg-[#f6f7fb]"
+                    >
+                      <X size={13} strokeWidth={2.4} />
+                    </button>
+                  </div>
+
+                  {loadingAgents ? (
+                    <div className="flex items-center gap-2 px-2 py-4 text-[11px] font-semibold text-[#46506a]">
+                      <Loader2 size={14} className="animate-spin text-[#3044ff]" />
+                      Loading agents
+                    </div>
+                  ) : agents.length === 0 ? (
+                    <p className="px-2 py-4 text-[11px] font-semibold leading-relaxed text-[#46506a]">
+                      Create an agent in Settings first.
+                    </p>
+                  ) : (
+                    <div className="mt-1 grid max-h-[280px] gap-1 overflow-y-auto">
+                      {agents.map((agent) => {
+                        const checked = agent.assignedConversationIds.includes(conv.id);
+                        const canAssign = agent.status === "Active" && agent.allowedPages.includes("inbox");
+
+                        return (
+                          <button
+                            key={agent.id}
+                            type="button"
+                            onClick={() => void onToggleAgentAssignment(agent)}
+                            disabled={!canAssign || assignmentSavingAgentId === agent.id}
+                            className={`grid min-h-[58px] grid-cols-[22px_minmax(0,1fr)] items-start gap-2 rounded-[8px] px-2 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-55 ${
+                              checked ? "bg-[#f6f7ff]" : "hover:bg-[#f6f7fb]"
+                            }`}
+                          >
+                            <span
+                              className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-[6px] border ${
+                                checked ? "border-[#3044ff] bg-[#3044ff] text-white" : "border-[#d7ddeb] bg-white text-transparent"
+                              }`}
+                            >
+                              {assignmentSavingAgentId === agent.id ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Check size={13} strokeWidth={2.8} />
+                              )}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-[12px] font-extrabold text-black">{agent.name}</span>
+                              <span className="mt-0.5 block truncate text-[10px] font-semibold text-[#596175]">{agent.email}</span>
+                              {!canAssign && (
+                                <span className="mt-1 block text-[10px] font-extrabold text-[#df405b]">
+                                  Enable Conversations permission first
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {assignmentStatus && (
+                    <p className="mt-2 rounded-[8px] bg-[#f6f7fb] px-2 py-2 text-[11px] font-semibold leading-relaxed text-[#46506a]">
+                      {assignmentStatus}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <button type="button" className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee] xl:hidden">
             <Search size={17} />
           </button>
@@ -1163,6 +1345,7 @@ function ChatThread({
           conv={conv}
           initialDraft={composerDraft}
           status={composerStatus}
+          takeoverMode={takeoverMode}
           onSubmit={onComposerSubmit}
           onGenerateAiReply={onGenerateAiReply}
         />
@@ -1179,6 +1362,8 @@ function SummaryPanel({
   accountName,
   composerStatus,
   refreshing,
+  takeoverMode,
+  onToggleTakeoverMode,
   onDraftSuggestedReply,
   onSendSuggestedReply,
 }: {
@@ -1187,6 +1372,8 @@ function SummaryPanel({
   accountName: string;
   composerStatus: ComposerStatus;
   refreshing: boolean;
+  takeoverMode: ConversationTakeoverMode;
+  onToggleTakeoverMode: () => void;
   onDraftSuggestedReply: (text: string) => void;
   onSendSuggestedReply: (text: string) => Promise<void>;
 }) {
@@ -1198,6 +1385,7 @@ function SummaryPanel({
   const [aiLoading, setAiLoading] = useState(false);
   const [, setClockTick] = useState(0);
   const lastAiKeyRef = useRef("");
+  const isHumanTakeover = takeoverMode === "human";
   const msgs = conv ? [...conv.messages].filter((m) => m.from !== "note").reverse() : [];
   const lastUserMsg = conv?.messages.find(m => m.from === "user" && m.sender_id !== igUserId);
   const lastUserMsgPreview = getMessagePreview(lastUserMsg);
@@ -1222,6 +1410,13 @@ function SummaryPanel({
   const runAiWorkflow = useCallback(
     async (options?: { silent?: boolean }) => {
       if (!conv) {
+        return;
+      }
+
+      if (isHumanTakeover) {
+        lastAiKeyRef.current = "";
+        setAiLoading(false);
+        setAiStatus("Human takeover is active. AI is paused for this conversation.");
         return;
       }
 
@@ -1259,7 +1454,7 @@ function SummaryPanel({
         setAiLoading(false);
       }
     },
-    [accountName, conv]
+    [accountName, conv, isHumanTakeover]
   );
 
   useEffect(() => {
@@ -1295,6 +1490,16 @@ function SummaryPanel({
       return () => window.clearTimeout(timeout);
     }
 
+    if (isHumanTakeover) {
+      const timeout = window.setTimeout(() => {
+        lastAiKeyRef.current = "";
+        setAiLoading(false);
+        setAiStatus("Human takeover is active. AI is paused for this conversation.");
+      }, 0);
+
+      return () => window.clearTimeout(timeout);
+    }
+
     if (lastAiKeyRef.current === aiRefreshKey) {
       return undefined;
     }
@@ -1305,7 +1510,7 @@ function SummaryPanel({
     }, 700);
 
     return () => window.clearTimeout(timeout);
-  }, [aiRefreshKey, conv, runAiWorkflow]);
+  }, [aiRefreshKey, conv, isHumanTakeover, runAiWorkflow]);
 
   return (
     <aside className="hidden h-full min-w-0 flex-col overflow-hidden border-l border-[#e7eaf2] bg-white xl:flex">
@@ -1397,6 +1602,21 @@ function SummaryPanel({
                     <IGBadge />Instagram
                   </span>
                 </div>
+                <div className="flex min-h-[42px] items-center justify-between gap-3 py-1.5">
+                  <span className="text-[12px] font-normal text-black">Control</span>
+                  <button
+                    type="button"
+                    onClick={onToggleTakeoverMode}
+                    className={`flex h-8 items-center gap-2 rounded-[8px] px-2.5 text-[11px] font-extrabold transition ${
+                      isHumanTakeover
+                        ? "border border-[#dde3ee] bg-white text-black hover:bg-[#f6f7fb]"
+                        : "bg-[#3044ff] text-white shadow-[0_12px_24px_rgba(48,68,255,0.18)] hover:bg-[#2638f0]"
+                    }`}
+                  >
+                    {isHumanTakeover ? <Sparkles size={13} strokeWidth={2.4} /> : <Users size={13} strokeWidth={2.4} />}
+                    {isHumanTakeover ? "Take over AI" : "Take over human"}
+                  </button>
+                </div>
               </div>
 
               <div className="mt-3 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-2.5">
@@ -1408,7 +1628,7 @@ function SummaryPanel({
                   <button
                     type="button"
                     onClick={() => void runAiWorkflow()}
-                    disabled={aiLoading}
+                    disabled={aiLoading || isHumanTakeover}
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border border-[#dde3ee] bg-white text-[#46506a] disabled:cursor-not-allowed disabled:opacity-55"
                     aria-label="Refresh AI qualification"
                   >
@@ -1457,7 +1677,7 @@ function SummaryPanel({
                   <button
                     type="button"
                     onClick={() => onDraftSuggestedReply(starterDraft)}
-                    disabled={!starterDraft || aiLoading}
+                    disabled={!starterDraft || aiLoading || isHumanTakeover}
                     className="h-8 rounded-[8px] border border-[#dde3ee] bg-white px-2 text-[11px] font-extrabold text-black disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     Draft opener
@@ -1465,7 +1685,7 @@ function SummaryPanel({
                   <button
                     type="button"
                     onClick={() => onDraftSuggestedReply(ctaDraft)}
-                    disabled={!ctaDraft || aiLoading}
+                    disabled={!ctaDraft || aiLoading || isHumanTakeover}
                     className="h-8 rounded-[8px] bg-[#3044ff] px-2 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     Draft CTA
@@ -1516,10 +1736,10 @@ function SummaryPanel({
                   <button
                     type="button"
                     onClick={() => onDraftSuggestedReply(suggestedReply)}
-                    disabled={aiLoading}
+                    disabled={aiLoading || isHumanTakeover}
                     className="text-[11px] font-bold text-[#3044ff] disabled:cursor-not-allowed disabled:opacity-55"
                   >
-                    {aiLoading ? "Thinking" : "Customize"}
+                    {isHumanTakeover ? "AI paused" : aiLoading ? "Thinking" : "Customize"}
                   </button>
                 </div>
                 <div className="rounded-[8px] border border-[#dde3ee] bg-white p-2.5 text-[12px] leading-[1.35] text-[#252c41]">
@@ -1530,11 +1750,11 @@ function SummaryPanel({
                   onClick={() => {
                     void onSendSuggestedReply(suggestedReply).catch(() => undefined);
                   }}
-                  disabled={composerStatus.sending}
+                  disabled={composerStatus.sending || isHumanTakeover}
                   className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded-[7px] bg-[#0d1118] text-[12px] font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-55"
                 >
                   {composerStatus.sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-                  Send this reply
+                  {isHumanTakeover ? "AI reply paused" : "Send this reply"}
                 </button>
               </div>
             </div>
@@ -1567,6 +1787,12 @@ export default function Inbox() {
     notice: null,
   });
   const [composerDraft, setComposerDraft] = useState<ComposerDraft | null>(null);
+  const [agents, setAgents] = useState<AgentAccount[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [canManageAgents, setCanManageAgents] = useState(false);
+  const [assignmentSavingAgentId, setAssignmentSavingAgentId] = useState("");
+  const [assignmentStatus, setAssignmentStatus] = useState("");
+  const [takeoverModes, setTakeoverModes] = useState<Record<string, ConversationTakeoverMode>>({});
   const hasLoadedInboxRef = useRef(false);
   const activeIdRef = useRef<string | null>(null);
 
@@ -1595,11 +1821,14 @@ export default function Inbox() {
         setAccount(data.account ?? null);
         setError(data.error);
       } else {
-        setConvs(data.conversations);
+        const nextConversations = data.conversations || [];
+        setConvs((current) =>
+          getConversationsSignature(current) === getConversationsSignature(nextConversations) ? current : nextConversations
+        );
         if (data.ig_user_id) setIgUserId(data.ig_user_id);
         setAccount(data.account ?? null);
-        if (data.conversations.length > 0 && !activeIdRef.current) {
-          setActiveId(data.conversations[0].id);
+        if (nextConversations.length > 0 && !activeIdRef.current) {
+          setActiveId(nextConversations[0].id);
         }
       }
     } catch {
@@ -1643,23 +1872,93 @@ export default function Inbox() {
     setConnectingNew(true);
     setError(null);
 
-    try {
-      const res = await fetch("/api/auth/instagram/disconnect", {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-      const data: { error?: string } = await res.json();
+    window.location.href = "/api/auth/instagram?next=/conversations";
+  }, []);
 
-      if (!res.ok || data.error) {
-        throw new Error(data.error || "Could not prepare Instagram reconnect");
+  const loadAgents = useCallback(async () => {
+    setLoadingAgents(true);
+
+    try {
+      const response = await fetch("/api/agents", {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const data = (await response.json()) as AgentsResponse;
+
+      if (!response.ok || data.error) {
+        setCanManageAgents(false);
+        setAgents([]);
+        return;
       }
 
-      window.location.href = "/api/auth/instagram?next=/conversations";
-    } catch (err) {
-      setConnectingNew(false);
-      setError(err instanceof Error ? err.message : "Could not prepare Instagram reconnect");
+      setAgents(data.agents || []);
+      setCanManageAgents(true);
+    } catch {
+      setCanManageAgents(false);
+      setAgents([]);
+    } finally {
+      setLoadingAgents(false);
     }
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void loadAgents();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [loadAgents]);
+
+  const toggleAgentAssignment = useCallback(
+    async (agent: AgentAccount) => {
+      const targetConv = convs.find((conv) => conv.id === activeId);
+
+      if (!targetConv) {
+        setAssignmentStatus("Select a conversation first.");
+        return;
+      }
+
+      const isAssigned = agent.assignedConversationIds.includes(targetConv.id);
+      const nextAssignedConversationIds = isAssigned
+        ? agent.assignedConversationIds.filter((conversationId) => conversationId !== targetConv.id)
+        : [...agent.assignedConversationIds, targetConv.id];
+
+      setAssignmentSavingAgentId(agent.id);
+      setAssignmentStatus("");
+
+      try {
+        const response = await fetch("/api/agents", {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "update",
+            id: agent.id,
+            name: agent.name,
+            email: agent.email,
+            allowedPages: agent.allowedPages,
+            assignedConversationIds: nextAssignedConversationIds,
+            humanEscalation: agent.humanEscalation,
+          }),
+        });
+        const data = (await response.json()) as AgentsResponse;
+
+        if (!response.ok || data.error || !data.agent) {
+          throw new Error(data.error || "Could not update assignment.");
+        }
+
+        setAgents((current) => current.map((item) => (item.id === data.agent?.id ? data.agent : item)));
+        setAssignmentStatus(isAssigned ? "Conversation unassigned." : "Conversation assigned.");
+      } catch (err) {
+        setAssignmentStatus(err instanceof Error ? err.message : "Could not update assignment.");
+      } finally {
+        setAssignmentSavingAgentId("");
+      }
+    },
+    [activeId, convs]
+  );
 
   const submitComposerMessage = useCallback(
     async (payload: ComposerSubmitPayload) => {
@@ -1709,6 +2008,7 @@ export default function Inbox() {
       try {
         const formData = new FormData();
         formData.append("recipientId", targetConv.participant.id);
+        formData.append("conversationId", targetConv.id);
         formData.append("text", payload.text);
         payload.files.forEach((file) => formData.append("files", file));
 
@@ -1794,6 +2094,28 @@ export default function Inbox() {
   }, [fetchConvs]);
 
   const activeConv = convs.find(c => c.id === activeId) ?? null;
+  const activeTakeoverMode: ConversationTakeoverMode = activeConv ? takeoverModes[activeConv.id] || "ai" : "ai";
+
+  const toggleTakeoverMode = useCallback(() => {
+    const targetConvId = activeIdRef.current;
+
+    if (!targetConvId) {
+      return;
+    }
+
+    setTakeoverModes((current) => {
+      const nextMode: ConversationTakeoverMode = (current[targetConvId] || "ai") === "ai" ? "human" : "ai";
+      return {
+        ...current,
+        [targetConvId]: nextMode,
+      };
+    });
+    setComposerStatus({
+      sending: false,
+      error: null,
+      notice: activeTakeoverMode === "ai" ? "Human takeover active" : "AI takeover active",
+    });
+  }, [activeTakeoverMode]);
 
   const draftSuggestedReply = useCallback((text: string) => {
     setComposerDraft({
@@ -1880,6 +2202,14 @@ export default function Inbox() {
         composerDraft={composerDraft}
         onComposerSubmit={submitComposerMessage}
         onGenerateAiReply={generateAiReply}
+        takeoverMode={activeTakeoverMode}
+        onToggleTakeoverMode={toggleTakeoverMode}
+        agents={agents}
+        loadingAgents={loadingAgents}
+        canManageAgents={canManageAgents}
+        assignmentSavingAgentId={assignmentSavingAgentId}
+        assignmentStatus={assignmentStatus}
+        onToggleAgentAssignment={toggleAgentAssignment}
       />
       <SummaryPanel
         key={activeConv?.id || "empty-summary"}
@@ -1888,6 +2218,8 @@ export default function Inbox() {
         accountName={formatInstagramAccount(account)}
         composerStatus={composerStatus}
         refreshing={refreshing}
+        takeoverMode={activeTakeoverMode}
+        onToggleTakeoverMode={toggleTakeoverMode}
         onDraftSuggestedReply={draftSuggestedReply}
         onSendSuggestedReply={sendSuggestedReply}
       />

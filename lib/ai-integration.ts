@@ -7,6 +7,14 @@ export type AiWorkflowSetting = {
   enabled: boolean;
 };
 
+export type AiBehaviorSettings = {
+  personality: string;
+  responseStyle: string;
+  knowledgeUsage: string;
+  proactiveOutreach: boolean;
+  autoTagging: boolean;
+};
+
 export type AiLeadInsight = {
   score: number;
   stage: string;
@@ -32,6 +40,7 @@ export type AiIntegrationSettings = {
   apiKeyPreview: string;
   model: string;
   workflows: AiWorkflowSetting[];
+  behavior: AiBehaviorSettings;
   systemPrompt: string;
   leadQualificationRules: string;
   ctaMessage: string;
@@ -67,6 +76,14 @@ export const defaultAiWorkflows: AiWorkflowSetting[] = [
   },
 ];
 
+export const defaultAiBehaviorSettings: AiBehaviorSettings = {
+  personality: "Professional",
+  responseStyle: "Helpful & Friendly",
+  knowledgeUsage: "Always",
+  proactiveOutreach: true,
+  autoTagging: true,
+};
+
 export const defaultAiLeadInsight: AiLeadInsight = {
   score: 0,
   stage: "Unqualified",
@@ -84,6 +101,7 @@ export const defaultAiIntegrationSettings: AiIntegrationSettings = {
   apiKeyPreview: "",
   model: openAiModelOptions[0],
   workflows: defaultAiWorkflows,
+  behavior: defaultAiBehaviorSettings,
   systemPrompt:
     "You are TractionFlo's Instagram DM assistant. Reply like a helpful creator support rep: concise, friendly, accurate, and focused on the user's next best step.",
   leadQualificationRules:
@@ -142,6 +160,70 @@ export function sanitizeAiText(value: unknown, fallback: string, maxLength = 120
   return trimmed ? trimmed.slice(0, maxLength) : fallback;
 }
 
+function normalizeAiBehaviorValue(value: unknown, options: string[], fallback: string) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  return options.includes(value) ? value : fallback;
+}
+
+function normalizeAiBoolean(value: unknown, fallback: boolean) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return fallback;
+}
+
+export function normalizeAiBehaviorSettings(value: unknown, metadata: Record<string, unknown> = {}): AiBehaviorSettings {
+  const behavior = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+  return {
+    personality: normalizeAiBehaviorValue(
+      behavior.personality ?? metadata.ai_personality,
+      ["Professional", "Friendly", "Playful", "Direct"],
+      defaultAiBehaviorSettings.personality
+    ),
+    responseStyle: normalizeAiBehaviorValue(
+      behavior.responseStyle ?? metadata.ai_response_style,
+      ["Helpful & Friendly", "Concise", "Sales focused", "Support first"],
+      defaultAiBehaviorSettings.responseStyle
+    ),
+    knowledgeUsage: normalizeAiBehaviorValue(
+      behavior.knowledgeUsage ?? metadata.ai_knowledge_usage,
+      ["Always", "Only when confident", "Ask first"],
+      defaultAiBehaviorSettings.knowledgeUsage
+    ),
+    proactiveOutreach: normalizeAiBoolean(
+      behavior.proactiveOutreach ?? metadata.ai_proactive_outreach,
+      defaultAiBehaviorSettings.proactiveOutreach
+    ),
+    autoTagging: normalizeAiBoolean(
+      behavior.autoTagging ?? metadata.ai_auto_tagging,
+      defaultAiBehaviorSettings.autoTagging
+    ),
+  };
+}
+
+export function getAiBehaviorPrompt(behavior: AiBehaviorSettings) {
+  const knowledgeRule =
+    behavior.knowledgeUsage === "Always"
+      ? "Use saved business knowledge proactively when it helps the customer."
+      : behavior.knowledgeUsage === "Only when confident"
+        ? "Only use business knowledge when the answer is clearly supported; ask a follow-up when uncertain."
+        : "Ask a short clarifying question before giving detailed business-specific claims.";
+
+  return `AI assistant behavior:
+- Personality: ${behavior.personality}
+- Response style: ${behavior.responseStyle}
+- Knowledge usage: ${behavior.knowledgeUsage}. ${knowledgeRule}
+- Proactive outreach: ${behavior.proactiveOutreach ? "enabled" : "disabled"}
+- Auto tagging: ${behavior.autoTagging ? "enabled" : "disabled"}
+
+Follow the selected personality and response style in every Instagram DM.`;
+}
+
 export function normalizeAiIntegrationMetadata(metadata: Record<string, unknown>): AiIntegrationSettings {
   const apiKey = metadata.openai_api_key;
 
@@ -150,6 +232,7 @@ export function normalizeAiIntegrationMetadata(metadata: Record<string, unknown>
     apiKeyPreview: maskOpenAiKey(apiKey),
     model: normalizeOpenAiModel(metadata.openai_model),
     workflows: normalizeAiWorkflows(metadata.ai_integration_workflows),
+    behavior: normalizeAiBehaviorSettings(metadata.ai_behavior, metadata),
     systemPrompt: sanitizeAiText(
       metadata.ai_integration_system_prompt,
       defaultAiIntegrationSettings.systemPrompt,

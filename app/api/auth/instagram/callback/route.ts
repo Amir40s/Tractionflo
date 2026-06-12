@@ -1,4 +1,8 @@
 import { NextResponse } from 'next/server';
+import {
+  exchangeInstagramTokenForLongLivedToken,
+  saveInstagramAccountToken,
+} from '@/lib/instagram-token';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
 function getAppBaseUrl(request: Request) {
@@ -8,6 +12,15 @@ function getAppBaseUrl(request: Request) {
 type InstagramOAuthState = {
   next: string;
   returnTo?: string;
+};
+
+type InstagramCodeTokenResponse = {
+  access_token?: string;
+  user_id?: string | number;
+  error?: {
+    message?: string;
+  };
+  error_message?: string;
 };
 
 function isSafeNextPath(value: unknown): value is string {
@@ -125,24 +138,27 @@ export async function GET(request: Request) {
       }
     });
     
-    const tokenData = await tokenResponse.json();
+    const tokenData = (await tokenResponse.json()) as InstagramCodeTokenResponse;
 
-    if (tokenData.error) {
-      throw new Error(tokenData.error.message);
-    }
-
-    const accessToken = tokenData.access_token;
-    const userId = tokenData.user_id;
-
-    if (userId && accessToken) {
-      // Upsert into Supabase
-      const supabase = createSupabaseServiceClient();
-      const { error: dbError } = await supabase.from('instagram_accounts').upsert(
-        { ig_user_id: userId.toString(), access_token: accessToken },
-        { onConflict: 'ig_user_id' }
+    if (!tokenResponse.ok || tokenData.error || !tokenData.access_token || !tokenData.user_id) {
+      throw new Error(
+        tokenData.error?.message || tokenData.error_message || 'Instagram did not return an access token'
       );
-      if (dbError) console.error('Supabase Insert Error:', dbError);
     }
+
+    const longLivedToken = await exchangeInstagramTokenForLongLivedToken({
+      accessToken: tokenData.access_token,
+      appSecret,
+    });
+
+    const accessToken = longLivedToken.accessToken;
+    const userId = tokenData.user_id.toString();
+    const supabase = createSupabaseServiceClient();
+
+    await saveInstagramAccountToken(supabase, {
+      ig_user_id: userId,
+      access_token: accessToken,
+    });
 
     const response = NextResponse.redirect(
       getSoftwareRedirect(redirectBaseUrl, nextPath, {
@@ -156,7 +172,7 @@ export async function GET(request: Request) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: 60 * 60 * 24 * 7 // 1 week
+      maxAge: longLivedToken.expiresIn || 60 * 60 * 24 * 60
     });
 
     return response;

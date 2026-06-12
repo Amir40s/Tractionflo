@@ -10,6 +10,19 @@ function redirectToAuthConfigError(pathname: '/login' | '/signup', error: unknow
   redirect(`${pathname}?error=${encodeURIComponent(message)}`)
 }
 
+function shouldShowOnboarding(metadata: Record<string, unknown> = {}) {
+  const role = typeof metadata.role === 'string' ? metadata.role.toLowerCase() : ''
+  const accountRole = typeof metadata.account_role === 'string' ? metadata.account_role.toLowerCase() : ''
+  const isSuperAdmin =
+    metadata.is_superadmin === true ||
+    role === 'super admin' ||
+    role === 'superadmin' ||
+    accountRole === 'superadmin'
+  const isAgent = metadata.is_agent === true || role === 'agent' || accountRole === 'agent'
+
+  return !isSuperAdmin && !isAgent && metadata.onboarding_completed !== true
+}
+
 export async function login(formData: FormData) {
   const supabase = await createClient().catch((error) => redirectToAuthConfigError('/login', error))
 
@@ -20,7 +33,7 @@ export async function login(formData: FormData) {
     return redirect('/login?error=Email and password are required')
   }
 
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,
   })
@@ -30,6 +43,11 @@ export async function login(formData: FormData) {
   }
 
   revalidatePath('/dashboard', 'layout')
+
+  if (shouldShowOnboarding(data.user?.user_metadata)) {
+    redirect('/onboarding')
+  }
+
   redirect('/dashboard')
 }
 
@@ -45,13 +63,14 @@ export async function signup(formData: FormData) {
     return redirect('/signup?error=Name, Email, and Password are required')
   }
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: {
         full_name: name,
         phone: phone || '',
+        onboarding_completed: false,
       }
     }
   })
@@ -61,6 +80,11 @@ export async function signup(formData: FormData) {
   }
 
   revalidatePath('/', 'layout')
+
+  if (data.session) {
+    redirect('/onboarding')
+  }
+
   redirect('/login?message=Check your email to continue sign in process')
 }
 

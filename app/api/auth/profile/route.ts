@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getUserPermissionProfile } from '@/lib/agent-permissions';
 import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,13 @@ function getProfileFromUser(user: {
   user_metadata?: Record<string, unknown>;
 }) {
   const metadata = user.user_metadata || {};
+  const permissions = getUserPermissionProfile(metadata);
+  const role = typeof metadata.role === 'string' ? metadata.role : 'Creator';
+  const accountRole = typeof metadata.account_role === 'string' ? metadata.account_role : '';
+  const isSuperAdmin =
+    metadata.is_superadmin === true ||
+    role.toLowerCase() === 'super admin' ||
+    accountRole.toLowerCase() === 'superadmin';
   const name =
     typeof metadata.full_name === 'string'
       ? metadata.full_name
@@ -30,7 +38,8 @@ function getProfileFromUser(user: {
     id: user.id,
     name,
     email: user.email || '',
-    role: typeof metadata.role === 'string' ? metadata.role : 'Creator',
+    role,
+    isSuperAdmin,
     avatarUrl:
       typeof metadata.avatar_url === 'string'
         ? metadata.avatar_url
@@ -41,6 +50,10 @@ function getProfileFromUser(user: {
     language: typeof metadata.language === 'string' ? metadata.language : 'English',
     currency: typeof metadata.currency === 'string' ? metadata.currency : 'USD ($)',
     accountId: `acct_${user.id.replace(/-/g, '').slice(0, 10)}`,
+    isAgent: permissions.isAgent,
+    allowedPages: permissions.allowedPages,
+    assignedConversationIds: permissions.assignedConversationIds,
+    humanEscalation: permissions.humanEscalation,
   };
 }
 
@@ -92,17 +105,25 @@ export async function POST(request: Request) {
     const timeZone = payload.timeZone?.trim();
     const language = payload.language?.trim();
     const currency = payload.currency?.trim();
+    const currentPermissions = getUserPermissionProfile((user.user_metadata || {}) as Record<string, unknown>);
+    const nextRole = currentPermissions.isAgent ? 'Agent' : role || user.user_metadata?.role || 'Creator';
 
     const updatePayload: Parameters<typeof supabase.auth.updateUser>[0] = {
       data: {
         ...user.user_metadata,
         full_name: name || user.user_metadata?.full_name || user.user_metadata?.name || '',
         name: name || user.user_metadata?.name || user.user_metadata?.full_name || '',
-        role: role || user.user_metadata?.role || 'Creator',
+        role: nextRole,
         avatar_url: avatarUrl || '',
         time_zone: timeZone || user.user_metadata?.time_zone || '(GMT-5) Eastern Time',
         language: language || user.user_metadata?.language || 'English',
         currency: currency || user.user_metadata?.currency || 'USD ($)',
+        account_role: user.user_metadata?.account_role,
+        is_agent: user.user_metadata?.is_agent,
+        status: user.user_metadata?.status,
+        allowed_pages: user.user_metadata?.allowed_pages,
+        assigned_conversation_ids: user.user_metadata?.assigned_conversation_ids,
+        human_escalation: user.user_metadata?.human_escalation,
       },
     };
 

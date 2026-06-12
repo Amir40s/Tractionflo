@@ -1,22 +1,10 @@
 import { NextResponse } from 'next/server';
+import { getFreshInstagramAccount, type StoredInstagramAccount } from '@/lib/instagram-token';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-type InstagramAccountRow = {
-  ig_user_id: string;
-  access_token: string | null;
-  created_at: string;
-};
-
-async function getInstagramProfile(account: InstagramAccountRow) {
-  if (!account.access_token) {
-    return {
-      id: account.ig_user_id,
-      connectedAt: account.created_at,
-    };
-  }
-
+async function getInstagramProfile(account: StoredInstagramAccount) {
   try {
     const meUrl = new URL('https://graph.instagram.com/v21.0/me');
     meUrl.searchParams.set('fields', 'id,username,name');
@@ -33,14 +21,14 @@ async function getInstagramProfile(account: InstagramAccountRow) {
       id: data.id || account.ig_user_id,
       username: data.username,
       name: data.name,
-      connectedAt: account.created_at,
+      connectedAt: account.created_at || undefined,
     };
   } catch (err) {
     console.error('Instagram profile status error:', err);
 
     return {
       id: account.ig_user_id,
-      connectedAt: account.created_at,
+      connectedAt: account.created_at || undefined,
     };
   }
 }
@@ -48,18 +36,8 @@ async function getInstagramProfile(account: InstagramAccountRow) {
 export async function GET() {
   try {
     const supabase = createSupabaseServiceClient();
-    const { data, error } = await supabase
-      .from('instagram_accounts')
-      .select('ig_user_id, access_token, created_at')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle<InstagramAccountRow>();
-
-    if (error) {
-      throw error;
-    }
-
-    const account = data ? await getInstagramProfile(data) : null;
+    const storedAccount = await getFreshInstagramAccount(supabase);
+    const account = storedAccount ? await getInstagramProfile(storedAccount) : null;
 
     return NextResponse.json({
       connected: Boolean(account?.id),

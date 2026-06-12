@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   getStoredOpenAiKey,
   isOpenAiKeyLike,
+  normalizeAiBehaviorSettings,
   normalizeAiIntegrationMetadata,
   normalizeAiWorkflows,
   normalizeOpenAiModel,
@@ -16,6 +17,7 @@ type IntegrationPayload = {
   clearApiKey?: boolean;
   model?: string;
   workflows?: unknown;
+  behavior?: unknown;
   systemPrompt?: string;
   leadQualificationRules?: string;
   ctaMessage?: string;
@@ -83,6 +85,13 @@ export async function POST(request: Request) {
     nextMetadata.ai_integration_workflows = normalizeAiWorkflows(
       payload.workflows ?? metadata.ai_integration_workflows
     );
+    const nextBehavior = normalizeAiBehaviorSettings(payload.behavior ?? metadata.ai_behavior, metadata);
+    nextMetadata.ai_behavior = nextBehavior;
+    nextMetadata.ai_personality = nextBehavior.personality;
+    nextMetadata.ai_response_style = nextBehavior.responseStyle;
+    nextMetadata.ai_knowledge_usage = nextBehavior.knowledgeUsage;
+    nextMetadata.ai_proactive_outreach = nextBehavior.proactiveOutreach;
+    nextMetadata.ai_auto_tagging = nextBehavior.autoTagging;
     nextMetadata.ai_integration_system_prompt = sanitizeAiText(
       payload.systemPrompt,
       sanitizeAiText(metadata.ai_integration_system_prompt, '', 1800),

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
+import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
 import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
 import { createClient } from '@/utils/supabase/server';
 
@@ -36,7 +36,9 @@ export async function POST() {
       messages: [
         {
           role: 'system',
-          content: integration.systemPrompt,
+          content: `${integration.systemPrompt}
+
+${getAiBehaviorPrompt(integration.behavior)}`,
         },
         {
           role: 'user',

@@ -16,6 +16,7 @@ import {
   Clock,
   ChartPie,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   CircleHelp,
@@ -23,7 +24,11 @@ import {
   Copy,
   CreditCard,
   Crown,
+  Database,
   DollarSign,
+  Download,
+  Eye,
+  EyeOff,
   ExternalLink,
   Flame,
   FileText,
@@ -61,14 +66,40 @@ import type { LucideIcon } from "lucide-react";
 import Inbox from "../components/Inbox";
 import { signout } from "../login/actions";
 import {
+  defaultAiBehaviorSettings,
   defaultAiIntegrationSettings,
   openAiModelOptions,
+  type AiBehaviorSettings,
   type AiIntegrationSettings,
   type AiWorkflowRunResult,
   type AiWorkflowSetting,
 } from "@/lib/ai-integration";
+import {
+  allPagePermissionIds,
+  pagePermissionOptions,
+  type AgentStatus,
+  type PagePermissionId,
+} from "@/lib/agent-permissions";
 
-type DashboardTab = "dashboard" | "inbox" | "opportunities" | "audience" | "knowledge" | "escalations" | "settings";
+type DashboardTab = "dashboard" | "inbox" | "opportunities" | "audience" | "knowledge" | "escalations" | "analytics" | "settings";
+
+type SuperAdminPage =
+  | "overview"
+  | "creators-connected"
+  | "creators-trials"
+  | "creators-churn"
+  | "revenue-subscriptions"
+  | "revenue-payments"
+  | "revenue-refunds"
+  | "platform-instagram"
+  | "platform-api"
+  | "platform-queue"
+  | "ai-usage"
+  | "ai-costs"
+  | "ai-escalations"
+  | "support-tickets"
+  | "support-issues"
+  | "settings";
 
 type ConnectedInstagramAccount = {
   id: string;
@@ -86,6 +117,11 @@ type AccountProfile = {
   language: string;
   currency: string;
   accountId: string;
+  isSuperAdmin: boolean;
+  isAgent: boolean;
+  allowedPages: PagePermissionId[];
+  assignedConversationIds: string[];
+  humanEscalation: boolean;
 };
 
 type AccountProfileResponse = {
@@ -134,8 +170,9 @@ type NavigationCounts = Partial<Record<DashboardTab, number | null>>;
 type SettingsSection =
   | "account"
   | "instagram"
-  | "ai"
   | "ai-integration"
+  | "agents"
+  | "permissions"
   | "escalations"
   | "notifications"
   | "team"
@@ -155,6 +192,11 @@ const defaultAccountProfile: AccountProfile = {
   language: "English",
   currency: "USD ($)",
   accountId: "acct_pending",
+  isSuperAdmin: false,
+  isAgent: false,
+  allowedPages: allPagePermissionIds,
+  assignedConversationIds: [],
+  humanEscalation: true,
 };
 
 function readStoredAccountProfile() {
@@ -189,6 +231,10 @@ function mergeAccountProfile(authProfile: AccountProfile | null, storedProfile: 
     name: authProfile.name || storedProfile.name,
     email: authProfile.email || storedProfile.email,
     accountId: authProfile.accountId || storedProfile.accountId,
+    isAgent: authProfile.isAgent,
+    allowedPages: authProfile.allowedPages.length > 0 ? authProfile.allowedPages : storedProfile.allowedPages,
+    assignedConversationIds: authProfile.assignedConversationIds,
+    humanEscalation: authProfile.humanEscalation,
   };
 }
 
@@ -199,6 +245,7 @@ const dashboardTabUrlValues: Record<DashboardTab, string> = {
   audience: "/audience",
   knowledge: "/knowledge-base",
   escalations: "/escalations",
+  analytics: "/analytics",
   settings: "/settings",
 };
 
@@ -229,6 +276,10 @@ function getDashboardTabFromUrl(): DashboardTab {
     return "escalations";
   }
 
+  if (pathname === "/analytics" || pathname === "/analysis") {
+    return "analytics";
+  }
+
   if (pathname === "/settings" || pathname === "/setting") {
     return "settings";
   }
@@ -255,6 +306,10 @@ function getDashboardTabFromUrl(): DashboardTab {
     return "escalations";
   }
 
+  if (view === "analytics" || view === "analysis") {
+    return "analytics";
+  }
+
   if (view === "settings" || view === "setting") {
     return "settings";
   }
@@ -264,6 +319,63 @@ function getDashboardTabFromUrl(): DashboardTab {
 
 function getDashboardUrl(tab: DashboardTab) {
   return dashboardTabUrlValues[tab];
+}
+
+const superAdminPageIds: SuperAdminPage[] = [
+  "overview",
+  "creators-connected",
+  "creators-trials",
+  "creators-churn",
+  "revenue-subscriptions",
+  "revenue-payments",
+  "revenue-refunds",
+  "platform-instagram",
+  "platform-api",
+  "platform-queue",
+  "ai-usage",
+  "ai-costs",
+  "ai-escalations",
+  "support-tickets",
+  "support-issues",
+  "settings",
+];
+
+function isSuperAdminPage(value: string | null): value is SuperAdminPage {
+  return Boolean(value && superAdminPageIds.includes(value as SuperAdminPage));
+}
+
+function getSuperAdminPageFromUrl(): SuperAdminPage {
+  if (typeof window === "undefined") {
+    return "overview";
+  }
+
+  const pathname = window.location.pathname;
+  const page = new URLSearchParams(window.location.search).get("admin");
+
+  if (isSuperAdminPage(page)) {
+    return page;
+  }
+
+  if (pathname === "/settings") {
+    return "settings";
+  }
+
+  return "overview";
+}
+
+function getSuperAdminUrl(page: SuperAdminPage) {
+  return page === "overview" ? "/dashboard" : `/dashboard?admin=${page}`;
+}
+
+function isSuperAdminProfile(profile: AccountProfile) {
+  const normalizedRole = profile.role.toLowerCase();
+
+  return (
+    profile.isSuperAdmin ||
+    normalizedRole === "super admin" ||
+    normalizedRole === "superadmin" ||
+    profile.email.toLowerCase() === "tractionflo@gmail.com"
+  );
 }
 
 type NavItem = {
@@ -345,6 +457,58 @@ type AudienceSegment = {
   negative?: boolean;
 };
 
+type AnalyticsMetric = {
+  label: string;
+  value: string;
+  change: string;
+  detail: string;
+  tone: string;
+  icon: LucideIcon;
+};
+
+type AnalyticsChannel = {
+  label: string;
+  value: string;
+  count: string;
+  color: string;
+};
+
+type AnalyticsAutomationMetric = {
+  label: string;
+  value: string;
+  detail: string;
+  tone: string;
+  icon: LucideIcon;
+};
+
+type AnalyticsReportRow = {
+  label: string;
+  source: string;
+  conversations: string;
+  conversion: string;
+  lastActive: string;
+  status: string;
+  statusTone: string;
+};
+
+type AnalyticsPerformanceBucket = {
+  label: string;
+  conversations: number;
+  messages: number;
+};
+
+type AnalyticsSummary = {
+  metrics: AnalyticsMetric[];
+  channels: AnalyticsChannel[];
+  automationMetrics: AnalyticsAutomationMetric[];
+  reportRows: AnalyticsReportRow[];
+  performanceBuckets: AnalyticsPerformanceBucket[];
+  loadedConversationCount: number;
+  totalConversationCount: number;
+  totalMessageCount: number;
+  latestActivity: string;
+};
+
 type KnowledgeTab = {
   label: string;
   count: string;
@@ -417,13 +581,7 @@ type SettingsMenuItem = {
   icon: LucideIcon;
 };
 
-type AiSettings = {
-  personality: string;
-  responseStyle: string;
-  knowledgeUsage: string;
-  proactiveOutreach: boolean;
-  autoTagging: boolean;
-};
+type AiSettings = AiBehaviorSettings;
 
 type EscalationRuleSetting = {
   id: string;
@@ -446,6 +604,24 @@ type TeamMemberSetting = {
   email: string;
   role: string;
   status: "Active" | "Invited";
+};
+
+type AgentAccount = {
+  id: string;
+  name: string;
+  email: string;
+  status: AgentStatus;
+  allowedPages: PagePermissionId[];
+  assignedConversationIds: string[];
+  humanEscalation: boolean;
+  createdAt?: string;
+  lastSignInAt?: string;
+};
+
+type AgentsResponse = {
+  agents?: AgentAccount[];
+  agent?: AgentAccount;
+  error?: string;
 };
 
 type BillingSettings = {
@@ -503,9 +679,35 @@ const navItems: NavItem[] = [
   { label: "Audience", icon: Users, tab: "audience" },
   { label: "Knowledge Base", icon: BookOpen, tab: "knowledge" },
   { label: "Escalations", icon: TriangleAlert, tab: "escalations" },
-  { label: "Analytics", icon: BarChart3 },
+  { label: "Analytics", icon: BarChart3, tab: "analytics" },
   { label: "Settings", icon: Settings, tab: "settings" },
 ];
+
+function canOpenDashboardTab(profile: AccountProfile, tab: DashboardTab) {
+  return !profile.isAgent || profile.allowedPages.includes(tab as PagePermissionId);
+}
+
+function getFirstAllowedTab(profile: AccountProfile): DashboardTab {
+  const firstAllowed = allPagePermissionIds.find((pageId) => profile.allowedPages.includes(pageId)) || "dashboard";
+  return firstAllowed as DashboardTab;
+}
+
+function getVisibleNavItems(profile: AccountProfile) {
+  if (!profile.isAgent) {
+    return navItems;
+  }
+
+  return navItems.filter((item) => item.tab && profile.allowedPages.includes(item.tab as PagePermissionId));
+}
+
+function getVisibleSettingsMenuItems(profile: AccountProfile) {
+  if (!profile.isAgent) {
+    return settingsMenuItems;
+  }
+
+  const agentSections: SettingsSection[] = ["account", "notifications", "security", "brand"];
+  return settingsMenuItems.filter((item) => agentSections.includes(item.id));
+}
 
 const opportunities: Opportunity[] = [
   {
@@ -1115,8 +1317,9 @@ const escalationDetailRows: EscalationDetailRow[] = [
 const settingsMenuItems: SettingsMenuItem[] = [
   { id: "account", label: "Account", detail: "Profile, plan and billing", icon: User },
   { id: "instagram", label: "Instagram", detail: "Connect & manage", icon: MessageSquare },
-  { id: "ai", label: "AI Assistant", detail: "Behavior & permissions", icon: Sparkles },
   { id: "ai-integration", label: "AI Integration", detail: "OpenAI key & automations", icon: BrainCircuit },
+  { id: "agents", label: "Agents", detail: "Human escalation team", icon: Users },
+  { id: "permissions", label: "Permissions", detail: "Pages and assignments", icon: Shield },
   { id: "escalations", label: "Escalation Rules", detail: "When to escalate", icon: TriangleAlert },
   { id: "notifications", label: "Notifications", detail: "Alerts & preferences", icon: Bell },
   { id: "team", label: "Team", detail: "Manage collaborators", icon: Users },
@@ -1130,11 +1333,7 @@ const settingsStateStorageKey = "tractionflo_settings_state";
 
 const defaultSettingsState: AppSettingsState = {
   ai: {
-    personality: "Professional",
-    responseStyle: "Helpful & Friendly",
-    knowledgeUsage: "Always",
-    proactiveOutreach: true,
-    autoTagging: true,
+    ...defaultAiBehaviorSettings,
   },
   aiIntegration: defaultAiIntegrationSettings,
   rules: [
@@ -1216,14 +1415,18 @@ function mergeSettingsState(storedValue: Partial<AppSettingsState> | null): AppS
     return defaultSettingsState;
   }
 
+  const aiBehavior = {
+    ...defaultSettingsState.ai,
+    ...storedValue.ai,
+    ...storedValue.aiIntegration?.behavior,
+  };
+
   return {
-    ai: {
-      ...defaultSettingsState.ai,
-      ...storedValue.ai,
-    },
+    ai: aiBehavior,
     aiIntegration: {
       ...defaultSettingsState.aiIntegration,
       ...storedValue.aiIntegration,
+      behavior: aiBehavior,
       workflows: mergeArrayById(
         defaultSettingsState.aiIntegration.workflows,
         storedValue.aiIntegration?.workflows
@@ -1383,6 +1586,7 @@ function Sidebar({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+  const visibleItems = getVisibleNavItems(profile);
 
   return (
     <aside className="sticky top-0 hidden h-screen min-h-screen w-[228px] shrink-0 flex-col overflow-hidden border-r border-[#e7eaf2] bg-white px-[18px] py-6 lg:flex">
@@ -1391,10 +1595,10 @@ function Sidebar({
       </div>
 
       <nav className="mt-8 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-1">
-        {navItems.map((item, index) => {
+        {visibleItems.map((item) => {
           const Icon = item.icon;
           const isActive = item.tab === activeTab;
-          const isAfterDivider = index === 6;
+          const isAfterDivider = item.label === "Analytics" || item.label === "Settings";
           const count = item.tab ? navigationCounts[item.tab] : null;
 
           return (
@@ -1468,19 +1672,21 @@ function Sidebar({
   );
 }
 
-function MobileNavigation({ activeTab, onChangeTab }: { activeTab: DashboardTab; onChangeTab: (tab: DashboardTab) => void }) {
-  const mobileItems = navItems.filter((item): item is NavItem & { tab: DashboardTab } =>
-    item.tab === "dashboard" ||
-    item.tab === "inbox" ||
-    item.tab === "opportunities" ||
-    item.tab === "audience" ||
-    item.tab === "knowledge" ||
-    item.tab === "escalations" ||
-    item.tab === "settings"
+function MobileNavigation({
+  activeTab,
+  onChangeTab,
+  profile,
+}: {
+  activeTab: DashboardTab;
+  onChangeTab: (tab: DashboardTab) => void;
+  profile: AccountProfile;
+}) {
+  const mobileItems = getVisibleNavItems(profile).filter((item): item is NavItem & { tab: DashboardTab } =>
+    Boolean(item.tab)
   );
 
   return (
-    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-7 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur lg:hidden">
+    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-8 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur lg:hidden">
       {mobileItems.map((item) => {
         const Icon = item.icon;
         const isActive = item.tab === activeTab;
@@ -1495,6 +1701,8 @@ function MobileNavigation({ activeTab, onChangeTab }: { activeTab: DashboardTab;
                 ? "KB"
                 : item.label === "Escalations"
                   ? "Alerts"
+                  : item.label === "Analytics"
+                    ? "Stats"
                   : item.label === "Settings"
                     ? "Set"
                 : item.label;
@@ -1514,6 +1722,1145 @@ function MobileNavigation({ activeTab, onChangeTab }: { activeTab: DashboardTab;
         );
       })}
     </nav>
+  );
+}
+
+type SuperAdminMetric = {
+  label: string;
+  value: string;
+  detail: string;
+  change: string;
+  tone: string;
+  icon: LucideIcon;
+};
+
+type SuperAdminTableRow = {
+  name: string;
+  detail: string;
+  values: string[];
+  status: string;
+  statusTone: "green" | "amber" | "red" | "purple";
+};
+
+type SuperAdminDetailConfig = {
+  metrics: SuperAdminMetric[];
+  columns: string[];
+  rows: SuperAdminTableRow[];
+  insightTitle: string;
+  insightItems: { label: string; value: string; detail: string; tone: string; icon: LucideIcon }[];
+};
+
+const superAdminNavGroups: {
+  label: string;
+  icon: LucideIcon;
+  page?: SuperAdminPage;
+  children?: { label: string; page: SuperAdminPage }[];
+}[] = [
+  { label: "Overview", icon: Box, page: "overview" },
+  {
+    label: "Creators",
+    icon: Users,
+    children: [
+      { label: "Connected Accounts", page: "creators-connected" },
+      { label: "Trials", page: "creators-trials" },
+      { label: "Churn Risk", page: "creators-churn" },
+    ],
+  },
+  {
+    label: "Revenue",
+    icon: CreditCard,
+    children: [
+      { label: "Subscriptions", page: "revenue-subscriptions" },
+      { label: "Payments", page: "revenue-payments" },
+      { label: "Refunds", page: "revenue-refunds" },
+    ],
+  },
+  {
+    label: "Platform",
+    icon: Globe2,
+    children: [
+      { label: "Instagram Accounts", page: "platform-instagram" },
+      { label: "API Health", page: "platform-api" },
+      { label: "Queue Monitoring", page: "platform-queue" },
+    ],
+  },
+  {
+    label: "AI",
+    icon: Sparkles,
+    children: [
+      { label: "Usage", page: "ai-usage" },
+      { label: "Costs", page: "ai-costs" },
+      { label: "Escalations", page: "ai-escalations" },
+    ],
+  },
+  {
+    label: "Support",
+    icon: CircleHelp,
+    children: [
+      { label: "Tickets", page: "support-tickets" },
+      { label: "Creator Issues", page: "support-issues" },
+    ],
+  },
+  { label: "Settings", icon: Settings, page: "settings" },
+];
+
+const superAdminPageMeta: Record<SuperAdminPage, { title: string; subtitle: string }> = {
+  overview: {
+    title: "Overview",
+    subtitle: "Real-time overview of the TractionFlo platform",
+  },
+  "creators-connected": {
+    title: "Connected Accounts",
+    subtitle: "Instagram creator accounts, token status, and recent activity.",
+  },
+  "creators-trials": {
+    title: "Trials",
+    subtitle: "Trial creators, conversion windows, and upgrade readiness.",
+  },
+  "creators-churn": {
+    title: "Churn Risk",
+    subtitle: "Creators with billing, usage, or support signals that need attention.",
+  },
+  "revenue-subscriptions": {
+    title: "Subscriptions",
+    subtitle: "Plan mix, recurring revenue, and customer lifecycle metrics.",
+  },
+  "revenue-payments": {
+    title: "Payments",
+    subtitle: "Successful charges, failed payments, and settlement monitoring.",
+  },
+  "revenue-refunds": {
+    title: "Refunds",
+    subtitle: "Refund volume, reasons, and recovery impact.",
+  },
+  "platform-instagram": {
+    title: "Instagram Accounts",
+    subtitle: "Connected Instagram accounts and token health across creators.",
+  },
+  "platform-api": {
+    title: "API Health",
+    subtitle: "Core service status, response times, and integration health.",
+  },
+  "platform-queue": {
+    title: "Queue Monitoring",
+    subtitle: "Webhook queues, retries, stuck jobs, and processing latency.",
+  },
+  "ai-usage": {
+    title: "AI Usage",
+    subtitle: "Message processing, AI conversations, and automation coverage.",
+  },
+  "ai-costs": {
+    title: "AI Costs",
+    subtitle: "Model spend, token usage, and margin impact.",
+  },
+  "ai-escalations": {
+    title: "AI Escalations",
+    subtitle: "Human handoff triggers, urgent chats, and AI confidence signals.",
+  },
+  "support-tickets": {
+    title: "Tickets",
+    subtitle: "Open tickets, response times, and resolution workload.",
+  },
+  "support-issues": {
+    title: "Creator Issues",
+    subtitle: "Creator-reported blockers and operational follow-up.",
+  },
+  settings: {
+    title: "Settings",
+    subtitle: "Superadmin controls, workspace preferences, and platform defaults.",
+  },
+};
+
+const superAdminOverviewMetrics: SuperAdminMetric[] = [
+  {
+    label: "Connected Accounts",
+    value: "1,284",
+    detail: "Instagram accounts",
+    change: "18.6% vs last 30 days",
+    tone: "bg-[#f0edff] text-[#4b3cff]",
+    icon: Globe2,
+  },
+  {
+    label: "Active Creators",
+    value: "892",
+    detail: "Active this month",
+    change: "14.2% vs last 30 days",
+    tone: "bg-[#eaf4ff] text-[#246bff]",
+    icon: Users,
+  },
+  {
+    label: "Trial Accounts",
+    value: "412",
+    detail: "In trial",
+    change: "8.7% vs last 30 days",
+    tone: "bg-[#fff6e8] text-[#d98613]",
+    icon: User,
+  },
+  {
+    label: "Paid Accounts",
+    value: "872",
+    detail: "Paying customers",
+    change: "16.3% vs last 30 days",
+    tone: "bg-[#eafaf0] text-[#13a84f]",
+    icon: Handshake,
+  },
+  {
+    label: "MRR",
+    value: "$216,928",
+    detail: "Monthly recurring revenue",
+    change: "19.8% vs last 30 days",
+    tone: "bg-[#f0edff] text-[#4b3cff]",
+    icon: DollarSign,
+  },
+  {
+    label: "ARR",
+    value: "$2.6M",
+    detail: "Annual recurring revenue",
+    change: "19.8% vs last 30 days",
+    tone: "bg-[#f0edff] text-[#4b3cff]",
+    icon: CircleDollarSign,
+  },
+];
+
+const superAdminCreatorRows = [
+  ["Sarah Creates", "@sarah.creates", "Pro", "Connected", "2 min ago", "328", "12", "$18,400", "Active"],
+  ["Mike Coach", "@mike.coach", "Founder", "Connected", "1 hour ago", "243", "6", "$9,800", "Active"],
+  ["Emma Fitness", "@emma.fitness", "Pro", "Connected", "3 hours ago", "182", "5", "$7,200", "Active"],
+  ["James Wilson", "@james.wilson", "Trial", "Not connected", "1 day ago", "0", "0", "$0", "Trial"],
+  ["GlowSkin", "@glowskin.co", "Founder", "Connected", "1 hour ago", "412", "9", "$15,200", "Active"],
+];
+
+const statusToneClasses = {
+  green: "bg-[#e8f8ed] text-[#0a9b3f]",
+  amber: "bg-[#fff4df] text-[#c07800]",
+  red: "bg-[#fff0f3] text-[#df405b]",
+  purple: "bg-[#f0edff] text-[#4b3cff]",
+};
+
+const superAdminDetailConfigs: Record<Exclude<SuperAdminPage, "overview" | "settings">, SuperAdminDetailConfig> = {
+  "creators-connected": {
+    metrics: [
+      { label: "Total connected", value: "1,284", detail: "Instagram accounts", change: "+18.6%", tone: "bg-[#f0edff] text-[#4b3cff]", icon: Globe2 },
+      { label: "Healthy tokens", value: "1,242", detail: "Ready for automation", change: "96.7%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+      { label: "Expired tokens", value: "28", detail: "Need reconnect", change: "-2.2%", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+      { label: "Disconnected", value: "14", detail: "No active Instagram link", change: "1.1%", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+    ],
+    columns: ["Plan", "Instagram", "Last active", "Messages", "Revenue"],
+    rows: [
+      { name: "Sarah Creates", detail: "@sarah.creates", values: ["Pro", "Connected", "2 min ago", "328", "$18,400"], status: "Active", statusTone: "green" },
+      { name: "Mike Coach", detail: "@mike.coach", values: ["Founder", "Connected", "1 hour ago", "243", "$9,800"], status: "Active", statusTone: "green" },
+      { name: "James Wilson", detail: "@james.wilson", values: ["Trial", "Not connected", "1 day ago", "0", "$0"], status: "Trial", statusTone: "amber" },
+    ],
+    insightTitle: "Account health",
+    insightItems: [
+      { label: "Reconnect required", value: "42", detail: "Expired or disconnected Instagram tokens", tone: "bg-[#fff4df] text-[#c07800]", icon: RefreshCw },
+      { label: "Automation ready", value: "1,242", detail: "Accounts with healthy token state", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+    ],
+  },
+  "creators-trials": {
+    metrics: [
+      { label: "Trial accounts", value: "412", detail: "Currently evaluating", change: "+8.7%", tone: "bg-[#fff6e8] text-[#d98613]", icon: User },
+      { label: "Conversion ready", value: "86", detail: "High engagement trials", change: "+12.4%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Target },
+      { label: "Expiring this week", value: "51", detail: "Need outreach", change: "7 days", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+      { label: "Trial pipeline", value: "$64.2K", detail: "Potential MRR", change: "+10.8%", tone: "bg-[#f0edff] text-[#4b3cff]", icon: DollarSign },
+    ],
+    columns: ["Start", "Plan target", "Messages", "Signals", "Owner"],
+    rows: [
+      { name: "James Wilson", detail: "@james.wilson", values: ["May 14", "Pro", "0", "Setup pending", "Success"], status: "Trial", statusTone: "amber" },
+      { name: "Fit Launch", detail: "@fitlaunch", values: ["May 12", "Founder", "91", "Pricing viewed", "Sales"], status: "Ready", statusTone: "green" },
+      { name: "Studio North", detail: "@studionorth", values: ["May 10", "Pro", "43", "High reply rate", "Sales"], status: "Ready", statusTone: "green" },
+    ],
+    insightTitle: "Trial actions",
+    insightItems: [
+      { label: "Needs activation", value: "51", detail: "Trials with low first-week usage", tone: "bg-[#fff4df] text-[#c07800]", icon: Play },
+      { label: "Upgrade nudges", value: "86", detail: "Trials ready for payment follow-up", tone: "bg-[#eafaf0] text-[#13a84f]", icon: ArrowRight },
+    ],
+  },
+  "creators-churn": {
+    metrics: [
+      { label: "At-risk creators", value: "37", detail: "Usage or billing risk", change: "-4.6%", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+      { label: "Low usage", value: "21", detail: "No activity in 7 days", change: "Needs review", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+      { label: "Failed payment", value: "9", detail: "Card action needed", change: "$2.8K MRR", tone: "bg-[#fff0f3] text-[#df405b]", icon: CreditCard },
+      { label: "Recovered", value: "14", detail: "Saved this month", change: "+6.1%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Heart },
+    ],
+    columns: ["Risk", "Plan", "MRR", "Last signal", "Owner"],
+    rows: [
+      { name: "Creator Lab", detail: "@creatorlab", values: ["High", "Founder", "$499", "Failed payment", "Support"], status: "At risk", statusTone: "red" },
+      { name: "Wellness Hub", detail: "@wellhub", values: ["Medium", "Pro", "$249", "Low usage", "Success"], status: "Watch", statusTone: "amber" },
+      { name: "Nova Coach", detail: "@novacoach", values: ["Low", "Pro", "$249", "Ticket resolved", "Success"], status: "Recovered", statusTone: "green" },
+    ],
+    insightTitle: "Retention queue",
+    insightItems: [
+      { label: "Save playbooks", value: "18", detail: "Accounts queued for retention outreach", tone: "bg-[#f0edff] text-[#4b3cff]", icon: BriefcaseBusiness },
+      { label: "Revenue at risk", value: "$11.7K", detail: "MRR attached to current risk signals", tone: "bg-[#fff0f3] text-[#df405b]", icon: DollarSign },
+    ],
+  },
+  "revenue-subscriptions": {
+    metrics: [
+      { label: "MRR", value: "$216,928", detail: "Monthly recurring revenue", change: "+19.8%", tone: "bg-[#f0edff] text-[#4b3cff]", icon: DollarSign },
+      { label: "ARR", value: "$2.6M", detail: "Annual recurring revenue", change: "+19.8%", tone: "bg-[#f0edff] text-[#4b3cff]", icon: CircleDollarSign },
+      { label: "Paid accounts", value: "872", detail: "Active subscriptions", change: "+16.3%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Handshake },
+      { label: "Churn rate", value: "2.4%", detail: "Current month", change: "-0.6%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
+    ],
+    columns: ["Plan", "MRR", "Accounts", "Growth", "Retention"],
+    rows: [
+      { name: "Founder Plan", detail: "$499 monthly", values: ["Founder", "$170,159", "341", "+21.1%", "114%"], status: "Strong", statusTone: "green" },
+      { name: "Pro Plan", detail: "$249 monthly", values: ["Pro", "$132,219", "531", "+17.4%", "109%"], status: "Strong", statusTone: "green" },
+      { name: "Trial pool", detail: "Not billed yet", values: ["Trial", "$64,200", "412", "+8.7%", "Pending"], status: "Pipeline", statusTone: "purple" },
+    ],
+    insightTitle: "Revenue mix",
+    insightItems: [
+      { label: "Founder share", value: "39.1%", detail: "Of paid accounts", tone: "bg-[#f0edff] text-[#4b3cff]", icon: Crown },
+      { label: "Pro share", value: "60.9%", detail: "Of paid accounts", tone: "bg-[#eaf4ff] text-[#246bff]", icon: Sparkles },
+    ],
+  },
+  "revenue-payments": {
+    metrics: [
+      { label: "Successful charges", value: "1,039", detail: "This month", change: "+13.8%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+      { label: "Failed payments", value: "9", detail: "Needs retry", change: "$2.8K", tone: "bg-[#fff0f3] text-[#df405b]", icon: CreditCard },
+      { label: "Processing", value: "$41.6K", detail: "Pending settlement", change: "2 days", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+      { label: "Recovered revenue", value: "$8.9K", detail: "Dunning wins", change: "+6.1%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
+    ],
+    columns: ["Amount", "Method", "Date", "Retry", "Owner"],
+    rows: [
+      { name: "Sarah Creates", detail: "Invoice INV-2042", values: ["$499", "Visa", "Today", "None", "Billing"], status: "Paid", statusTone: "green" },
+      { name: "Creator Lab", detail: "Invoice INV-2039", values: ["$499", "Mastercard", "Today", "2nd retry", "Billing"], status: "Failed", statusTone: "red" },
+      { name: "Studio North", detail: "Invoice INV-2033", values: ["$249", "Visa", "Yesterday", "None", "Billing"], status: "Paid", statusTone: "green" },
+    ],
+    insightTitle: "Payment ops",
+    insightItems: [
+      { label: "Retry queue", value: "9", detail: "Failed invoices in retry workflow", tone: "bg-[#fff0f3] text-[#df405b]", icon: RefreshCw },
+      { label: "Settlement health", value: "99.1%", detail: "Charges settled successfully", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Shield },
+    ],
+  },
+  "revenue-refunds": {
+    metrics: [
+      { label: "Refunds", value: "$3,218", detail: "This month", change: "-4.2%", tone: "bg-[#fff0f3] text-[#df405b]", icon: CreditCard },
+      { label: "Refund rate", value: "1.5%", detail: "Of paid revenue", change: "-0.3%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
+      { label: "Open disputes", value: "3", detail: "Needs evidence", change: "24h SLA", tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+      { label: "Saved refunds", value: "$1,842", detail: "Resolved by support", change: "+9.2%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Heart },
+    ],
+    columns: ["Amount", "Reason", "Date", "Plan", "Owner"],
+    rows: [
+      { name: "Build Better", detail: "@buildbetter", values: ["$249", "Duplicate charge", "May 17", "Pro", "Billing"], status: "Resolved", statusTone: "green" },
+      { name: "Creator Lab", detail: "@creatorlab", values: ["$499", "Cancellation", "May 16", "Founder", "Success"], status: "Review", statusTone: "amber" },
+      { name: "Fit Launch", detail: "@fitlaunch", values: ["$249", "Product fit", "May 15", "Pro", "Support"], status: "Open", statusTone: "red" },
+    ],
+    insightTitle: "Refund reasons",
+    insightItems: [
+      { label: "Billing issues", value: "46%", detail: "Duplicate, failed, or unclear charges", tone: "bg-[#fff4df] text-[#c07800]", icon: CreditCard },
+      { label: "Product fit", value: "31%", detail: "Feature gap or onboarding mismatch", tone: "bg-[#f0edff] text-[#4b3cff]", icon: SlidersHorizontal },
+    ],
+  },
+  "platform-instagram": {
+    metrics: [
+      { label: "Instagram accounts", value: "1,284", detail: "Connected total", change: "96.7% healthy", tone: "bg-[#f0edff] text-[#4b3cff]", icon: Globe2 },
+      { label: "Webhook events", value: "184K", detail: "Today", change: "+22.4%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Code2 },
+      { label: "Expired tokens", value: "28", detail: "Reconnect required", change: "2.2%", tone: "bg-[#fff4df] text-[#c07800]", icon: RefreshCw },
+      { label: "Disconnected", value: "14", detail: "No active channel", change: "1.1%", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+    ],
+    columns: ["Token", "Messages", "Webhook", "Last sync", "Owner"],
+    rows: [
+      { name: "Sarah Creates", detail: "@sarah.creates", values: ["Healthy", "328", "Live", "2 min ago", "Platform"], status: "Healthy", statusTone: "green" },
+      { name: "James Wilson", detail: "@james.wilson", values: ["Expired", "0", "Paused", "1 day ago", "Success"], status: "Reconnect", statusTone: "amber" },
+      { name: "Creator Lab", detail: "@creatorlab", values: ["Disconnected", "0", "Failed", "3 days ago", "Support"], status: "Issue", statusTone: "red" },
+    ],
+    insightTitle: "Instagram status",
+    insightItems: [
+      { label: "Healthy", value: "1,242", detail: "Accounts ready for automation", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+      { label: "Needs action", value: "42", detail: "Expired or disconnected tokens", tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+    ],
+  },
+  "platform-api": {
+    metrics: [
+      { label: "Instagram API", value: "Healthy", detail: "99.98% uptime", change: "132ms avg", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Globe2 },
+      { label: "OpenAI API", value: "Healthy", detail: "99.95% uptime", change: "421ms avg", tone: "bg-[#eafaf0] text-[#13a84f]", icon: BrainCircuit },
+      { label: "Database", value: "Healthy", detail: "No incidents", change: "18ms avg", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Database },
+      { label: "Webhook queue", value: "Warning", detail: "Retry spike", change: "284 pending", tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+    ],
+    columns: ["Status", "Latency", "Uptime", "Incidents", "Owner"],
+    rows: [
+      { name: "Instagram API", detail: "Meta graph and messaging", values: ["Healthy", "132ms", "99.98%", "0", "Platform"], status: "Healthy", statusTone: "green" },
+      { name: "OpenAI API", detail: "Drafts and qualification", values: ["Healthy", "421ms", "99.95%", "0", "AI"], status: "Healthy", statusTone: "green" },
+      { name: "Webhook queue", detail: "Instagram webhook workers", values: ["Warning", "1.8s", "99.64%", "1", "Platform"], status: "Warning", statusTone: "amber" },
+    ],
+    insightTitle: "Service health",
+    insightItems: [
+      { label: "Healthy services", value: "5", detail: "No action required", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+      { label: "Warning", value: "1", detail: "Webhook queue needs monitoring", tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+    ],
+  },
+  "platform-queue": {
+    metrics: [
+      { label: "Pending jobs", value: "284", detail: "Webhook queue", change: "+6.3%", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+      { label: "Processed today", value: "184K", detail: "Events handled", change: "+22.4%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+      { label: "Retries", value: "41", detail: "Automatic retry", change: "15 min", tone: "bg-[#fff4df] text-[#c07800]", icon: RefreshCw },
+      { label: "Failed jobs", value: "3", detail: "Needs operator", change: "Open", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+    ],
+    columns: ["Queue", "Pending", "Oldest", "Retries", "Worker"],
+    rows: [
+      { name: "Webhook ingest", detail: "Instagram messages", values: ["High", "184", "8 min", "22", "Live"], status: "Warning", statusTone: "amber" },
+      { name: "AI drafts", detail: "OpenAI reply generation", values: ["Normal", "31", "1 min", "4", "Live"], status: "Healthy", statusTone: "green" },
+      { name: "Media sync", detail: "Attachment fetch jobs", values: ["Normal", "69", "4 min", "15", "Live"], status: "Healthy", statusTone: "green" },
+    ],
+    insightTitle: "Queue operations",
+    insightItems: [
+      { label: "Avg processing", value: "1.8s", detail: "Across active workers", tone: "bg-[#eaf4ff] text-[#246bff]", icon: Clock },
+      { label: "Manual review", value: "3", detail: "Jobs that need operator retry", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+    ],
+  },
+  "ai-usage": {
+    metrics: [
+      { label: "Messages processed", value: "124,580", detail: "Today", change: "+22.4%", tone: "bg-[#f0edff] text-[#4b3cff]", icon: Bot },
+      { label: "AI conversations", value: "18,420", detail: "Automated chats", change: "+18.7%", tone: "bg-[#f0edff] text-[#4b3cff]", icon: Sparkles },
+      { label: "Opportunities found", value: "3,281", detail: "Buying signals", change: "+27.1%", tone: "bg-[#fff6e8] text-[#d98613]", icon: Target },
+      { label: "Escalations", value: "284", detail: "Human handoffs", change: "-6.3%", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+    ],
+    columns: ["Messages", "AI replies", "Opportunities", "Escalations", "Health"],
+    rows: [
+      { name: "Lead qualification", detail: "Pricing and booking intent", values: ["58,420", "21,310", "1,284", "94", "Good"], status: "Healthy", statusTone: "green" },
+      { name: "CTA drafts", detail: "Suggested replies", values: ["42,118", "18,002", "1,031", "72", "Good"], status: "Healthy", statusTone: "green" },
+      { name: "Support intent", detail: "Refund or issue detection", values: ["24,042", "9,108", "966", "118", "Watch"], status: "Watch", statusTone: "amber" },
+    ],
+    insightTitle: "Automation coverage",
+    insightItems: [
+      { label: "AI-ready chats", value: "92%", detail: "Conversations handled without handoff", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+      { label: "Handoff load", value: "284", detail: "Escalations created today", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+    ],
+  },
+  "ai-costs": {
+    metrics: [
+      { label: "AI spend", value: "$1,842", detail: "Month to date", change: "+11.2%", tone: "bg-[#f0edff] text-[#4b3cff]", icon: DollarSign },
+      { label: "Cost per reply", value: "$0.018", detail: "Average", change: "-4.1%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
+      { label: "Token volume", value: "102M", detail: "Input and output", change: "+21.4%", tone: "bg-[#eaf4ff] text-[#246bff]", icon: BrainCircuit },
+      { label: "Gross margin", value: "91.4%", detail: "After AI costs", change: "+1.3%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: CircleDollarSign },
+    ],
+    columns: ["Spend", "Tokens", "Replies", "Cost/reply", "Trend"],
+    rows: [
+      { name: "GPT reply drafts", detail: "Suggested and sent replies", values: ["$912", "51M", "49,200", "$0.019", "Stable"], status: "Normal", statusTone: "green" },
+      { name: "Lead qualification", detail: "Opportunity scoring", values: ["$684", "38M", "31,004", "$0.022", "Up"], status: "Watch", statusTone: "amber" },
+      { name: "Workflow tests", detail: "Internal AI tests", values: ["$246", "13M", "8,210", "$0.030", "Review"], status: "Review", statusTone: "purple" },
+    ],
+    insightTitle: "Cost controls",
+    insightItems: [
+      { label: "Projected spend", value: "$3.2K", detail: "Expected month-end AI usage", tone: "bg-[#f0edff] text-[#4b3cff]", icon: CalendarDays },
+      { label: "Savings target", value: "$420", detail: "Available through prompt compression", tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
+    ],
+  },
+  "ai-escalations": {
+    metrics: [
+      { label: "Escalations", value: "284", detail: "Today", change: "-6.3%", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+      { label: "Urgent", value: "18", detail: "High-priority handoffs", change: "Open", tone: "bg-[#fff0f3] text-[#df405b]", icon: Flame },
+      { label: "Avg handoff time", value: "2m 14s", detail: "AI to human", change: "-18s", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Clock },
+      { label: "Resolved", value: "241", detail: "Handled today", change: "+9.8%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+    ],
+    columns: ["Reason", "Count", "Avg time", "Owner", "Trend"],
+    rows: [
+      { name: "Refund request", detail: "Billing or cancellation language", values: ["Refund", "74", "1m 58s", "Support", "Down"], status: "Handled", statusTone: "green" },
+      { name: "Angry sentiment", detail: "Urgent support tone", values: ["Sentiment", "58", "2m 41s", "Support", "Up"], status: "Watch", statusTone: "amber" },
+      { name: "Human requested", detail: "Creator wants manual takeover", values: ["Human", "152", "2m 10s", "Agents", "Stable"], status: "Handled", statusTone: "green" },
+    ],
+    insightTitle: "Handoff signals",
+    insightItems: [
+      { label: "Needs tuning", value: "31", detail: "Escalations caused by low AI confidence", tone: "bg-[#fff4df] text-[#c07800]", icon: SlidersHorizontal },
+      { label: "Human load", value: "18", detail: "Urgent active conversations", tone: "bg-[#fff0f3] text-[#df405b]", icon: Flame },
+    ],
+  },
+  "support-tickets": {
+    metrics: [
+      { label: "Open tickets", value: "18", detail: "Current queue", change: "-3", tone: "bg-[#fff0f3] text-[#df405b]", icon: Mail },
+      { label: "In progress", value: "7", detail: "Assigned now", change: "2h SLA", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+      { label: "Resolved today", value: "24", detail: "Closed issues", change: "+12%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+      { label: "Satisfaction", value: "4.8/5", detail: "Latest support score", change: "+0.2", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Star },
+    ],
+    columns: ["Priority", "Topic", "Age", "Assignee", "SLA"],
+    rows: [
+      { name: "Webhook not receiving", detail: "Sarah Creates", values: ["High", "Instagram", "18 min", "Platform", "On track"], status: "Open", statusTone: "red" },
+      { name: "Billing question", detail: "GlowSkin", values: ["Medium", "Billing", "1h 04m", "Support", "On track"], status: "In progress", statusTone: "amber" },
+      { name: "AI reply tone", detail: "Mike Coach", values: ["Low", "AI", "2h 10m", "AI", "On track"], status: "Open", statusTone: "purple" },
+    ],
+    insightTitle: "Support summary",
+    insightItems: [
+      { label: "Avg response", value: "2h 14m", detail: "Across open tickets", tone: "bg-[#eaf4ff] text-[#246bff]", icon: Clock },
+      { label: "First response", value: "1h 06m", detail: "Median first support reply", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Send },
+    ],
+  },
+  "support-issues": {
+    metrics: [
+      { label: "Creator issues", value: "31", detail: "Open creator blockers", change: "-8%", tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+      { label: "Product issues", value: "11", detail: "Need engineering triage", change: "4 high", tone: "bg-[#fff0f3] text-[#df405b]", icon: Code2 },
+      { label: "Onboarding issues", value: "13", detail: "Setup help needed", change: "-3", tone: "bg-[#fff4df] text-[#c07800]", icon: GraduationCap },
+      { label: "Resolved today", value: "19", detail: "Creator blockers closed", change: "+14%", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+    ],
+    columns: ["Category", "Impact", "Age", "Owner", "Next step"],
+    rows: [
+      { name: "Instagram reconnect loop", detail: "6 creators affected", values: ["Platform", "High", "42 min", "Platform", "Patch"], status: "Open", statusTone: "red" },
+      { name: "AI draft too long", detail: "3 creators affected", values: ["AI", "Medium", "2h", "AI", "Tune"], status: "Review", statusTone: "amber" },
+      { name: "Plan upgrade blocked", detail: "2 creators affected", values: ["Billing", "Medium", "4h", "Billing", "Retry"], status: "Open", statusTone: "purple" },
+    ],
+    insightTitle: "Issue themes",
+    insightItems: [
+      { label: "Platform blockers", value: "11", detail: "Need engineering or API follow-up", tone: "bg-[#fff0f3] text-[#df405b]", icon: Code2 },
+      { label: "Success follow-up", value: "20", detail: "Can be handled by support team", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Handshake },
+    ],
+  },
+};
+
+function SuperAdminBrandMark() {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="relative h-8 w-8">
+        <div className="absolute left-0 top-0 h-2 w-7 rounded-full bg-gradient-to-r from-[#8156ff] to-[#3529ff]" />
+        <div className="absolute left-[9px] top-[2px] h-6 w-2 rounded-full bg-gradient-to-b from-[#5d43ff] to-[#8b6dff]" />
+        <div className="absolute right-0.5 top-[6px] h-2.5 w-2.5 rounded-full bg-[#8a70ff]" />
+      </div>
+      <span className="text-[18px] font-extrabold leading-none text-white">TractionFlo</span>
+      <span className="rounded-[5px] bg-[#5b38ff] px-2 py-1 text-[10px] font-extrabold text-white">Admin</span>
+    </div>
+  );
+}
+
+function SuperAdminSidebar({
+  activePage,
+  onChangePage,
+  profile,
+}: {
+  activePage: SuperAdminPage;
+  onChangePage: (page: SuperAdminPage) => void;
+  profile: AccountProfile;
+}) {
+  const initials = profile.name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <aside className="sticky top-0 hidden h-screen min-h-screen w-[238px] shrink-0 flex-col overflow-hidden bg-[#071022] px-3.5 py-5 text-white lg:flex">
+      <SuperAdminBrandMark />
+
+      <nav className="mt-7 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
+        {superAdminNavGroups.map((group) => {
+          const Icon = group.icon;
+          const isGroupActive =
+            group.page === activePage || Boolean(group.children?.some((child) => child.page === activePage));
+
+          if (group.page) {
+            return (
+              <button
+                key={group.label}
+                type="button"
+                onClick={() => onChangePage(group.page!)}
+                className={`flex h-11 items-center gap-3 rounded-[8px] px-3 text-left text-[13px] font-extrabold transition ${
+                  isGroupActive ? "bg-[#5b38ff] text-white shadow-[0_16px_35px_rgba(91,56,255,0.28)]" : "text-[#cbd3e2] hover:bg-white/8"
+                }`}
+              >
+                <Icon size={18} strokeWidth={2.35} />
+                <span className="flex-1">{group.label}</span>
+              </button>
+            );
+          }
+
+          return (
+            <div key={group.label} className="py-1">
+              <div className={`flex h-9 items-center gap-3 px-3 text-[13px] font-extrabold ${isGroupActive ? "text-white" : "text-[#cbd3e2]"}`}>
+                <Icon size={17} strokeWidth={2.25} />
+                <span className="flex-1">{group.label}</span>
+                <ChevronDown size={14} strokeWidth={2.4} />
+              </div>
+              <div className="ml-[21px] mt-1 border-l border-white/15 pl-4">
+                {group.children?.map((child) => {
+                  const isActive = child.page === activePage;
+
+                  return (
+                    <button
+                      key={child.page}
+                      type="button"
+                      onClick={() => onChangePage(child.page)}
+                      className={`block h-8 w-full rounded-[7px] px-2 text-left text-[12px] font-semibold transition ${
+                        isActive ? "bg-white/12 text-white" : "text-[#9faac0] hover:bg-white/8 hover:text-white"
+                      }`}
+                    >
+                      {child.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </nav>
+
+      <div className="shrink-0 space-y-3 pt-4">
+        <div className="flex h-[58px] items-center gap-3 rounded-[10px] bg-white/6 px-3">
+          {profile.avatarUrl ? (
+            <span
+              aria-label={profile.name}
+              role="img"
+              className="h-10 w-10 rounded-full bg-cover bg-center"
+              style={{ backgroundImage: `url(${profile.avatarUrl})` }}
+            />
+          ) : (
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-[11px] font-extrabold text-white">
+              {initials || "SA"}
+            </span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12px] font-extrabold text-white">{profile.name || "Super Admin"}</span>
+            <span className="block truncate text-[11px] font-semibold text-[#9faac0]">Super Admin</span>
+          </span>
+          <ChevronRight size={15} className="text-[#9faac0]" strokeWidth={2.4} />
+        </div>
+
+        <form action={signout}>
+          <button
+            type="submit"
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-[10px] border border-white/10 bg-white/5 px-3 text-[12px] font-extrabold text-[#ffd1dc] transition hover:bg-white/10"
+          >
+            <LogOut size={15} strokeWidth={2.35} />
+            Logout
+          </button>
+        </form>
+      </div>
+    </aside>
+  );
+}
+
+function SuperAdminHeader({ page }: { page: SuperAdminPage }) {
+  const meta = superAdminPageMeta[page];
+
+  return (
+    <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div>
+        <div className="mb-4 lg:hidden">
+          <BrandMark />
+        </div>
+        <h1 className="text-[32px] font-extrabold leading-none tracking-[-0.02em] text-black md:text-[38px]">
+          {meta.title}
+        </h1>
+        <p className="mt-3 text-[13px] font-semibold text-[#596175]">{meta.subtitle}</p>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="button"
+          className="flex h-11 items-center gap-3 rounded-[8px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.035)]"
+        >
+          May 12 - May 18, 2025
+          <CalendarDays size={16} strokeWidth={2.3} />
+        </button>
+        <button
+          type="button"
+          className="flex h-11 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.035)]"
+        >
+          <span className="h-2.5 w-2.5 rounded-full bg-[#13a84f]" />
+          Auto refresh: On
+          <ChevronDown size={14} strokeWidth={2.4} />
+        </button>
+        <button
+          type="button"
+          className="flex h-11 items-center gap-2 rounded-[8px] bg-[#5b38ff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_35px_rgba(91,56,255,0.22)]"
+        >
+          <Download size={15} strokeWidth={2.4} />
+          Export
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function SuperAdminMetricCard({ metric }: { metric: SuperAdminMetric }) {
+  const Icon = metric.icon;
+
+  return (
+    <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+      <div className="flex items-start gap-3">
+        <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-[12px] ${metric.tone}`}>
+          <Icon size={22} strokeWidth={2.35} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold text-[#687089]">{metric.label}</p>
+          <p className="mt-1 text-[24px] font-extrabold leading-none text-black">{metric.value}</p>
+          <p className="mt-2 text-[11px] font-semibold text-[#687089]">{metric.detail}</p>
+        </div>
+      </div>
+      <p className="mt-4 flex items-center gap-1.5 text-[11px] font-extrabold text-[#13a84f]">
+        <TrendingUp size={13} strokeWidth={2.4} />
+        {metric.change}
+      </p>
+    </article>
+  );
+}
+
+function AdminLineChart({ bars = false }: { bars?: boolean }) {
+  if (bars) {
+    const values = [14, 34, 11, 28, 16, 38, 19, 26, 51, 18, 13, 45, 24, 31, 55, 20, 36, 27, 48, 62];
+
+    return (
+      <div className="flex h-[190px] items-end gap-2 rounded-[8px] bg-[#fbfbff] px-4 pb-5 pt-3">
+        {values.map((value, index) => (
+          <span
+            key={`${value}-${index}`}
+            className="flex-1 rounded-t-[5px] bg-gradient-to-t from-[#5b38ff] to-[#9a89ff]"
+            style={{ height: `${Math.max(18, value * 2.1)}px` }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-[230px] rounded-[8px] bg-[#fbfbff]">
+      <svg viewBox="0 0 640 230" className="h-full w-full overflow-visible">
+        <defs>
+          <linearGradient id="adminMrrFill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#5b38ff" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="#5b38ff" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path
+          d="M24 180 C88 156 132 160 185 142 C230 126 271 114 318 92 C366 70 412 82 462 55 C520 25 562 45 616 22 L616 220 L24 220 Z"
+          fill="url(#adminMrrFill)"
+        />
+        <path
+          d="M24 180 C88 156 132 160 185 142 C230 126 271 114 318 92 C366 70 412 82 462 55 C520 25 562 45 616 22"
+          fill="none"
+          stroke="#5b38ff"
+          strokeLinecap="round"
+          strokeWidth="3"
+        />
+        {[24, 185, 318, 462, 616].map((x, index) => (
+          <circle key={x} cx={x} cy={[180, 142, 92, 55, 22][index]} r="4" fill="#5b38ff" />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function AdminDonut({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-center py-4">
+      <div
+        className="relative flex h-[154px] w-[154px] items-center justify-center rounded-full"
+        style={{ background: "conic-gradient(#16b364 0 69.5%, #3154ff 69.5% 89.5%, #ff850d 89.5% 95.8%, #98a2b3 95.8% 100%)" }}
+      >
+        <div className="flex h-[92px] w-[92px] flex-col items-center justify-center rounded-full bg-white">
+          <span className="text-[24px] font-extrabold text-black">{value}</span>
+          <span className="text-[11px] font-semibold text-[#687089]">{label}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SuperAdminOverviewPage() {
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        {superAdminOverviewMetrics.map((metric) => (
+          <SuperAdminMetricCard key={metric.label} metric={metric} />
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.45fr_1.15fr_0.9fr_0.95fr]">
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)] xl:col-span-1">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-[14px] font-extrabold text-black">MRR Growth</h2>
+              <p className="mt-2 text-[26px] font-extrabold leading-none text-black">$216,928</p>
+            </div>
+            <button type="button" className="flex h-8 items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold">
+              Last 30 days
+              <ChevronDown size={13} />
+            </button>
+          </div>
+          <AdminLineChart />
+        </article>
+
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-[14px] font-extrabold text-black">New Signups</h2>
+              <p className="mt-2 text-[22px] font-extrabold leading-none text-black">341</p>
+            </div>
+            <button type="button" className="flex h-8 items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold">
+              Last 30 days
+              <ChevronDown size={13} />
+            </button>
+          </div>
+          <AdminLineChart bars />
+        </article>
+
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <h2 className="text-[14px] font-extrabold text-black">Account Status</h2>
+          <AdminDonut label="Total" value="1,284" />
+          <div className="space-y-2 text-[11px] font-bold">
+            {[
+              ["Active", "892 (69.5%)", "#16b364"],
+              ["Trial", "412 (32.1%)", "#3154ff"],
+              ["Inactive", "72 (6.6%)", "#ff850d"],
+              ["Cancelled", "54 (4.2%)", "#98a2b3"],
+            ].map(([label, value, color]) => (
+              <div key={label} className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
+                <span className="flex-1 text-[#30384d]">{label}</span>
+                <span className="text-[#596175]">{value}</span>
+              </div>
+            ))}
+          </div>
+        </article>
+
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[14px] font-extrabold text-black">Platform Health</h2>
+            <button type="button" className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
+          </div>
+          <div className="space-y-3">
+            {[
+              ["Instagram API", "Healthy", Globe2, "green"],
+              ["OpenAI API", "Healthy", BrainCircuit, "green"],
+              ["Database", "Healthy", Database, "green"],
+              ["Webhook Queue", "Warning", TriangleAlert, "amber"],
+              ["Email Service", "Healthy", Mail, "green"],
+              ["Payment Service", "Healthy", CreditCard, "green"],
+            ].map(([label, status, IconValue, tone]) => {
+              const Icon = IconValue as LucideIcon;
+              return (
+                <div key={label as string} className="flex items-center gap-3 text-[12px] font-bold">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-[#f6f7fb] text-[#4b3cff]">
+                    <Icon size={15} strokeWidth={2.35} />
+                  </span>
+                  <span className="flex-1 text-[#30384d]">{label as string}</span>
+                  <span className={tone === "green" ? "text-[#13a84f]" : "text-[#c07800]"}>{status as string}</span>
+                </div>
+              );
+            })}
+          </div>
+        </article>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.55fr_0.75fr]">
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[14px] font-extrabold text-black">Recently Active Creators</h2>
+            <button type="button" className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-[12px]">
+              <thead className="border-b border-[#edf0f6] text-[10px] uppercase text-[#687089]">
+                <tr>
+                  {["Creator", "Plan", "Instagram", "Last active", "Conversations", "Opportunities", "Revenue found", "Status"].map((header) => (
+                    <th key={header} className="py-3 font-extrabold">{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {superAdminCreatorRows.map((row) => (
+                  <tr key={row[0]} className="border-b border-[#edf0f6] last:border-b-0">
+                    <td className="py-3">
+                      <p className="font-extrabold text-black">{row[0]}</p>
+                      <p className="text-[11px] font-semibold text-[#687089]">{row[1]}</p>
+                    </td>
+                    <td className="py-3 font-bold text-[#4b3cff]">{row[2]}</td>
+                    <td className={`py-3 font-bold ${row[3] === "Connected" ? "text-[#13a84f]" : "text-[#df405b]"}`}>{row[3]}</td>
+                    <td className="py-3 font-semibold text-[#30384d]">{row[4]}</td>
+                    <td className="py-3 font-extrabold text-black">{row[5]}</td>
+                    <td className="py-3 font-extrabold text-black">{row[6]}</td>
+                    <td className="py-3 font-extrabold text-black">{row[7]}</td>
+                    <td className="py-3">
+                      <span className={`rounded-full px-2 py-1 text-[10px] font-extrabold ${row[8] === "Active" ? statusToneClasses.green : statusToneClasses.amber}`}>
+                        {row[8]}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <div className="grid gap-4">
+          <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-extrabold text-black">Instagram Accounts</h2>
+              <button type="button" className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
+            </div>
+            <AdminDonut label="Connected" value="1,284" />
+            <div className="space-y-2 text-[12px] font-bold">
+              {[
+                ["Healthy", "1,242 (96.7%)", "text-[#13a84f]"],
+                ["Expired Token", "28 (2.2%)", "text-[#c07800]"],
+                ["Disconnected", "14 (1.1%)", "text-[#df405b]"],
+              ].map(([label, value, tone]) => (
+                <div key={label} className="flex justify-between">
+                  <span className={tone}>{label}</span>
+                  <span className="text-[#30384d]">{value}</span>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+            <h2 className="text-[14px] font-extrabold text-black">AI Usage Today</h2>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {[
+                ["Messages Processed", "124,580", Bot, "bg-[#f0edff] text-[#4b3cff]"],
+                ["AI Conversations", "18,420", Sparkles, "bg-[#f0edff] text-[#4b3cff]"],
+                ["Opportunities Found", "3,281", Target, "bg-[#fff6e8] text-[#d98613]"],
+                ["Escalations", "284", TriangleAlert, "bg-[#fff0f3] text-[#df405b]"],
+              ].map(([label, value, IconValue, tone]) => {
+                const Icon = IconValue as LucideIcon;
+                return (
+                  <div key={label as string} className="rounded-[8px] border border-[#edf0f6] p-3">
+                    <span className={`mb-3 flex h-8 w-8 items-center justify-center rounded-[8px] ${tone as string}`}>
+                      <Icon size={16} strokeWidth={2.35} />
+                    </span>
+                    <p className="text-[11px] font-bold text-[#687089]">{label as string}</p>
+                    <p className="mt-1 text-[18px] font-extrabold text-black">{value as string}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </article>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminTable({ config }: { config: SuperAdminDetailConfig }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] text-left text-[12px]">
+        <thead className="border-b border-[#edf0f6] text-[10px] uppercase text-[#687089]">
+          <tr>
+            <th className="py-3 font-extrabold">Name</th>
+            {config.columns.map((column) => (
+              <th key={column} className="py-3 font-extrabold">{column}</th>
+            ))}
+            <th className="py-3 font-extrabold">Status</th>
+            <th className="py-3 text-right font-extrabold">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {config.rows.map((row) => (
+            <tr key={row.name} className="border-b border-[#edf0f6] last:border-b-0">
+              <td className="py-4">
+                <p className="font-extrabold text-black">{row.name}</p>
+                <p className="mt-1 text-[11px] font-semibold text-[#687089]">{row.detail}</p>
+              </td>
+              {row.values.map((value, index) => (
+                <td key={`${row.name}-${index}`} className="py-4 font-bold text-[#30384d]">{value}</td>
+              ))}
+              <td className="py-4">
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${statusToneClasses[row.statusTone]}`}>
+                  {row.status}
+                </span>
+              </td>
+              <td className="py-4 text-right">
+                <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#e0e4ef] text-black">
+                  <MoreHorizontal size={16} strokeWidth={2.4} />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SuperAdminDetailPage({ page }: { page: Exclude<SuperAdminPage, "overview" | "settings"> }) {
+  const config = superAdminDetailConfigs[page];
+
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {config.metrics.map((metric) => (
+          <SuperAdminMetricCard key={metric.label} metric={metric} />
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-[15px] font-extrabold text-black">{superAdminPageMeta[page].title} activity</h2>
+            <div className="flex gap-2">
+              <button type="button" className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold">
+                <Search size={14} strokeWidth={2.4} />
+                Search
+              </button>
+              <button type="button" className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold">
+                <RefreshCw size={14} strokeWidth={2.4} />
+                Refresh
+              </button>
+            </div>
+          </div>
+          <SuperAdminTable config={config} />
+        </article>
+
+        <aside className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <h2 className="text-[15px] font-extrabold text-black">{config.insightTitle}</h2>
+          <div className="mt-4 space-y-3">
+            {config.insightItems.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <div key={item.label} className="rounded-[8px] border border-[#edf0f6] p-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${item.tone}`}>
+                      <Icon size={18} strokeWidth={2.35} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-extrabold text-black">{item.label}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-[#687089]">{item.detail}</p>
+                    </div>
+                    <span className="text-[20px] font-extrabold text-black">{item.value}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminSettingsPage({ profile }: { profile: AccountProfile }) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+      <section className="rounded-[9px] border border-[#e7eaf2] bg-white p-5 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+        <h2 className="text-[17px] font-extrabold text-black">Workspace settings</h2>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          {[
+            ["Workspace name", "TractionFlo"],
+            ["Admin email", profile.email],
+            ["Default timezone", "(GMT-5) Eastern Time"],
+            ["Billing currency", "USD ($)"],
+          ].map(([label, value]) => (
+            <label key={label} className="block">
+              <span className="text-[12px] font-extrabold text-[#46506a]">{label}</span>
+              <input
+                readOnly
+                value={value}
+                className="mt-2 h-12 w-full rounded-[8px] border border-[#dfe4ee] bg-[#f9faff] px-3 text-[13px] font-bold text-black outline-none"
+              />
+            </label>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-[8px] bg-[#5b38ff] px-4 text-[13px] font-extrabold text-white shadow-[0_16px_35px_rgba(91,56,255,0.22)]"
+        >
+          <Shield size={16} strokeWidth={2.4} />
+          Save admin settings
+        </button>
+      </section>
+
+      <aside className="space-y-4">
+        {[
+          ["Admin access", "Superadmin can open every platform page.", Shield, "bg-[#f0edff] text-[#4b3cff]"],
+          ["Audit exports", "Reports export with platform-wide data.", Download, "bg-[#eaf4ff] text-[#246bff]"],
+          ["System alerts", "Warnings appear for queues and API health.", Bell, "bg-[#fff4df] text-[#c07800]"],
+        ].map(([title, detail, IconValue, tone]) => {
+          const Icon = IconValue as LucideIcon;
+
+          return (
+            <article key={title as string} className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+              <span className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${tone as string}`}>
+                <Icon size={18} strokeWidth={2.35} />
+              </span>
+              <h3 className="mt-3 text-[14px] font-extrabold text-black">{title as string}</h3>
+              <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#596175]">{detail as string}</p>
+            </article>
+          );
+        })}
+      </aside>
+    </div>
+  );
+}
+
+function SuperAdminMobileNavigation({
+  activePage,
+  onChangePage,
+}: {
+  activePage: SuperAdminPage;
+  onChangePage: (page: SuperAdminPage) => void;
+}) {
+  const mobileItems = superAdminNavGroups.filter((group): group is { label: string; icon: LucideIcon; page: SuperAdminPage } =>
+    Boolean(group.page)
+  );
+
+  return (
+    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-2 rounded-[14px] border border-[#17213a] bg-[#071022]/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.28)] backdrop-blur lg:hidden">
+      {mobileItems.map((item) => {
+        const Icon = item.icon;
+        const isActive = item.page === activePage;
+
+        return (
+          <button
+            key={item.page}
+            type="button"
+            onClick={() => onChangePage(item.page)}
+            className={`flex h-12 items-center justify-center gap-2 rounded-[10px] text-[11px] font-extrabold transition ${
+              isActive ? "bg-[#5b38ff] text-white" : "text-[#cbd3e2]"
+            }`}
+          >
+            <Icon size={16} strokeWidth={2.4} />
+            {item.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function SuperAdminDashboard({ profile }: { profile: AccountProfile }) {
+  const [activePage, setActivePage] = useState<SuperAdminPage>("overview");
+
+  useEffect(() => {
+    const syncFromUrl = () => {
+      setActivePage(getSuperAdminPageFromUrl());
+    };
+
+    syncFromUrl();
+    window.addEventListener("popstate", syncFromUrl);
+
+    return () => window.removeEventListener("popstate", syncFromUrl);
+  }, []);
+
+  function handlePageChange(page: SuperAdminPage) {
+    setActivePage(page);
+
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", getSuperAdminUrl(page));
+    }
+  }
+
+  return (
+    <div className="flex h-dvh w-full overflow-hidden bg-[#f8f9fd] font-sans text-black">
+      <SuperAdminSidebar activePage={activePage} onChangePage={handlePageChange} profile={profile} />
+
+      <main className="h-dvh flex-1 overflow-y-auto px-4 pb-24 pt-5 sm:px-6 lg:px-7 lg:pb-8 xl:px-9">
+        <div className="mx-auto max-w-[1440px]">
+          <SuperAdminHeader page={activePage} />
+
+          <div className="mt-6">
+            {activePage === "overview" ? (
+              <SuperAdminOverviewPage />
+            ) : activePage === "settings" ? (
+              <SuperAdminSettingsPage profile={profile} />
+            ) : (
+              <SuperAdminDetailPage page={activePage} />
+            )}
+          </div>
+        </div>
+      </main>
+
+      <SuperAdminMobileNavigation activePage={activePage} onChangePage={handlePageChange} />
+    </div>
   );
 }
 
@@ -2132,14 +3479,18 @@ function SettingsToggle({
 function SettingsMenuCard({
   activeSection,
   onSectionChange,
+  profile,
 }: {
   activeSection: SettingsSection;
   onSectionChange: (section: SettingsSection) => void;
+  profile: AccountProfile;
 }) {
+  const visibleMenuItems = getVisibleSettingsMenuItems(profile);
+
   return (
     <aside className="self-start rounded-[12px] border border-[#e5e8f0] bg-white p-3 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <div className="space-y-1">
-        {settingsMenuItems.map((item) => {
+        {visibleMenuItems.map((item) => {
           const Icon = item.icon;
           const isActive = item.id === activeSection;
 
@@ -2694,22 +4045,7 @@ function InstagramConnectionCard({ onManage }: { onManage?: () => void }) {
     setIsConnectingNew(true);
     setConnectionError("");
 
-    try {
-      const response = await fetch("/api/auth/instagram/disconnect", {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-      const data: { error?: string } = await response.json();
-
-      if (!response.ok || data.error) {
-        throw new Error(data.error || "Could not prepare Instagram reconnect");
-      }
-
-      window.location.href = "/api/auth/instagram?next=/settings";
-    } catch (error) {
-      setIsConnectingNew(false);
-      setConnectionError(error instanceof Error ? error.message : "Could not prepare Instagram reconnect");
-    }
+    window.location.href = "/api/auth/instagram?next=/settings";
   }
 
   if (!isConnected) {
@@ -2983,22 +4319,7 @@ function SettingsInstagramSection() {
     setIsConnectingNew(true);
     setError("");
 
-    try {
-      const response = await fetch("/api/auth/instagram/disconnect", {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-      const data: { error?: string } = await response.json();
-
-      if (!response.ok || data.error) {
-        throw new Error(data.error || "Could not prepare Instagram reconnect");
-      }
-
-      window.location.href = "/api/auth/instagram?next=/settings";
-    } catch (connectError) {
-      setIsConnectingNew(false);
-      setError(connectError instanceof Error ? connectError.message : "Could not prepare Instagram reconnect");
-    }
+    window.location.href = "/api/auth/instagram?next=/settings";
   }
 
   const nonNoteMessages = conversations.flatMap((conversation) =>
@@ -3339,16 +4660,46 @@ function SettingsAssistantCard({
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onConfigure}
-        className="mt-5 flex h-10 w-full items-center justify-between rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black"
-      >
-        Configure AI Assistant
-        <ArrowRight size={15} strokeWidth={2.5} />
-      </button>
+      {onConfigure && (
+        <button
+          type="button"
+          onClick={onConfigure}
+          className="mt-5 flex h-10 w-full items-center justify-between rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black"
+        >
+          Configure AI Assistant
+          <ArrowRight size={15} strokeWidth={2.5} />
+        </button>
+      )}
     </section>
   );
+}
+
+function getAiBehaviorPreview(settings: AiSettings) {
+  if (settings.responseStyle === "Concise") {
+    return "Got it. I can help with that. What result are you trying to get first?";
+  }
+
+  if (settings.responseStyle === "Sales focused") {
+    return "Thanks for reaching out. If growth is the goal, I can point you to the best package and next step.";
+  }
+
+  if (settings.responseStyle === "Support first") {
+    return "Thanks for sharing that. I will help you sort it out and make sure you get the right next step.";
+  }
+
+  if (settings.personality === "Playful") {
+    return "Hey, happy to help. Tell me what you are working on and I will point you in the right direction.";
+  }
+
+  if (settings.personality === "Direct") {
+    return "I can help. Send your goal, budget, and timeline so I can recommend the right next step.";
+  }
+
+  return "Hi, thanks for reaching out. I can help with that. What are you hoping to accomplish first?";
+}
+
+function getAiBehaviorSummary(settings: AiSettings) {
+  return `Personality is ${settings.personality.toLowerCase()}, responses are ${settings.responseStyle.toLowerCase()}, and knowledge usage is set to ${settings.knowledgeUsage.toLowerCase()}.`;
 }
 
 type AiIntegrationApiResponse = {
@@ -3370,12 +4721,19 @@ const aiWorkflowVisuals: Record<AiWorkflowSetting["id"], { icon: LucideIcon; ton
 
 function SettingsAiIntegrationSection({
   integration,
+  assistantSettings,
   onChange,
+  onAssistantChange,
 }: {
   integration: AiIntegrationSettings;
+  assistantSettings: AiSettings;
   onChange: (integration: AiIntegrationSettings) => void;
+  onAssistantChange: (settings: AiSettings) => void;
 }) {
-  const [draft, setDraft] = useState<AiIntegrationSettings>(integration);
+  const [draft, setDraft] = useState<AiIntegrationSettings>({
+    ...integration,
+    behavior: integration.behavior || assistantSettings,
+  });
   const [apiKey, setApiKey] = useState("");
   const [status, setStatus] = useState("");
   const [testReply, setTestReply] = useState("");
@@ -3385,10 +4743,15 @@ function SettingsAiIntegrationSection({
   const [isTesting, setIsTesting] = useState(false);
   const [isTestingWorkflows, setIsTestingWorkflows] = useState(false);
   const onChangeRef = useRef(onChange);
+  const onAssistantChangeRef = useRef(onAssistantChange);
 
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  useEffect(() => {
+    onAssistantChangeRef.current = onAssistantChange;
+  }, [onAssistantChange]);
 
   useEffect(() => {
     let isMounted = true;
@@ -3410,6 +4773,7 @@ function SettingsAiIntegrationSection({
         if (isMounted) {
           setDraft(data.integration);
           onChangeRef.current(data.integration);
+          onAssistantChangeRef.current(data.integration.behavior);
           setStatus(data.integration.apiKeySaved ? "OpenAI key is connected." : "Add an OpenAI key to turn on AI replies.");
         }
       } catch (error) {
@@ -3440,6 +4804,12 @@ function SettingsAiIntegrationSection({
     }));
   }
 
+  function updateBehavior(behavior: AiSettings) {
+    updateDraft({ behavior });
+    onAssistantChange(behavior);
+    setStatus("AI tone changed. Save integration to apply it to live OpenAI replies.");
+  }
+
   function updateWorkflow(id: AiWorkflowSetting["id"], enabled: boolean) {
     updateDraft({
       workflows: draft.workflows.map((workflow) => (workflow.id === id ? { ...workflow, enabled } : workflow)),
@@ -3465,6 +4835,7 @@ function SettingsAiIntegrationSection({
           clearApiKey: options?.clearApiKey,
           model: draft.model,
           workflows: draft.workflows,
+          behavior: draft.behavior,
           systemPrompt: draft.systemPrompt,
           leadQualificationRules: draft.leadQualificationRules,
           ctaMessage: draft.ctaMessage,
@@ -3479,6 +4850,7 @@ function SettingsAiIntegrationSection({
 
       setDraft(data.integration);
       onChange(data.integration);
+      onAssistantChange(data.integration.behavior);
       setApiKey("");
       setStatus(options?.clearApiKey ? "OpenAI key removed." : "AI integration saved.");
     } catch (error) {
@@ -3725,6 +5097,39 @@ function SettingsAiIntegrationSection({
               </div>
             )}
           </div>
+        </section>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+        <SettingsAssistantCard settings={draft.behavior} onChange={updateBehavior} />
+        <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+          <div className="flex items-center gap-2">
+            <Bot size={17} className="text-[#3044ff]" strokeWidth={2.35} />
+            <h2 className="text-[15px] font-extrabold text-black">AI behavior preview</h2>
+          </div>
+          <div className="mt-5 rounded-[12px] bg-[#f6f7fb] p-4">
+            <p className="text-[12px] font-semibold leading-relaxed text-[#253049]">
+              {getAiBehaviorSummary(draft.behavior)}
+            </p>
+            <p className="mt-3 text-[12px] font-medium leading-relaxed text-[#46506a]">
+              Proactive outreach is {draft.behavior.proactiveOutreach ? "on" : "off"} and auto tagging is {draft.behavior.autoTagging ? "on" : "off"}.
+            </p>
+          </div>
+          <div className="mt-4 rounded-[12px] border border-[#edf0f6] bg-white p-4">
+            <p className="text-[10px] font-extrabold uppercase text-[#596175]">Sample Instagram reply</p>
+            <p className="mt-2 text-[13px] font-semibold leading-relaxed text-[#253049]">
+              {getAiBehaviorPreview(draft.behavior)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void saveIntegration()}
+            disabled={isSaving}
+            className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_30px_rgba(48,68,255,0.22)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} strokeWidth={2.4} />}
+            Save AI tone
+          </button>
         </section>
       </div>
 
@@ -4122,6 +5527,706 @@ function SettingsTeamSection({
   );
 }
 
+function getConversationLabel(conversation: InstagramSettingsConversation) {
+  return (
+    conversation.participant.username ||
+    conversation.participant.name ||
+    `Instagram user ${conversation.participant.id.slice(-6)}`
+  );
+}
+
+function getConversationPreviewForSettings(conversation: InstagramSettingsConversation) {
+  const lastMessage = conversation.messages[0];
+
+  if (!lastMessage) {
+    return "No messages yet";
+  }
+
+  if (lastMessage.text) {
+    return lastMessage.text;
+  }
+
+  const firstAttachment = lastMessage.attachments?.[0];
+  if (firstAttachment?.type === "image") return "Photo";
+  if (firstAttachment?.type === "video") return "Video";
+  if (firstAttachment) return firstAttachment.name || "Attachment";
+
+  return "Message";
+}
+
+function createEmptyAgentDraft(): AgentAccount & { password: string } {
+  return {
+    id: "",
+    name: "",
+    email: "",
+    password: "",
+    status: "Active",
+    allowedPages: ["inbox", "escalations", "settings"],
+    assignedConversationIds: [],
+    humanEscalation: true,
+  };
+}
+
+const agentAccountsPageSize = 5;
+const conversationAssignmentsPageSize = 10;
+
+function SettingsAgentsSection({ mode }: { mode: "agents" | "permissions" }) {
+  const [agents, setAgents] = useState<AgentAccount[]>([]);
+  const [conversations, setConversations] = useState<InstagramSettingsConversation[]>([]);
+  const [draft, setDraft] = useState<AgentAccount & { password: string }>(createEmptyAgentDraft);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [agentPage, setAgentPage] = useState(1);
+  const [conversationPage, setConversationPage] = useState(1);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const selectedAgent = agents.find((agent) => agent.id === draft.id);
+  const selectedConversationCount = draft.assignedConversationIds.length;
+  const isPermissionsMode = mode === "permissions";
+  const totalAgentPages = Math.max(1, Math.ceil(agents.length / agentAccountsPageSize));
+  const currentAgentPage = Math.min(agentPage, totalAgentPages);
+  const agentPageStartIndex = agents.length === 0 ? 0 : (currentAgentPage - 1) * agentAccountsPageSize;
+  const paginatedAgents = agents.slice(agentPageStartIndex, agentPageStartIndex + agentAccountsPageSize);
+  const agentPageEndIndex = Math.min(agentPageStartIndex + paginatedAgents.length, agents.length);
+  const totalConversationPages = Math.max(1, Math.ceil(conversations.length / conversationAssignmentsPageSize));
+  const currentConversationPage = Math.min(conversationPage, totalConversationPages);
+  const conversationPageStartIndex =
+    conversations.length === 0 ? 0 : (currentConversationPage - 1) * conversationAssignmentsPageSize;
+  const paginatedConversations = conversations.slice(
+    conversationPageStartIndex,
+    conversationPageStartIndex + conversationAssignmentsPageSize
+  );
+  const conversationPageEndIndex = Math.min(conversationPageStartIndex + paginatedConversations.length, conversations.length);
+  const allConversationsSelected =
+    conversations.length > 0 && conversations.every((conversation) => draft.assignedConversationIds.includes(conversation.id));
+
+  const loadAgents = useCallback(async () => {
+    const response = await fetch("/api/agents", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const data: AgentsResponse = await response.json();
+
+    if (!response.ok || data.error) {
+      throw new Error(data.error || "Could not load agents");
+    }
+
+    setAgents(data.agents || []);
+  }, []);
+
+  const loadConversations = useCallback(async () => {
+    const response = await fetch("/api/instagram/conversations", {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const data: InstagramConversationsResponse = await response.json();
+
+    if (!response.ok || (data.error && data.error !== "No Instagram account connected")) {
+      throw new Error(data.error || "Could not load conversations");
+    }
+
+    setConversations(data.conversations || []);
+  }, []);
+
+  const refreshData = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      if (isPermissionsMode) {
+        await Promise.all([loadAgents(), loadConversations()]);
+      } else {
+        await loadAgents();
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load agent settings");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isPermissionsMode, loadAgents, loadConversations]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => void refreshData(), 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [refreshData]);
+
+  useEffect(() => {
+    if (mode !== "agents") {
+      return;
+    }
+
+    const resetDraft = () => {
+      setDraft(createEmptyAgentDraft());
+      setShowPassword(false);
+    };
+    const immediateReset = window.setTimeout(resetDraft, 0);
+    const autofillReset = window.setTimeout(resetDraft, 250);
+
+    return () => {
+      window.clearTimeout(immediateReset);
+      window.clearTimeout(autofillReset);
+    };
+  }, [mode]);
+
+  useEffect(() => {
+    if (!isPermissionsMode || draft.id || agents.length === 0) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setDraft({
+        ...agents[0],
+        password: "",
+      });
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [agents, draft.id, isPermissionsMode]);
+
+  function updateDraft<K extends keyof (AgentAccount & { password: string })>(
+    key: K,
+    value: (AgentAccount & { password: string })[K]
+  ) {
+    setDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function selectAgent(agent: AgentAccount) {
+    setStatusMessage("");
+    setErrorMessage("");
+    setShowPassword(false);
+    setDraft({
+      ...agent,
+      password: "",
+    });
+  }
+
+  function startNewAgent() {
+    setStatusMessage("");
+    setErrorMessage("");
+    setShowPassword(false);
+    setDraft(createEmptyAgentDraft());
+  }
+
+  function togglePage(pageId: PagePermissionId) {
+    updateDraft(
+      "allowedPages",
+      draft.allowedPages.includes(pageId)
+        ? draft.allowedPages.filter((item) => item !== pageId)
+        : [...draft.allowedPages, pageId]
+    );
+  }
+
+  function toggleConversation(conversationId: string) {
+    updateDraft(
+      "assignedConversationIds",
+      draft.assignedConversationIds.includes(conversationId)
+        ? draft.assignedConversationIds.filter((item) => item !== conversationId)
+        : [...draft.assignedConversationIds, conversationId]
+    );
+  }
+
+  function selectAllConversations() {
+    const allConversationIds = conversations.map((conversation) => conversation.id);
+    updateDraft("assignedConversationIds", Array.from(new Set([...draft.assignedConversationIds, ...allConversationIds])));
+  }
+
+  async function saveAgent() {
+    setIsSaving(true);
+    setStatusMessage("");
+    setErrorMessage("");
+    const isCreatingAgent = !draft.id;
+
+    try {
+      const response = await fetch("/api/agents", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: draft.id ? "update" : "create",
+          id: draft.id || undefined,
+          name: draft.name,
+          email: draft.email,
+          password: draft.password || undefined,
+          allowedPages: draft.allowedPages,
+          assignedConversationIds: draft.assignedConversationIds,
+          humanEscalation: draft.humanEscalation,
+        }),
+      });
+      const data: AgentsResponse = await response.json();
+
+      if (!response.ok || data.error || !data.agent) {
+        throw new Error(data.error || "Could not save agent");
+      }
+
+      setAgents((current) => {
+        const exists = current.some((agent) => agent.id === data.agent?.id);
+        return exists
+          ? current.map((agent) => (agent.id === data.agent?.id ? data.agent : agent))
+          : [...current, data.agent!];
+      });
+      if (isCreatingAgent) {
+        setAgentPage(Math.max(1, Math.ceil((agents.length + 1) / agentAccountsPageSize)));
+      }
+      setShowPassword(false);
+      setDraft(isCreatingAgent ? createEmptyAgentDraft() : { ...data.agent, password: "" });
+      setStatusMessage(isPermissionsMode ? "Agent permissions updated." : isCreatingAgent ? "Agent login created. Add another agent below." : "Agent updated.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not save agent");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function suspendAgent(agent: AgentAccount) {
+    setIsSaving(true);
+    setStatusMessage("");
+    setErrorMessage("");
+
+    try {
+      const response = await fetch("/api/agents", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "suspend", id: agent.id }),
+      });
+      const data: AgentsResponse = await response.json();
+
+      if (!response.ok || data.error || !data.agent) {
+        throw new Error(data.error || "Could not suspend agent");
+      }
+
+      setAgents((current) => current.map((item) => (item.id === data.agent?.id ? data.agent : item)));
+
+      if (draft.id === agent.id) {
+        setDraft({ ...data.agent, password: "" });
+      }
+
+      setStatusMessage("Agent suspended.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not suspend agent");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-5">
+      <SettingsSectionHeader
+        section={mode}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
+              {agents.length} agents
+            </span>
+            <button
+              type="button"
+              onClick={() => void refreshData()}
+              disabled={isLoading}
+              className="flex h-9 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black disabled:opacity-60"
+            >
+              <RefreshCw size={13} strokeWidth={2.4} className={isLoading ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
+        }
+      />
+
+      {(statusMessage || errorMessage) && (
+        <p
+          className={`rounded-[8px] px-3 py-2 text-[11px] font-semibold ${
+            errorMessage ? "bg-[#fff7f9] text-[#df405b]" : "bg-[#f6f7fb] text-[#46506a]"
+          }`}
+        >
+          {errorMessage || statusMessage}
+        </p>
+      )}
+
+      <div className="grid gap-5">
+        {mode === "agents" && (
+        <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-[15px] font-extrabold text-black">{draft.id ? "Edit agent" : "Create agent login"}</h3>
+              <p className="mt-1 text-[11px] font-medium text-[#46506a]">
+                {draft.id ? "Update access for this support account." : "Create a Supabase login for a support agent."}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={startNewAgent}
+              className="flex h-9 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black"
+            >
+              {draft.id ? <Plus size={14} strokeWidth={2.5} /> : <X size={14} strokeWidth={2.5} />}
+              {draft.id ? "New agent" : "Clear"}
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-4">
+            <label className="block">
+              <span className="text-[11px] font-extrabold text-[#46506a]">Name</span>
+              <input
+                value={draft.name}
+                name="agent-display-name"
+                autoComplete="off"
+                onChange={(event) => updateDraft("name", event.target.value)}
+                className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-extrabold text-[#46506a]">Login email</span>
+              <input
+                value={draft.email}
+                type="email"
+                name="agent-login-email"
+                autoComplete="off"
+                onChange={(event) => updateDraft("email", event.target.value)}
+                className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-extrabold text-[#46506a]">
+                {draft.id ? "New password" : "Password"}
+              </span>
+              <span className="relative mt-2 block">
+                <input
+                  value={draft.password}
+                  type={showPassword ? "text" : "password"}
+                  name="agent-new-password"
+                  autoComplete="new-password"
+                  placeholder={draft.id ? "Leave blank to keep current password" : "At least 8 characters"}
+                  onChange={(event) => updateDraft("password", event.target.value)}
+                  className="h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 pr-11 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[7px] text-[#596175] transition hover:bg-[#f6f7fb] hover:text-black"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={15} strokeWidth={2.3} /> : <Eye size={15} strokeWidth={2.3} />}
+                </button>
+              </span>
+            </label>
+            <div className="flex items-center justify-between gap-4 rounded-[10px] border border-[#edf0f6] px-3 py-3">
+              <div>
+                <p className="text-[12px] font-extrabold text-black">Human escalation</p>
+                <p className="mt-1 text-[11px] font-medium text-[#46506a]">Agent can receive escalated conversations.</p>
+              </div>
+              <SettingsToggle
+                ariaLabel="Toggle human escalation"
+                checked={draft.humanEscalation}
+                onChange={(checked) => updateDraft("humanEscalation", checked)}
+              />
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={saveAgent}
+            disabled={isSaving}
+            className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.24)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? <RefreshCw size={14} strokeWidth={2.4} className="animate-spin" /> : <Shield size={14} strokeWidth={2.4} />}
+            {draft.id ? "Save agent" : "Create agent"}
+          </button>
+        </section>
+        )}
+
+        {mode === "permissions" && (
+        <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-[15px] font-extrabold text-black">Page permissions</h3>
+              <p className="mt-1 text-[11px] font-medium text-[#46506a]">
+                {draft.id ? `${draft.name || selectedAgent?.name || "Selected agent"} can only open checked pages.` : "Select an agent below before changing page access."}
+              </p>
+            </div>
+            <span className="rounded-[8px] bg-[#eef4ff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
+              {draft.allowedPages.length} pages
+            </span>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2">
+            {pagePermissionOptions.map((option) => {
+              const checked = draft.allowedPages.includes(option.id);
+
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => draft.id && togglePage(option.id)}
+                  disabled={!draft.id}
+                  className={`min-h-[72px] rounded-[10px] border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    checked ? "border-[#cfd7ff] bg-[#f6f7ff]" : "border-[#edf0f6] bg-white hover:bg-[#fbfbff]"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span
+                      className={`flex h-5 w-5 items-center justify-center rounded-[6px] border ${
+                        checked ? "border-[#3044ff] bg-[#3044ff] text-white" : "border-[#d7ddeb] bg-white text-transparent"
+                      }`}
+                    >
+                      <Check size={13} strokeWidth={2.8} />
+                    </span>
+                    <span className="text-[12px] font-extrabold text-black">{option.label}</span>
+                  </span>
+                  <span className="mt-2 block text-[11px] font-medium leading-[1.35] text-[#46506a]">{option.detail}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+        )}
+      </div>
+
+      {mode === "permissions" && (
+      <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-[15px] font-extrabold text-black">Conversation assignments</h3>
+            <p className="mt-1 text-[11px] font-medium text-[#46506a]">
+              Agents only see conversations checked here after login.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={selectAllConversations}
+              disabled={!draft.id || conversations.length === 0 || allConversationsSelected}
+              className="flex h-9 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Check size={13} strokeWidth={2.6} />
+              {allConversationsSelected ? "All selected" : "Select all"}
+            </button>
+            <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
+              {selectedConversationCount} assigned
+            </span>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="mt-5 flex min-h-[120px] items-center justify-center gap-2 rounded-[10px] bg-[#f6f7fb] text-[12px] font-semibold text-[#46506a]">
+            <RefreshCw size={15} strokeWidth={2.3} className="animate-spin text-[#3044ff]" />
+            Loading agents and conversations
+          </div>
+        ) : conversations.length === 0 ? (
+          <div className="mt-5 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-4 text-[12px] font-medium text-[#46506a]">
+            Connect Instagram or receive a DM first, then conversations will appear here for assignment.
+          </div>
+        ) : (
+          <div className="mt-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {paginatedConversations.map((conversation) => {
+                const checked = draft.assignedConversationIds.includes(conversation.id);
+                const label = getConversationLabel(conversation);
+
+                return (
+                  <button
+                    key={conversation.id}
+                    type="button"
+                    onClick={() => draft.id && toggleConversation(conversation.id)}
+                    disabled={!draft.id}
+                    className={`min-h-[82px] rounded-[10px] border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      checked ? "border-[#cfd7ff] bg-[#f6f7ff]" : "border-[#edf0f6] bg-white hover:bg-[#fbfbff]"
+                    }`}
+                  >
+                    <span className="flex items-start justify-between gap-3">
+                      <span className="min-w-0">
+                        <span className="block truncate text-[12px] font-extrabold text-black">{label}</span>
+                        <span className="mt-1 block line-clamp-1 text-[11px] font-medium text-[#46506a]">
+                          {getConversationPreviewForSettings(conversation)}
+                        </span>
+                      </span>
+                      <span
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border ${
+                          checked ? "border-[#3044ff] bg-[#3044ff] text-white" : "border-[#d7ddeb] bg-white text-transparent"
+                        }`}
+                      >
+                        <Check size={13} strokeWidth={2.8} />
+                      </span>
+                    </span>
+                    <span className="mt-2 block truncate text-[10px] font-semibold text-[#697083]">{conversation.id}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3 border-t border-[#edf0f6] pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[11px] font-semibold text-[#46506a]">
+                Showing {conversationPageStartIndex + 1}-{conversationPageEndIndex} of {conversations.length} conversations
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConversationPage(Math.max(1, currentConversationPage - 1))}
+                  disabled={currentConversationPage === 1}
+                  className="flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <ChevronLeft size={13} strokeWidth={2.5} />
+                  Previous
+                </button>
+                {Array.from({ length: totalConversationPages }, (_, index) => index + 1).map((page) => (
+                  <button
+                    key={page}
+                    type="button"
+                    onClick={() => setConversationPage(page)}
+                    aria-current={page === currentConversationPage ? "page" : undefined}
+                    className={`flex h-8 min-w-8 items-center justify-center rounded-[8px] px-2 text-[11px] font-extrabold ${
+                      page === currentConversationPage
+                        ? "bg-[#3044ff] text-white"
+                        : "border border-[#dde3ee] bg-white text-black hover:bg-[#f6f7fb]"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setConversationPage(Math.min(totalConversationPages, currentConversationPage + 1))}
+                  disabled={currentConversationPage === totalConversationPages}
+                  className="flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  Next
+                  <ChevronRight size={13} strokeWidth={2.5} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+      )}
+
+      {mode === "permissions" && draft.id && (
+        <button
+          type="button"
+          onClick={saveAgent}
+          disabled={isSaving}
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.24)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSaving ? <RefreshCw size={14} strokeWidth={2.4} className="animate-spin" /> : <Shield size={14} strokeWidth={2.4} />}
+          Save permissions
+        </button>
+      )}
+
+      <section className={`rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)] ${mode === "permissions" ? "order-first" : ""}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-[15px] font-extrabold text-black">{mode === "permissions" ? "Select agent" : "Agent accounts"}</h3>
+          <span className="text-[11px] font-semibold text-[#46506a]">
+            {mode === "permissions" ? "Choose which agent receives these permissions." : "Login uses each agent's own email and password."}
+          </span>
+        </div>
+
+        <div className="mt-4 divide-y divide-[#edf0f6] border-t border-[#edf0f6]">
+          {agents.length === 0 ? (
+            <p className="py-6 text-[12px] font-medium text-[#46506a]">No agents created yet.</p>
+          ) : (
+            paginatedAgents.map((agent) => {
+	              const isSelectedAgent = mode === "permissions" && draft.id === agent.id;
+
+	              return (
+	                <div
+	                  key={agent.id}
+	                  className={`grid gap-3 py-4 xl:grid-cols-[minmax(0,1fr)_130px_150px_180px] xl:items-center ${
+	                    isSelectedAgent ? "rounded-[10px] border border-[#bfdbfe] bg-[#eff6ff] px-3 shadow-[0_14px_34px_rgba(48,68,255,0.08)]" : ""
+	                  }`}
+	                >
+	                  <button type="button" onClick={() => selectAgent(agent)} className="min-w-0 text-left">
+	                    <p className="truncate text-[13px] font-extrabold text-black">{agent.name}</p>
+	                    <p className="mt-1 truncate text-[11px] font-medium text-[#46506a]">{agent.email}</p>
+	                  </button>
+	                  <span className={`w-max rounded-[8px] px-2.5 py-1 text-[10px] font-extrabold ${agent.status === "Active" ? "bg-[#e7f8ed] text-[#0a9b3f]" : "bg-[#fff3e6] text-[#ff850d]"}`}>
+	                    {agent.status}
+	                  </span>
+	                  <span className="text-[11px] font-semibold text-[#46506a]">
+	                    {agent.allowedPages.length} pages · {agent.assignedConversationIds.length} conversations
+	                  </span>
+	                  <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+	                    <button
+	                      type="button"
+	                      onClick={() => selectAgent(agent)}
+	                      className={`flex h-8 items-center justify-center gap-1.5 rounded-[8px] px-3 text-[11px] font-extrabold ${
+	                        isSelectedAgent
+	                          ? "border border-[#7c3aed] bg-[#7c3aed] text-white shadow-[0_12px_24px_rgba(124,58,237,0.24)]"
+	                          : "border border-[#dde3ee] bg-white text-black"
+	                      }`}
+	                    >
+	                      {isSelectedAgent && <Check size={13} strokeWidth={2.7} />}
+	                      {isSelectedAgent ? "Selected" : mode === "permissions" ? "Select" : "Edit"}
+	                    </button>
+	                    {mode === "agents" && (
+	                      <button
+	                        type="button"
+	                        onClick={() => void suspendAgent(agent)}
+	                        disabled={isSaving || agent.status === "Suspended"}
+	                        className="h-8 rounded-[8px] border border-[#ffd6dd] bg-[#fff8fa] px-3 text-[11px] font-extrabold text-[#df405b] disabled:cursor-not-allowed disabled:opacity-50"
+	                      >
+	                        Suspend
+	                      </button>
+	                    )}
+	                  </div>
+	                </div>
+	              );
+            })
+          )}
+        </div>
+
+        {agents.length > 0 && (
+          <div className="mt-4 flex flex-col gap-3 border-t border-[#edf0f6] pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[11px] font-semibold text-[#46506a]">
+              Showing {agentPageStartIndex + 1}-{agentPageEndIndex} of {agents.length} agents
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAgentPage(Math.max(1, currentAgentPage - 1))}
+                disabled={currentAgentPage === 1}
+                className="flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <ChevronLeft size={13} strokeWidth={2.5} />
+                Previous
+              </button>
+              {Array.from({ length: totalAgentPages }, (_, index) => index + 1).map((page) => (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => setAgentPage(page)}
+                  aria-current={page === currentAgentPage ? "page" : undefined}
+                  className={`flex h-8 min-w-8 items-center justify-center rounded-[8px] px-2 text-[11px] font-extrabold ${
+                    page === currentAgentPage
+                      ? "bg-[#3044ff] text-white"
+                      : "border border-[#dde3ee] bg-white text-black hover:bg-[#f6f7fb]"
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setAgentPage(Math.min(totalAgentPages, currentAgentPage + 1))}
+                disabled={currentAgentPage === totalAgentPages}
+                className="flex h-8 items-center gap-1.5 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Next
+                <ChevronRight size={13} strokeWidth={2.5} />
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function SettingsBillingSection({
   billing,
   onChange,
@@ -4466,6 +6571,18 @@ function SettingsPage({
     window.localStorage.setItem(settingsStateStorageKey, JSON.stringify(settingsState));
   }, [settingsState]);
 
+  useEffect(() => {
+    const visibleSections = getVisibleSettingsMenuItems(profile);
+
+    if (!visibleSections.some((item) => item.id === activeSection)) {
+      const timeout = window.setTimeout(() => {
+        setActiveSection(visibleSections[0]?.id || "account");
+      }, 0);
+
+      return () => window.clearTimeout(timeout);
+    }
+  }, [profile, activeSection]);
+
   function updateSettingsState<K extends keyof AppSettingsState>(key: K, value: AppSettingsState[K]) {
     setSettingsState((current) => ({
       ...current,
@@ -4506,7 +6623,7 @@ function SettingsPage({
         : {
             icon: CircleHelp,
             title: "Help",
-            body: "Use the left settings menu to update your profile, Instagram connection, AI behavior, team access, billing, API, security, and brand voice.",
+            body: "Use the left settings menu to update your profile, Instagram connection, AI integration, team access, billing, API, security, and brand voice.",
             action: "Open API settings",
             section: "api" as SettingsSection,
           };
@@ -4552,43 +6669,23 @@ function SettingsPage({
       return <SettingsInstagramSection />;
     }
 
-    if (activeSection === "ai") {
-      return (
-        <div className="grid gap-5">
-          <SettingsSectionHeader section="ai" action={<span className="rounded-[8px] bg-[#e7f8ed] px-3 py-1.5 text-[11px] font-extrabold text-[#0a9b3f]">Saved automatically</span>} />
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-            <SettingsAssistantCard settings={settingsState.ai} onChange={(ai) => updateSettingsState("ai", ai)} />
-            <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
-              <h2 className="text-[15px] font-extrabold text-black">AI behavior preview</h2>
-              <div className="mt-5 rounded-[12px] bg-[#f6f7fb] p-4">
-                <p className="text-[12px] font-semibold leading-relaxed text-[#253049]">
-                  Personality is {settingsState.ai.personality.toLowerCase()}, responses are {settingsState.ai.responseStyle.toLowerCase()}, and knowledge usage is set to {settingsState.ai.knowledgeUsage.toLowerCase()}.
-                </p>
-                <p className="mt-3 text-[12px] font-medium leading-relaxed text-[#46506a]">
-                Proactive outreach is {settingsState.ai.proactiveOutreach ? "on" : "off"} and auto tagging is {settingsState.ai.autoTagging ? "on" : "off"}.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveSection("ai-integration")}
-                className="mt-5 flex h-10 w-full items-center justify-between rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black"
-              >
-                Open AI integration
-                <ArrowRight size={15} strokeWidth={2.5} />
-              </button>
-            </section>
-          </div>
-        </div>
-      );
-    }
-
     if (activeSection === "ai-integration") {
       return (
         <SettingsAiIntegrationSection
           integration={settingsState.aiIntegration}
+          assistantSettings={settingsState.ai}
           onChange={(aiIntegration) => updateSettingsState("aiIntegration", aiIntegration)}
+          onAssistantChange={(ai) => updateSettingsState("ai", ai)}
         />
       );
+    }
+
+    if (activeSection === "agents") {
+      return <SettingsAgentsSection mode="agents" />;
+    }
+
+    if (activeSection === "permissions") {
+      return <SettingsAgentsSection mode="permissions" />;
     }
 
     if (activeSection === "escalations") {
@@ -4658,7 +6755,7 @@ function SettingsPage({
           <div>
             <h1 className="text-[30px] font-extrabold leading-none text-black sm:text-[32px]">Settings</h1>
             <p className="mt-3 text-[12px] font-medium leading-[1.4] text-[#46506a]">
-              Manage your account, integrations, and AI assistant.
+              Manage your account, integrations, and automations.
             </p>
           </div>
 
@@ -4697,7 +6794,7 @@ function SettingsPage({
         {renderQuickPanel()}
 
         <div className="mt-7 grid items-start gap-5 xl:grid-cols-[252px_minmax(0,1fr)]">
-          <SettingsMenuCard activeSection={activeSection} onSectionChange={setActiveSection} />
+          <SettingsMenuCard activeSection={activeSection} onSectionChange={setActiveSection} profile={profile} />
           {renderSettingsContent()}
         </div>
       </div>
@@ -5290,6 +7387,608 @@ function AudiencePage() {
   );
 }
 
+function formatAnalyticsInteger(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatAnalyticsPercent(value: number) {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+
+  return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
+}
+
+function formatAnalyticsDuration(milliseconds: number) {
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) {
+    return "No replies";
+  }
+
+  const totalSeconds = Math.max(1, Math.round(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${remainingMinutes}m`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+
+  return `${seconds}s`;
+}
+
+function getAnalyticsMessageTime(message: InstagramSettingsMessage) {
+  return new Date(message.time).getTime();
+}
+
+function getAnalyticsConversationTime(conversation: InstagramSettingsConversation) {
+  const latestMessageTime = conversation.messages
+    .map((message) => getAnalyticsMessageTime(message))
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+
+  if (latestMessageTime) {
+    return latestMessageTime;
+  }
+
+  return conversation.updated_time ? new Date(conversation.updated_time).getTime() : 0;
+}
+
+function getAnalyticsMessageText(message: InstagramSettingsMessage) {
+  return `${message.text || ""} ${message.attachments?.map((attachment) => attachment.name || attachment.type).join(" ") || ""}`.toLowerCase();
+}
+
+function getAnalyticsReplyRate(inboundCount: number, outboundCount: number) {
+  return inboundCount > 0 ? Math.min(100, (outboundCount / inboundCount) * 100) : 0;
+}
+
+function buildAnalyticsSummary(conversations: InstagramSettingsConversation[], totalConversationCount?: number): AnalyticsSummary {
+  const now = Date.now();
+  const totalLoaded = conversations.length;
+  const totalCount = typeof totalConversationCount === "number" ? totalConversationCount : totalLoaded;
+  const allMessages = conversations.flatMap((conversation) => conversation.messages);
+  const userMessages = allMessages.filter((message) => message.from === "user");
+  const creatorMessages = allMessages.filter((message) => message.from === "me");
+  const mediaMessages = allMessages.filter((message) => (message.attachments || []).length > 0);
+  const opportunitySignals = userMessages.filter((message) => {
+    const text = getAnalyticsMessageText(message);
+    return ["price", "pricing", "cost", "book", "buy", "interested", "call", "program"].some((keyword) => text.includes(keyword));
+  }).length;
+  const escalationSignals = userMessages.filter((message) => {
+    const text = getAnalyticsMessageText(message);
+    return ["refund", "issue", "problem", "support", "angry", "cancel", "human"].some((keyword) => text.includes(keyword));
+  }).length;
+  const responseTimes: number[] = [];
+
+  conversations.forEach((conversation) => {
+    const chronologicalMessages = [...conversation.messages]
+      .filter((message) => Number.isFinite(getAnalyticsMessageTime(message)))
+      .sort((a, b) => getAnalyticsMessageTime(a) - getAnalyticsMessageTime(b));
+
+    chronologicalMessages.forEach((message, index) => {
+      if (message.from !== "user") {
+        return;
+      }
+
+      const nextCreatorMessage = chronologicalMessages
+        .slice(index + 1)
+        .find((candidate) => candidate.from === "me" && getAnalyticsMessageTime(candidate) > getAnalyticsMessageTime(message));
+
+      if (nextCreatorMessage) {
+        responseTimes.push(getAnalyticsMessageTime(nextCreatorMessage) - getAnalyticsMessageTime(message));
+      }
+    });
+  });
+
+  const averageResponseTime =
+    responseTimes.length > 0
+      ? responseTimes.reduce((total, value) => total + value, 0) / responseTimes.length
+      : 0;
+  const replyCoverage = getAnalyticsReplyRate(userMessages.length, creatorMessages.length);
+  const activeToday = conversations.filter((conversation) => {
+    const time = getAnalyticsConversationTime(conversation);
+    return time > 0 && now - time <= 86_400_000;
+  }).length;
+  const latestConversation = [...conversations].sort((a, b) => getAnalyticsConversationTime(b) - getAnalyticsConversationTime(a))[0];
+  const buckets = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(now - (6 - index) * 86_400_000);
+    const key = date.toISOString().slice(0, 10);
+
+    return {
+      key,
+      label: date.toLocaleDateString([], { weekday: "short" }),
+      conversations: 0,
+      messages: 0,
+    };
+  });
+
+  conversations.forEach((conversation) => {
+    const conversationKey = new Date(getAnalyticsConversationTime(conversation) || 0).toISOString().slice(0, 10);
+    const conversationBucket = buckets.find((bucket) => bucket.key === conversationKey);
+
+    if (conversationBucket) {
+      conversationBucket.conversations += 1;
+    }
+
+    conversation.messages.forEach((message) => {
+      const messageTime = getAnalyticsMessageTime(message);
+
+      if (!Number.isFinite(messageTime)) {
+        return;
+      }
+
+      const messageKey = new Date(messageTime).toISOString().slice(0, 10);
+      const messageBucket = buckets.find((bucket) => bucket.key === messageKey);
+
+      if (messageBucket) {
+        messageBucket.messages += 1;
+      }
+    });
+  });
+
+  const totalMessageCount = allMessages.length;
+  const channels: AnalyticsChannel[] = [
+    {
+      label: "Instagram conversations",
+      value: formatAnalyticsPercent(totalCount > 0 ? (totalLoaded / totalCount) * 100 : 0),
+      count: `${formatAnalyticsInteger(totalLoaded)} loaded of ${formatAnalyticsInteger(totalCount)} total`,
+      color: "#3044ff",
+    },
+    {
+      label: "User messages",
+      value: formatAnalyticsPercent(totalMessageCount > 0 ? (userMessages.length / totalMessageCount) * 100 : 0),
+      count: `${formatAnalyticsInteger(userMessages.length)} inbound`,
+      color: "#13a84f",
+    },
+    {
+      label: "Creator replies",
+      value: formatAnalyticsPercent(totalMessageCount > 0 ? (creatorMessages.length / totalMessageCount) * 100 : 0),
+      count: `${formatAnalyticsInteger(creatorMessages.length)} outbound`,
+      color: "#ff850d",
+    },
+    {
+      label: "Media messages",
+      value: formatAnalyticsPercent(totalMessageCount > 0 ? (mediaMessages.length / totalMessageCount) * 100 : 0),
+      count: `${formatAnalyticsInteger(mediaMessages.length)} with attachments`,
+      color: "#df405b",
+    },
+  ];
+
+  const automationMetrics: AnalyticsAutomationMetric[] = [
+    {
+      label: "Opportunity signals",
+      value: formatAnalyticsInteger(opportunitySignals),
+      detail: "Pricing, booking, buying, or program intent",
+      tone: "bg-[#eef4ff] text-[#246bff]",
+      icon: Target,
+    },
+    {
+      label: "AI-ready conversations",
+      value: formatAnalyticsInteger(Math.max(0, userMessages.length - escalationSignals)),
+      detail: "Inbound messages without handoff keywords",
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: Sparkles,
+    },
+    {
+      label: "Handoff signals",
+      value: formatAnalyticsInteger(escalationSignals),
+      detail: "Refund, issue, support, or human keywords",
+      tone: "bg-[#fff0f3] text-[#df405b]",
+      icon: TriangleAlert,
+    },
+  ];
+
+  const reportRows: AnalyticsReportRow[] = [...conversations]
+    .sort((a, b) => getAnalyticsConversationTime(b) - getAnalyticsConversationTime(a))
+    .slice(0, 6)
+    .map((conversation) => {
+      const inbound = conversation.messages.filter((message) => message.from === "user").length;
+      const outbound = conversation.messages.filter((message) => message.from === "me").length;
+      const lastMessage = [...conversation.messages].sort((a, b) => getAnalyticsMessageTime(b) - getAnalyticsMessageTime(a))[0];
+      const needsReply = lastMessage?.from === "user";
+      const noMessages = conversation.messages.length === 0;
+
+      return {
+        label: getConversationLabel(conversation),
+        source: "Instagram",
+        conversations: `${formatAnalyticsInteger(conversation.messages.length)} msgs`,
+        conversion: formatAnalyticsPercent(getAnalyticsReplyRate(inbound, outbound)),
+        lastActive: formatInstagramRelativeTime(lastMessage?.time || conversation.updated_time),
+        status: noMessages ? "No messages" : needsReply ? "Needs reply" : "Handled",
+        statusTone: noMessages
+          ? "bg-[#f3f4f8] text-[#596175]"
+          : needsReply
+            ? "bg-[#fff3e6] text-[#ff850d]"
+            : "bg-[#e7f8ed] text-[#0a9b3f]",
+      };
+    });
+
+  return {
+    metrics: [
+      {
+        label: "Total conversations",
+        value: formatAnalyticsInteger(totalCount),
+        change: `${formatAnalyticsInteger(totalLoaded)} loaded`,
+        detail: "from Instagram",
+        tone: "bg-[#f0edff] text-[#4b3cff]",
+        icon: MessageSquare,
+      },
+      {
+        label: "Reply coverage",
+        value: formatAnalyticsPercent(replyCoverage),
+        change: `${formatAnalyticsInteger(creatorMessages.length)} replies`,
+        detail: `${formatAnalyticsInteger(userMessages.length)} inbound`,
+        tone: "bg-[#eafaf0] text-[#13a84f]",
+        icon: Bot,
+      },
+      {
+        label: "Avg response time",
+        value: formatAnalyticsDuration(averageResponseTime),
+        change: `${formatAnalyticsInteger(responseTimes.length)} replies timed`,
+        detail: "creator after user",
+        tone: "bg-[#eef4ff] text-[#246bff]",
+        icon: Clock,
+      },
+      {
+        label: "Opportunity signals",
+        value: formatAnalyticsInteger(opportunitySignals),
+        change: `${formatAnalyticsInteger(activeToday)} active today`,
+        detail: "buying intent",
+        tone: "bg-[#fff3e6] text-[#ff850d]",
+        icon: Target,
+      },
+    ],
+    channels,
+    automationMetrics,
+    reportRows,
+    performanceBuckets: buckets.map(({ label, conversations: bucketConversations, messages }) => ({
+      label,
+      conversations: bucketConversations,
+      messages,
+    })),
+    loadedConversationCount: totalLoaded,
+    totalConversationCount: totalCount,
+    totalMessageCount,
+    latestActivity: formatInstagramRelativeTime(latestConversation?.updated_time),
+  };
+}
+
+function AnalyticsMetricStrip({ metrics }: { metrics: AnalyticsMetric[] }) {
+  return (
+    <section className="mt-6 grid overflow-hidden rounded-[12px] border border-[#e5e8f0] bg-white shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:grid-cols-2 xl:grid-cols-4">
+      {metrics.map((metric, index) => {
+        const Icon = metric.icon;
+
+        return (
+          <div
+            key={metric.label}
+            className={`flex min-h-[112px] items-center gap-4 border-[#e5e8f0] px-4 py-4 sm:px-5 ${
+              index < metrics.length - 1 ? "border-b sm:border-r xl:border-b-0" : ""
+            }`}
+          >
+            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] ${metric.tone}`}>
+              <Icon size={21} strokeWidth={2.25} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-[#596175]">{metric.label}</p>
+              <p className="mt-2 text-[22px] font-extrabold leading-none text-black">{metric.value}</p>
+              <p className="mt-2 flex min-w-0 items-center gap-1 text-[10px] font-semibold text-[#13a84f]">
+                <TrendingUp size={11} strokeWidth={2.5} />
+                {metric.change}
+                <span className="truncate text-[#596175]">{metric.detail}</span>
+              </p>
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+function AnalyticsPerformanceChart({ buckets }: { buckets: AnalyticsPerformanceBucket[] }) {
+  const maxValue = Math.max(1, ...buckets.map((bucket) => Math.max(bucket.conversations, bucket.messages)));
+  const hasWeeklyActivity = buckets.some((bucket) => bucket.conversations > 0 || bucket.messages > 0);
+
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-extrabold text-black">Conversation activity</h2>
+          <p className="mt-1 text-[11px] font-medium text-[#596175]">Daily conversations updated and messages received.</p>
+        </div>
+        <button
+          type="button"
+          className="flex h-8 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black"
+        >
+          This week
+          <ChevronDown size={14} strokeWidth={2.5} />
+        </button>
+      </div>
+
+      <div className="-mx-2 mt-4 overflow-x-auto px-2 no-scrollbar">
+        {hasWeeklyActivity ? (
+          <div className="flex min-h-[252px] min-w-[620px] items-end gap-4 rounded-[10px] bg-[#fbfbff] px-4 pb-4 pt-5">
+            {buckets.map((bucket) => {
+              const conversationHeight = bucket.conversations > 0 ? Math.max(22, (bucket.conversations / maxValue) * 186) : 0;
+              const messageHeight = bucket.messages > 0 ? Math.max(18, (bucket.messages / maxValue) * 186) : 0;
+
+              return (
+                <div key={bucket.label} className="flex flex-1 flex-col items-center gap-3">
+                  <div className="flex h-[194px] items-end gap-2">
+                    <span
+                      className="w-5 rounded-t-[6px] bg-[#3044ff] shadow-[0_10px_18px_rgba(48,68,255,0.18)]"
+                      style={{ height: `${conversationHeight}px` }}
+                      title={`${bucket.conversations} conversations`}
+                    />
+                    <span
+                      className="w-5 rounded-t-[6px] bg-[#13a84f] shadow-[0_10px_18px_rgba(19,168,79,0.16)]"
+                      style={{ height: `${messageHeight}px` }}
+                      title={`${bucket.messages} messages`}
+                    />
+                  </div>
+                  <span className="text-[11px] font-semibold text-[#596175]">{bucket.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex min-h-[252px] min-w-[620px] flex-col items-center justify-center rounded-[10px] border border-dashed border-[#dde3ee] bg-[#fbfbff] px-6 text-center">
+            <BarChart3 size={34} strokeWidth={2.2} className="text-[#8b92a6]" />
+            <p className="mt-3 text-[13px] font-extrabold text-black">No activity in the last 7 days</p>
+            <p className="mt-2 max-w-[360px] text-[11px] font-medium leading-relaxed text-[#596175]">
+              Older conversations are still counted below. New Instagram messages will appear here automatically.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] font-semibold text-[#596175]">
+        <span className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 rounded-full bg-[#3044ff]" />
+          Conversations
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 rounded-full bg-[#13a84f]" />
+          Messages
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function AnalyticsChannelCard({
+  channels,
+  totalConversationCount,
+}: {
+  channels: AnalyticsChannel[];
+  totalConversationCount: number;
+}) {
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <h2 className="text-[15px] font-extrabold text-black">Channel split</h2>
+      <p className="mt-1 text-[11px] font-medium text-[#596175]">Coverage and message mix from your loaded Instagram data.</p>
+
+      <div className="mt-5">
+        <div className="rounded-[12px] bg-[#fbfbff] p-4 text-center">
+          <p className="text-[26px] font-extrabold leading-none text-black">{formatAnalyticsInteger(totalConversationCount)}</p>
+          <p className="mt-2 text-[11px] font-medium text-[#596175]">total conversations available</p>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          {channels.map((channel) => (
+            <div key={channel.label} className="text-[12px]">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: channel.color }} />
+                  <span className="truncate font-extrabold text-black">{channel.label}</span>
+                </div>
+                <span className="shrink-0 font-extrabold text-black">{channel.value}</span>
+              </div>
+              <div className="h-2 rounded-full bg-[#edf0f6]">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: channel.value,
+                    backgroundColor: channel.color,
+                  }}
+                />
+              </div>
+              <p className="mt-1 truncate text-[11px] font-medium text-[#596175]">{channel.count}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AnalyticsAutomationCard({ metrics }: { metrics: AnalyticsAutomationMetric[] }) {
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-extrabold text-black">AI automation</h2>
+          <p className="mt-1 text-[11px] font-medium text-[#596175]">How the assistant is handling active chats.</p>
+        </div>
+        <span className="rounded-[8px] bg-[#e7f8ed] px-2.5 py-1 text-[10px] font-extrabold text-[#0a9b3f]">Healthy</span>
+      </div>
+
+      <div className="mt-4 grid gap-3">
+        {metrics.map((metric) => {
+          const Icon = metric.icon;
+
+          return (
+            <div key={metric.label} className="flex items-center gap-3 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-3">
+              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] ${metric.tone}`}>
+                <Icon size={19} strokeWidth={2.25} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[12px] font-extrabold text-black">{metric.label}</p>
+                <p className="mt-1 truncate text-[11px] font-medium text-[#596175]">{metric.detail}</p>
+              </div>
+              <span className="text-[18px] font-extrabold text-black">{metric.value}</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function AnalyticsReportTable({ rows }: { rows: AnalyticsReportRow[] }) {
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-extrabold text-black">Recent performance</h2>
+          <p className="mt-1 text-[11px] font-medium text-[#596175]">Top conversation groups from the selected period.</p>
+        </div>
+        <button type="button" className="flex h-8 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black">
+          Export
+          <UploadCloud size={14} strokeWidth={2.35} />
+        </button>
+      </div>
+
+      <div className="mt-4 overflow-x-auto no-scrollbar">
+        <div className="min-w-[760px]">
+          <div className="grid grid-cols-[minmax(190px,1fr)_140px_110px_110px_110px_92px] border-b border-[#edf0f6] px-2 pb-2 text-[10px] font-semibold uppercase text-[#596175]">
+            <span>Segment</span>
+            <span>Source</span>
+            <span>Conversations</span>
+            <span>Reply rate</span>
+            <span>Last active</span>
+            <span>Status</span>
+          </div>
+          {rows.length === 0 ? (
+            <div className="px-2 py-8 text-center text-[12px] font-medium text-[#596175]">
+              No conversations available for reporting yet.
+            </div>
+          ) : rows.map((row, index) => (
+            <div
+              key={row.label}
+              className={`grid grid-cols-[minmax(190px,1fr)_140px_110px_110px_110px_92px] items-center px-2 py-3 text-[12px] ${
+                index < rows.length - 1 ? "border-b border-[#edf0f6]" : ""
+              }`}
+            >
+              <span className="font-extrabold text-black">{row.label}</span>
+              <span className="font-medium text-[#46506a]">{row.source}</span>
+              <span className="font-semibold text-black">{row.conversations}</span>
+              <span className="font-semibold text-black">{row.conversion}</span>
+              <span className="font-semibold text-black">{row.lastActive}</span>
+              <span className={`w-max rounded-[7px] px-2.5 py-1 text-[10px] font-extrabold ${row.statusTone}`}>{row.status}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AnalyticsPage() {
+  const [analyticsResponse, setAnalyticsResponse] = useState<InstagramConversationsResponse | null>(null);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
+  const [analyticsError, setAnalyticsError] = useState("");
+  const conversations = analyticsResponse?.conversations || [];
+  const summary = buildAnalyticsSummary(conversations, analyticsResponse?.conversation_count);
+
+  const loadAnalytics = useCallback(async () => {
+    setIsLoadingAnalytics(true);
+    setAnalyticsError("");
+
+    try {
+      const response = await fetch("/api/instagram/conversations", {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const data: InstagramConversationsResponse = await response.json();
+
+      if (!response.ok || (data.error && data.error !== "No Instagram account connected")) {
+        throw new Error(data.error || "Could not load analytics");
+      }
+
+      setAnalyticsResponse(data);
+
+      if (data.error) {
+        setAnalyticsError(data.error);
+      }
+    } catch (error) {
+      setAnalyticsError(error instanceof Error ? error.message : "Could not load analytics");
+      setAnalyticsResponse({ conversations: [], conversation_count: 0 });
+    } finally {
+      setIsLoadingAnalytics(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => void loadAnalytics(), 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [loadAnalytics]);
+
+  return (
+    <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
+      <div className="mx-auto max-w-[1286px]">
+        <div className="mb-5 lg:hidden">
+          <BrandMark />
+        </div>
+
+        <header className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:gap-8">
+          <div>
+            <h1 className="text-[30px] font-extrabold leading-none text-black sm:text-[34px]">Analytics</h1>
+            <p className="mt-3 text-[12px] font-medium leading-[1.4] text-[#596175]">
+              Track Instagram conversations, reply coverage, AI signals, and handoff needs.
+            </p>
+          </div>
+
+          <div className="grid w-full grid-cols-[1fr_auto] items-center gap-3 sm:flex sm:w-auto sm:gap-3">
+            <div className="min-w-0 rounded-[9px] border border-[#e0e4ef] bg-white px-4 py-2.5 shadow-[0_12px_36px_rgba(20,28,53,0.025)] sm:w-[252px]">
+              <p className="truncate text-[12px] font-extrabold text-black">
+                {isLoadingAnalytics ? "Syncing analytics..." : `${formatAnalyticsInteger(summary.totalMessageCount)} messages tracked`}
+              </p>
+              <p className="mt-1 truncate text-[10px] font-semibold text-[#596175]">
+                Last activity: {summary.latestActivity}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadAnalytics()}
+              disabled={isLoadingAnalytics}
+              className="flex h-11 w-[92px] items-center justify-center gap-2 rounded-[9px] border border-[#e0e4ef] bg-white text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] disabled:cursor-not-allowed disabled:opacity-60 sm:h-12 sm:w-[104px] sm:text-[13px]"
+            >
+              <RefreshCw size={15} strokeWidth={2.4} className={isLoadingAnalytics ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
+        </header>
+
+        {analyticsError && (
+          <div className="mt-5 rounded-[10px] border border-[#edf0f6] bg-white px-4 py-3 text-[12px] font-semibold text-[#46506a] shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+            {analyticsError}
+          </div>
+        )}
+
+        <AnalyticsMetricStrip metrics={summary.metrics} />
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.42fr)_minmax(340px,0.9fr)]">
+          <AnalyticsPerformanceChart buckets={summary.performanceBuckets} />
+          <div className="grid gap-4">
+            <AnalyticsChannelCard channels={summary.channels} totalConversationCount={summary.totalConversationCount} />
+            <AnalyticsAutomationCard metrics={summary.automationMetrics} />
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <AnalyticsReportTable rows={summary.reportRows} />
+        </div>
+      </div>
+    </main>
+  );
+}
+
 function DashboardOverview({ profile }: { profile: AccountProfile }) {
   const greetingName = profile.name.trim() || "there";
 
@@ -5476,6 +8175,22 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
   );
 }
 
+function RestrictedPage() {
+  return (
+    <main className="flex h-dvh flex-1 items-center justify-center bg-[#fdfdff] p-6">
+      <section className="max-w-md rounded-[12px] border border-[#e5e8f0] bg-white p-6 text-center shadow-[0_22px_60px_rgba(20,28,53,0.04)]">
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-[14px] bg-[#f0edff] text-[#3044ff]">
+          <Shield size={22} strokeWidth={2.35} />
+        </span>
+        <h1 className="mt-4 text-[18px] font-extrabold text-black">Access not enabled</h1>
+        <p className="mt-2 text-[12px] font-medium leading-relaxed text-[#46506a]">
+          Ask an admin to add this page to your permissions.
+        </p>
+      </section>
+    </main>
+  );
+}
+
 function DashboardContent() {
   const [activeTab, setActiveTab] = useState<DashboardTab>("dashboard");
   const [accountProfile, setAccountProfile] = useState<AccountProfile>(defaultAccountProfile);
@@ -5532,6 +8247,20 @@ function DashboardContent() {
   }, [accountProfile]);
 
   useEffect(() => {
+    if (canOpenDashboardTab(accountProfile, activeTab)) {
+      return;
+    }
+
+    const nextTab = getFirstAllowedTab(accountProfile);
+    const timeout = window.setTimeout(() => {
+      setActiveTab(nextTab);
+      window.history.replaceState(null, "", getDashboardUrl(nextTab));
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [accountProfile, activeTab]);
+
+  useEffect(() => {
     let isMounted = true;
 
     async function loadConversationCount() {
@@ -5580,6 +8309,10 @@ function DashboardContent() {
   }, []);
 
   function handleTabChange(tab: DashboardTab) {
+    if (!canOpenDashboardTab(accountProfile, tab)) {
+      return;
+    }
+
     setActiveTab(tab);
 
     if (typeof window !== "undefined") {
@@ -5612,6 +8345,10 @@ function DashboardContent() {
     return nextProfile;
   }
 
+  if (isSuperAdminProfile(accountProfile)) {
+    return <SuperAdminDashboard profile={accountProfile} />;
+  }
+
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-[#fdfdff] font-sans text-black">
       <Sidebar
@@ -5625,7 +8362,9 @@ function DashboardContent() {
         }}
       />
 
-      {activeTab === "dashboard" ? (
+      {!canOpenDashboardTab(accountProfile, activeTab) ? (
+        <RestrictedPage />
+      ) : activeTab === "dashboard" ? (
         <DashboardOverview profile={accountProfile} />
       ) : activeTab === "opportunities" ? (
         <OpportunitiesPage />
@@ -5635,6 +8374,8 @@ function DashboardContent() {
         <KnowledgeBasePage />
       ) : activeTab === "escalations" ? (
         <EscalationsPage />
+      ) : activeTab === "analytics" ? (
+        <AnalyticsPage />
       ) : activeTab === "settings" ? (
         <SettingsPage profile={accountProfile} onProfileChange={updateAccountProfile} />
       ) : (
@@ -5647,7 +8388,7 @@ function DashboardContent() {
           </div>
         </main>
       )}
-      <MobileNavigation activeTab={activeTab} onChangeTab={handleTabChange} />
+      <MobileNavigation activeTab={activeTab} onChangeTab={handleTabChange} profile={accountProfile} />
     </div>
   );
 }

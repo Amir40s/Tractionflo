@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   defaultAiLeadInsight,
   getEnabledWorkflowMap,
+  getAiBehaviorPrompt,
   getStoredOpenAiKey,
   normalizeAiIntegrationMetadata,
   type AiLeadInsight,
@@ -175,6 +176,8 @@ export async function POST(request: Request) {
         {
           role: 'system',
           content: `${integration.systemPrompt}
+
+${getAiBehaviorPrompt(integration.behavior)}
 
 Lead qualification rules: ${integration.leadQualificationRules}
 Preferred CTA: ${integration.ctaMessage}

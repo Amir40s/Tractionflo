@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
+import { canAccessPage, filterAssignedConversations, getUserPermissionProfile } from '@/lib/agent-permissions';
+import { getFreshInstagramAccount } from '@/lib/instagram-token';
 import { createSupabaseServiceClient } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,20 +107,39 @@ export async function GET(request: Request) {
   try {
     const requestUrl = new URL(request.url);
     const countOnly = requestUrl.searchParams.get('countOnly') === '1';
+    const authSupabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await authSupabase.auth.getUser();
+
+    if (authError) {
+      throw authError;
+    }
+
+    if (!user) {
+      return NextResponse.json({ error: 'Not authenticated', conversations: [], conversation_count: 0 }, { status: 401 });
+    }
+
+    const permissions = getUserPermissionProfile((user.user_metadata || {}) as Record<string, unknown>);
+
+    if (!canAccessPage(permissions, 'inbox')) {
+      return NextResponse.json({
+        error: 'Conversations are not enabled for this agent.',
+        conversations: [],
+        conversation_count: 0,
+      });
+    }
 
     // 1. Get the stored Instagram access token from Supabase
     const supabase = createSupabaseServiceClient();
-    const { data: accounts, error: dbError } = await supabase
-      .from('instagram_accounts')
-      .select('ig_user_id, access_token')
-      .order('created_at', { ascending: false })
-      .limit(1);
+    const storedAccount = await getFreshInstagramAccount(supabase);
 
-    if (dbError || !accounts || accounts.length === 0) {
+    if (!storedAccount) {
       return NextResponse.json({ error: 'No Instagram account connected', conversations: [], conversation_count: 0 }, { status: 200 });
     }
 
-    const { ig_user_id, access_token } = accounts[0];
+    const { ig_user_id, access_token } = storedAccount;
 
     // 2. Fetch real Instagram ID for this token
     const meUrl = new URL('https://graph.instagram.com/v21.0/me');
@@ -148,10 +170,11 @@ export async function GET(request: Request) {
     }
 
     const rawConversations: InstagramConversation[] = convsData.data || [];
+    const visibleConversations = filterAssignedConversations(rawConversations, permissions);
 
     if (countOnly) {
       return NextResponse.json({
-        conversation_count: rawConversations.length,
+        conversation_count: visibleConversations.length,
         ig_user_id: real_ig_user_id,
         account,
       });
@@ -159,7 +182,7 @@ export async function GET(request: Request) {
 
     // 4. Fetch messages for each conversation (up to 10 convs)
     const conversations = await Promise.all(
-      rawConversations.slice(0, 10).map(async (conv) => {
+      visibleConversations.slice(0, 10).map(async (conv) => {
         const participants = conv.participants?.data || [];
         const ownParticipant = participants.find(
           (p) => p.username && meData.username && p.username === meData.username
@@ -200,7 +223,7 @@ export async function GET(request: Request) {
       })
     );
 
-    return NextResponse.json({ conversations, conversation_count: rawConversations.length, ig_user_id: real_ig_user_id, account });
+    return NextResponse.json({ conversations, conversation_count: visibleConversations.length, ig_user_id: real_ig_user_id, account });
   } catch (err) {
     console.error('Instagram conversations fetch error:', err);
     return NextResponse.json({ error: 'Failed to fetch conversations', conversations: [], conversation_count: 0 }, { status: 200 });
