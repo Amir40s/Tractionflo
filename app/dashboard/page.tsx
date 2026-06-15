@@ -80,6 +80,15 @@ import {
   type AgentStatus,
   type PagePermissionId,
 } from "@/lib/agent-permissions";
+import {
+  defaultNotificationSettings,
+  dispatchNotificationPreferencesChanged,
+  getDefaultNotificationValue,
+  getNotificationOptions,
+  normalizeNotificationSettings,
+  settingsStateStorageKey,
+  type NotificationSetting,
+} from "@/lib/notification-preferences";
 
 type DashboardTab = "dashboard" | "inbox" | "opportunities" | "audience" | "knowledge" | "escalations" | "analytics" | "settings";
 
@@ -99,6 +108,7 @@ type SuperAdminPage =
   | "ai-escalations"
   | "support-tickets"
   | "support-issues"
+  | "profile"
   | "settings";
 
 type ConnectedInstagramAccount = {
@@ -337,6 +347,7 @@ const superAdminPageIds: SuperAdminPage[] = [
   "ai-escalations",
   "support-tickets",
   "support-issues",
+  "profile",
   "settings",
 ];
 
@@ -509,6 +520,45 @@ type AnalyticsSummary = {
   latestActivity: string;
 };
 
+type RecentActivityItem = {
+  title: string;
+  subtitle: string;
+  time: string;
+  icon: LucideIcon;
+  tone: string;
+  meta?: string;
+};
+
+type CreatorLiveSummary = {
+  conversations: InstagramSettingsConversation[];
+  totalConversationCount: number;
+  totalMessageCount: number;
+  inboundMessageCount: number;
+  outboundMessageCount: number;
+  dateRangeLabel: string;
+  estimatedRevenue: number;
+  opportunityCount: number;
+  escalationCount: number;
+  dashboardOpportunities: Opportunity[];
+  dashboardPipeline: PipelineStep[];
+  recentActivity: RecentActivityItem[];
+  opportunityTabs: { label: string; count: string; icon: LucideIcon }[];
+  opportunityMetrics: { label: string; value: string; change: string; icon: LucideIcon }[];
+  opportunityCards: OpportunityPageCard[];
+  audienceMetrics: AudienceMetric[];
+  audienceSources: AudienceSource[];
+  topAudience: AudienceProfile[];
+  audienceSegments: AudienceSegment[];
+  knowledgeTabs: KnowledgeTab[];
+  knowledgeSources: KnowledgeSource[];
+  knowledgeInsights: KnowledgeInsight[];
+  knowledgeUpdates: KnowledgeUpdate[];
+  knowledgeTrainingPercent: number;
+  escalations: EscalationItem[];
+  escalationTabs: EscalationTab[];
+  escalationDetailRows: EscalationDetailRow[];
+};
+
 type KnowledgeTab = {
   label: string;
   count: string;
@@ -591,12 +641,7 @@ type EscalationRuleSetting = {
   enabled: boolean;
 };
 
-type NotificationSetting = {
-  id: string;
-  label: string;
-  value: string;
-  enabled: boolean;
-};
+type BrowserNotificationPermission = "default" | "granted" | "denied" | "unsupported";
 
 type TeamMemberSetting = {
   id: string;
@@ -631,6 +676,21 @@ type BillingSettings = {
   nextBillingDate: string;
   seats: number;
   invoiceEmail: string;
+};
+
+type PricingPlan = {
+  id: string;
+  name: string;
+  description: string;
+  monthlyPrice: number;
+  status: "active" | "hidden";
+  features: string[];
+  cta: string;
+};
+
+type PricingResponse = {
+  plans?: PricingPlan[];
+  error?: string;
 };
 
 type ApiEventSetting = {
@@ -709,611 +769,6 @@ function getVisibleSettingsMenuItems(profile: AccountProfile) {
   return settingsMenuItems.filter((item) => agentSections.includes(item.id));
 }
 
-const opportunities: Opportunity[] = [
-  {
-    title: "Brand Partnership",
-    eyebrow: "PARTNERSHIP",
-    body: ["Brand: GlowSkin", "Interested in sponsored", "campaign."],
-    value: "$5,000+",
-    action: "Review",
-    tone: "purple",
-    icon: Handshake,
-  },
-  {
-    title: "Ready-to-Buy Lead",
-    eyebrow: "HIGH INTENT",
-    body: ["Interested in Coaching", "Asked about pricing 3 times."],
-    value: "$2,800+",
-    action: "Review",
-    tone: "blue",
-    icon: User,
-  },
-  {
-    title: "Community Leader",
-    eyebrow: "SUPERFAN",
-    body: ["Engages with 100s", "Active in your community."],
-    value: "$1,200+",
-    action: "Review",
-    tone: "orange",
-    icon: Star,
-  },
-  {
-    title: "Refund Request",
-    eyebrow: "ESCALATION",
-    body: ["Order #1024", "Requesting full refund."],
-    action: "Take over",
-    tone: "red",
-    icon: TriangleAlert,
-  },
-];
-
-const pipeline: PipelineStep[] = [
-  {
-    label: "Engaged",
-    value: "12,480",
-    detail: "2.6%\nconversion",
-    tone: "text-[#4b3cff] bg-[#f0edff]",
-    icon: Users,
-  },
-  {
-    label: "Conversations",
-    value: "328",
-    detail: "25.6%\nconversion",
-    tone: "text-[#4b3cff] bg-[#f0edff]",
-    icon: MessageSquare,
-  },
-  {
-    label: "Qualified",
-    value: "84",
-    detail: "27.4%\nconversion",
-    tone: "text-[#13b95f] bg-[#eafaf0]",
-    icon: Sparkles,
-  },
-  {
-    label: "Opportunities",
-    value: "23",
-    detail: "26.1%\nconversion",
-    tone: "text-[#ff850d] bg-[#fff3e6]",
-    icon: Target,
-  },
-  {
-    label: "Customers",
-    value: "6",
-    detail: "$4,280\nrevenue influenced",
-    tone: "text-[#df405b] bg-[#fff0f3]",
-    icon: Crown,
-  },
-];
-
-const recentActivity = [
-  {
-    title: "Partnership inquiry received",
-    subtitle: "GlowSkin interested in collaboration",
-    time: "2m ago",
-    icon: Handshake,
-    tone: "text-[#4b3cff] bg-[#f0edff]",
-  },
-  {
-    title: "Course sale generated",
-    subtitle: "The Creator System",
-    time: "1h ago",
-    meta: "+$297",
-    icon: ShoppingCart,
-    tone: "text-[#16b857] bg-[#eafaf0]",
-  },
-  {
-    title: "New community member",
-    subtitle: "Joined from AI conversation",
-    time: "3h ago",
-    icon: Users,
-    tone: "text-[#ff850d] bg-[#fff3e6]",
-  },
-  {
-    title: "Lead qualified",
-    subtitle: "High intent coaching prospect",
-    time: "5h ago",
-    icon: User,
-    tone: "text-[#246bff] bg-[#eef4ff]",
-  },
-];
-
-const opportunityTabs = [
-  { label: "Buyers", count: "6", icon: Users },
-  { label: "Partnerships", count: "3", icon: Handshake },
-  { label: "Superfans", count: "2", icon: Crown },
-  { label: "Community Leaders", count: "2", icon: User },
-  { label: "All Opportunities", count: "12", icon: Users },
-] as const;
-
-const opportunityMetrics = [
-  {
-    label: "Potential Revenue",
-    value: "$18,400",
-    change: "+23% vs last 7 days",
-    icon: CircleDollarSign,
-  },
-  {
-    label: "Opportunities",
-    value: "12",
-    change: "+3 vs last 7 days",
-    icon: BriefcaseBusiness,
-  },
-  {
-    label: "Avg. Deal Value",
-    value: "$1,533",
-    change: "+18% vs last 7 days",
-    icon: TrendingUp,
-  },
-  {
-    label: "Conversion Rate",
-    value: "24%",
-    change: "+5% vs last 7 days",
-    icon: ChartPie,
-  },
-] as const;
-
-const opportunityPageCards: OpportunityPageCard[] = [
-  {
-    name: "GlowSkin",
-    subtitle: "Brand Partnership",
-    detail: "Interested in sponsored content collaboration and long-term partnership.",
-    badge: "PARTNERSHIP",
-    time: "2m ago",
-    tone: "purple",
-    icon: Handshake,
-    value: "$5,000+",
-    action: "Review",
-    verified: true,
-    avatars: [47, 32, 12],
-    extraAvatars: "+3",
-  },
-  {
-    name: "Jessica Parker",
-    subtitle: "1:1 Coaching Inquiry",
-    detail: "Asked about pricing 3 times and requested more information about the program.",
-    badge: "HIGH INTENT",
-    time: "15m ago",
-    tone: "green",
-    icon: User,
-    scoreLabel: "Lead Score",
-    score: "92/100",
-    progress: "92%",
-    action: "Review",
-  },
-  {
-    name: "Michael Chen",
-    subtitle: "Course Buyer",
-    detail: "Viewed pricing page 4 times and asked about payment plan options.",
-    badge: "READY TO BUY",
-    time: "28m ago",
-    tone: "blue",
-    icon: ShoppingCart,
-    scoreLabel: "Lead Score",
-    score: "88/100",
-    progress: "88%",
-    action: "Review",
-  },
-  {
-    name: "Sofia Martinez",
-    subtitle: "Superfan",
-    detail: "Highly engaged across content. Advocating for you in the community.",
-    badge: "SUPERFAN",
-    time: "1h ago",
-    tone: "orange",
-    icon: Sparkles,
-    scoreLabel: "Engagement Score",
-    score: "95/100",
-    progress: "95%",
-    action: "Review",
-  },
-  {
-    name: "FitLife Apparel",
-    subtitle: "Brand Partnership",
-    detail: "Interested in product placement and affiliate partnership opportunities.",
-    badge: "PARTNERSHIP",
-    time: "3h ago",
-    tone: "purple",
-    icon: BriefcaseBusiness,
-    value: "$3,500+",
-    action: "Review",
-  },
-  {
-    name: "Daniel Lewis",
-    subtitle: "Coaching Inquiry",
-    detail: "Asked detailed questions about the program and implementation process.",
-    badge: "HIGH INTENT",
-    time: "5h ago",
-    tone: "green",
-    icon: User,
-    scoreLabel: "Lead Score",
-    score: "78/100",
-    progress: "78%",
-    action: "Review",
-  },
-  {
-    name: "Ava Thompson",
-    subtitle: "Course Interest",
-    detail: "Downloaded lead magnet and showed interest in starting soon.",
-    badge: "WARM LEAD",
-    time: "7h ago",
-    tone: "blue",
-    icon: ShoppingCart,
-    scoreLabel: "Lead Score",
-    score: "65/100",
-    progress: "65%",
-    action: "Review",
-  },
-  {
-    name: "Refund Requested",
-    subtitle: "Order #1024",
-    detail: "Customer requested refund citing content expectations not met.",
-    badge: "AT RISK",
-    time: "9h ago",
-    tone: "red",
-    icon: TriangleAlert,
-    scoreLabel: "Risk Score",
-    risk: "High",
-    action: "Take over",
-  },
-];
-
-const audienceMetrics: AudienceMetric[] = [
-  {
-    label: "Total Audience",
-    value: "124,580",
-    change: "12.4%",
-    tone: "purple",
-    icon: Users,
-  },
-  {
-    label: "Engaged Audience",
-    value: "18,247",
-    change: "18.7%",
-    tone: "green",
-    icon: Sparkles,
-  },
-  {
-    label: "Leads",
-    value: "2,381",
-    change: "15.3%",
-    tone: "blue",
-    icon: User,
-  },
-  {
-    label: "Customers",
-    value: "846",
-    change: "8.2%",
-    tone: "violet",
-    icon: ShoppingCart,
-  },
-  {
-    label: "Partners",
-    value: "24",
-    change: "20.0%",
-    tone: "orange",
-    icon: Handshake,
-  },
-];
-
-const audienceSources: AudienceSource[] = [
-  { label: "Instagram", percent: "68.7%", count: "85,600", color: "#3f3cff" },
-  { label: "TikTok", percent: "17.3%", count: "21,500", color: "#bd35d2" },
-  { label: "YouTube", percent: "8.6%", count: "10,700", color: "#fb3d5d" },
-  { label: "Email", percent: "3.2%", count: "4,000", color: "#13a84f" },
-  { label: "Other", percent: "2.2%", count: "2,780", color: "#9aa1b5" },
-];
-
-const topAudience: AudienceProfile[] = [
-  {
-    name: "Jessica Parker",
-    handle: "@jess.parker",
-    avatar: 47,
-    engagement: "98",
-    active: "2m ago",
-    tag: "High intent",
-    tagTone: "bg-[#e7f8ed] text-[#0a9b3f]",
-  },
-  {
-    name: "Michael Chen",
-    handle: "@michaelchen",
-    avatar: 12,
-    engagement: "95",
-    active: "5m ago",
-    tag: "Lead",
-    tagTone: "bg-[#e8f0ff] text-[#246bff]",
-  },
-  {
-    name: "Sofia Martinez",
-    handle: "@sofia.martinez",
-    avatar: 32,
-    engagement: "92",
-    active: "12m ago",
-    tag: "Superfan",
-    tagTone: "bg-[#f2e8ff] text-[#8a35ff]",
-  },
-  {
-    name: "Ava Thompson",
-    handle: "@ava.thompson",
-    avatar: 48,
-    engagement: "89",
-    active: "18m ago",
-    tag: "Lead",
-    tagTone: "bg-[#e8f0ff] text-[#246bff]",
-  },
-  {
-    name: "Daniel Lewis",
-    handle: "@daniel.lewis",
-    avatar: 52,
-    engagement: "87",
-    active: "27m ago",
-    tag: "High intent",
-    tagTone: "bg-[#e7f8ed] text-[#0a9b3f]",
-  },
-];
-
-const audienceSegments: AudienceSegment[] = [
-  {
-    label: "High Intent Leads",
-    detail: "Actively researching or asking about offers",
-    count: "1,245",
-    change: "16.4%",
-    tone: "bg-[#eafaf0] text-[#13a84f]",
-    icon: User,
-  },
-  {
-    label: "Warm Leads",
-    detail: "Engaged and considering",
-    count: "3,782",
-    change: "8.7%",
-    tone: "bg-[#eef4ff] text-[#246bff]",
-    icon: Flame,
-  },
-  {
-    label: "Engaged Followers",
-    detail: "Interacts regularly with your content",
-    count: "18,247",
-    change: "18.7%",
-    tone: "bg-[#f0edff] text-[#6d3cff]",
-    icon: Heart,
-  },
-  {
-    label: "Superfans",
-    detail: "Highly engaged and supportive",
-    count: "2,341",
-    change: "22.1%",
-    tone: "bg-[#fff3e6] text-[#ff850d]",
-    icon: Sparkles,
-  },
-  {
-    label: "At Risk",
-    detail: "Decreasing engagement",
-    count: "1,102",
-    change: "-6.3%",
-    tone: "bg-[#fff0f3] text-[#df405b]",
-    icon: TriangleAlert,
-    negative: true,
-  },
-];
-
-const knowledgeTabs: KnowledgeTab[] = [
-  { label: "All Sources", count: "12", icon: Bot },
-  { label: "FAQs", count: "3", icon: CircleHelp },
-  { label: "Pricing", count: "2", icon: DollarSign },
-  { label: "Products", count: "2", icon: Box },
-  { label: "Services", count: "2", icon: Sparkles },
-  { label: "Courses", count: "1", icon: GraduationCap },
-  { label: "Policies", count: "1", icon: Shield },
-  { label: "Website", count: "1", icon: Globe2 },
-  { label: "PDFs", count: "0", icon: FileText },
-];
-
-const knowledgeSources: KnowledgeSource[] = [
-  {
-    title: "Website",
-    subtitle: "tractionflo.com",
-    type: "Website",
-    status: "Synced",
-    statusTone: "bg-[#e7f8ed] text-[#0a8f3b]",
-    updated: "May 18, 2025\n10:32 AM",
-    tone: "bg-[#eef4ff] text-[#246bff]",
-    typeTone: "bg-[#e8f0ff] text-[#246bff]",
-    icon: Globe2,
-  },
-  {
-    title: "FAQ",
-    subtitle: "Common questions and answers",
-    type: "FAQ",
-    status: "Up to date",
-    statusTone: "bg-[#e7f8ed] text-[#0a8f3b]",
-    updated: "May 17, 2025\n4:15 PM",
-    tone: "bg-[#f0edff] text-[#6d3cff]",
-    typeTone: "bg-[#f2e8ff] text-[#7a35ff]",
-    icon: CircleHelp,
-  },
-  {
-    title: "Pricing & Packages",
-    subtitle: "Current pricing, plans, and terms",
-    type: "Pricing",
-    status: "Up to date",
-    statusTone: "bg-[#e7f8ed] text-[#0a8f3b]",
-    updated: "May 16, 2025\n2:40 PM",
-    tone: "bg-[#eafaf0] text-[#0a9b3f]",
-    typeTone: "bg-[#e7f8ed] text-[#0a9b3f]",
-    icon: DollarSign,
-  },
-  {
-    title: "Coaching Programs",
-    subtitle: "1:1 Coaching, Group Coaching, Mentorship",
-    type: "Products",
-    status: "Up to date",
-    statusTone: "bg-[#e7f8ed] text-[#0a8f3b]",
-    updated: "May 16, 2025\n11:20 AM",
-    tone: "bg-[#eef4ff] text-[#246bff]",
-    typeTone: "bg-[#e8f0ff] text-[#246bff]",
-    icon: Box,
-  },
-  {
-    title: "Services",
-    subtitle: "Done-for-you services and offerings",
-    type: "Services",
-    status: "Up to date",
-    statusTone: "bg-[#e7f8ed] text-[#0a8f3b]",
-    updated: "May 15, 2025\n9:08 AM",
-    tone: "bg-[#fff3e6] text-[#ff850d]",
-    typeTone: "bg-[#fff0df] text-[#ff850d]",
-    icon: Sparkles,
-  },
-  {
-    title: "Courses",
-    subtitle: "Course outlines, bonuses, curriculum",
-    type: "Courses",
-    status: "Needs review",
-    statusTone: "bg-[#fff0df] text-[#ff7a00]",
-    updated: "May 12, 2025\n3:22 PM",
-    tone: "bg-[#f0edff] text-[#6d3cff]",
-    typeTone: "bg-[#f2e8ff] text-[#7a35ff]",
-    icon: GraduationCap,
-  },
-  {
-    title: "Refund Policy",
-    subtitle: "Refunds, cancellations, chargebacks",
-    type: "Policies",
-    status: "Up to date",
-    statusTone: "bg-[#e7f8ed] text-[#0a8f3b]",
-    updated: "May 10, 2025\n1:05 PM",
-    tone: "bg-[#fff0f3] text-[#df405b]",
-    typeTone: "bg-[#ffedf1] text-[#df405b]",
-    icon: Shield,
-  },
-  {
-    title: "Brand Guidelines",
-    subtitle: "Tone of voice, brand rules, examples",
-    type: "PDF",
-    status: "Up to date",
-    statusTone: "bg-[#e7f8ed] text-[#0a8f3b]",
-    updated: "May 8, 2025\n6:30 PM",
-    tone: "bg-[#f3f4f8] text-[#596175]",
-    typeTone: "bg-[#eff1f6] text-[#596175]",
-    icon: FileText,
-  },
-];
-
-const knowledgeInsights: KnowledgeInsight[] = [
-  {
-    title: "Top question categories",
-    detail: "See what your audience asks most",
-    tone: "bg-[#f0edff] text-[#4b3cff]",
-    icon: BarChart3,
-  },
-  {
-    title: "Gaps in knowledge",
-    detail: "Find missing information",
-    tone: "bg-[#f3f4f8] text-[#31394f]",
-    icon: Box,
-  },
-  {
-    title: "Improve AI responses",
-    detail: "Review and refine content",
-    tone: "bg-[#fff3e6] text-[#ff850d]",
-    icon: Bot,
-  },
-];
-
-const knowledgeUpdates: KnowledgeUpdate[] = [
-  {
-    title: "Website synced",
-    detail: "tractionflo.com",
-    time: "2h ago",
-    tone: "bg-[#eef4ff] text-[#246bff]",
-    icon: Globe2,
-  },
-  {
-    title: "Pricing updated",
-    detail: "2 changes made",
-    time: "1d ago",
-    tone: "bg-[#eafaf0] text-[#0a9b3f]",
-    icon: DollarSign,
-  },
-  {
-    title: "FAQ updated",
-    detail: "1 change made",
-    time: "2d ago",
-    tone: "bg-[#f0edff] text-[#6d3cff]",
-    icon: CircleHelp,
-  },
-];
-
-const escalationTabs: EscalationTab[] = [
-  { label: "All", count: "3", tone: "text-[#3044ff] bg-[#eef0ff]", icon: Sparkles },
-  { label: "Refunds", count: "1", tone: "text-[#df405b] bg-[#fff0f3]", icon: Shield },
-  { label: "Complaints", count: "1", tone: "text-[#ff850d] bg-[#fff3e6]", icon: Sparkles },
-  { label: "Partnerships", count: "0", tone: "text-[#7a35ff] bg-[#f0edff]", icon: Handshake },
-  { label: "Brand Deals", count: "1", tone: "text-[#0a9b3f] bg-[#eafaf0]", icon: BriefcaseBusiness },
-  { label: "VIP Leads", count: "0", tone: "text-[#3044ff] bg-[#eef4ff]", icon: Star },
-];
-
-const escalationItems: EscalationItem[] = [
-  {
-    name: "Ava Thompson",
-    handle: "@ava.thompson",
-    avatar: "https://i.pravatar.cc/96?img=47",
-    channel: "instagram",
-    time: "2h ago",
-    badge: "Refund Request",
-    badgeTone: "bg-[#fff0f3] text-[#df405b]",
-    title: "Order #1024 - Refund request",
-    detail: "Customer is unhappy with course content and requesting a full refund.",
-    meta: ["Risk: High", "Order value: $297"],
-    metaTone: "first:bg-[#fff0f3] first:text-[#df405b] bg-[#eff1f6] text-[#31394f]",
-    borderTone: "border-[#ffc7d0]",
-    glowTone: "bg-[#fffafa]",
-    dotTone: "bg-[#df405b]",
-    icon: TriangleAlert,
-  },
-  {
-    name: "Michael Chen",
-    handle: "@michael.chen",
-    avatar: "https://i.pravatar.cc/96?img=12",
-    channel: "instagram",
-    time: "5h ago",
-    badge: "Complaint",
-    badgeTone: "bg-[#fff3e6] text-[#ff850d]",
-    title: "Course access issue",
-    detail: "User reports they can't access the course materials after purchase.",
-    meta: ["Risk: Medium", "Order value: $197"],
-    metaTone: "first:bg-[#fff3e6] first:text-[#ff850d] bg-[#eff1f6] text-[#31394f]",
-    borderTone: "border-[#ffe0ba]",
-    glowTone: "bg-[#fffdf9]",
-    dotTone: "bg-[#ff850d]",
-    icon: CircleHelp,
-  },
-  {
-    name: "GlowSkin",
-    handle: "@glowskin.co",
-    avatar: "https://i.pravatar.cc/96?img=32",
-    channel: "instagram",
-    time: "1d ago",
-    badge: "Partnership Inquiry",
-    badgeTone: "bg-[#e7f8ed] text-[#0a9b3f]",
-    title: "Collaboration terms question",
-    detail: "Brand asked for product integration details and audience reach.",
-    meta: ["Potential value: $5,000+", "Status: Waiting"],
-    metaTone: "first:bg-[#e7f8ed] first:text-[#0a9b3f] bg-[#eff1f6] text-[#31394f]",
-    borderTone: "border-[#cbeedd]",
-    glowTone: "bg-[#fbfffd]",
-    dotTone: "bg-[#13a84f]",
-    icon: Handshake,
-  },
-];
-
-const escalationDetailRows: EscalationDetailRow[] = [
-  { label: "Escalation type", value: "Refund Request", icon: TriangleAlert, valueTone: "bg-[#fff0f3] text-[#df405b]" },
-  { label: "Order", value: "#1024", icon: BriefcaseBusiness },
-  { label: "Order value", value: "$297", icon: CircleDollarSign },
-  { label: "Escalated", value: "May 18, 2025 at 9:41 AM", icon: Clock },
-  { label: "Risk level", value: "High", icon: TriangleAlert, valueTone: "bg-[#fff0f3] text-[#df405b]" },
-];
-
 const settingsMenuItems: SettingsMenuItem[] = [
   { id: "account", label: "Account", detail: "Profile, plan and billing", icon: User },
   { id: "instagram", label: "Instagram", detail: "Connect & manage", icon: MessageSquare },
@@ -1329,8 +784,6 @@ const settingsMenuItems: SettingsMenuItem[] = [
   { id: "brand", label: "Brand Settings", detail: "Your brand & voice", icon: Palette },
 ];
 
-const settingsStateStorageKey = "tractionflo_settings_state";
-
 const defaultSettingsState: AppSettingsState = {
   ai: {
     ...defaultAiBehaviorSettings,
@@ -1342,12 +795,7 @@ const defaultSettingsState: AppSettingsState = {
     { id: "partnerships", label: "Partnership deals > $2,500", action: "Escalate for approval", priority: "Medium", enabled: true },
     { id: "vip", label: "VIP leads", action: "Escalate immediately", priority: "High", enabled: true },
   ],
-  notifications: [
-    { id: "email", label: "Email notifications", value: "All important updates", enabled: true },
-    { id: "push", label: "Push notifications", value: "On", enabled: true },
-    { id: "digest", label: "Daily digest", value: "Every morning", enabled: true },
-    { id: "escalation", label: "Escalation alerts", value: "Instant", enabled: true },
-  ],
+  notifications: defaultNotificationSettings,
   team: [
     { id: "owner", name: "Sarah Creates", email: "sarah@creates.com", role: "Owner", status: "Active" },
     { id: "ops", name: "Maya Support", email: "maya@tractionflo.test", role: "Support", status: "Active" },
@@ -1433,7 +881,7 @@ function mergeSettingsState(storedValue: Partial<AppSettingsState> | null): AppS
       ) as AiWorkflowSetting[],
     },
     rules: mergeArrayById(defaultSettingsState.rules, storedValue.rules),
-    notifications: mergeArrayById(defaultSettingsState.notifications, storedValue.notifications),
+    notifications: normalizeNotificationSettings(storedValue.notifications),
     team: Array.isArray(storedValue.team) && storedValue.team.length > 0 ? storedValue.team : defaultSettingsState.team,
     billing: {
       ...defaultSettingsState.billing,
@@ -1633,25 +1081,25 @@ function Sidebar({
         <button
           type="button"
           onClick={() => onChangeTab("settings")}
-          className="flex h-[58px] w-full items-center gap-3 rounded-[10px] border border-[#e6e9f1] bg-white px-3 shadow-[0_18px_38px_rgba(20,28,53,0.04)]"
+          className="flex min-h-[68px] w-full items-center gap-3 rounded-[10px] border border-[#e6e9f1] bg-white px-3 shadow-[0_18px_38px_rgba(20,28,53,0.04)] transition hover:border-[#d9def0] hover:bg-[#fbfbff]"
         >
           {profile.avatarUrl ? (
             <span
               aria-label={profile.name}
               role="img"
-              className="h-10 w-10 rounded-full bg-cover bg-center"
+              className="h-12 w-12 shrink-0 rounded-full border border-[#e3e7f0] bg-cover bg-center shadow-[0_10px_22px_rgba(20,28,53,0.08)]"
               style={{ backgroundImage: `url(${profile.avatarUrl})` }}
             />
           ) : (
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-[11px] font-extrabold text-white">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-[12px] font-extrabold text-white shadow-[0_10px_22px_rgba(124,58,237,0.16)]">
               {initials || "TF"}
             </span>
           )}
-          <span className="flex-1 text-left">
+          <span className="min-w-0 flex-1 text-left">
             <span className="block truncate text-[12px] font-extrabold text-black">{profile.name}</span>
             <span className="block truncate text-[11px] font-semibold text-[#697083]">{profile.role}</span>
           </span>
-          <ChevronDown size={16} strokeWidth={2.4} />
+          <ChevronDown size={16} className="shrink-0" strokeWidth={2.4} />
         </button>
 
         <button
@@ -1748,6 +1196,262 @@ type SuperAdminDetailConfig = {
   rows: SuperAdminTableRow[];
   insightTitle: string;
   insightItems: { label: string; value: string; detail: string; tone: string; icon: LucideIcon }[];
+};
+
+const superAdminTablePageSize = 10;
+
+type AdminDateRangePreset = "7d" | "30d" | "90d";
+
+const adminDateRangeOptions: { value: AdminDateRangePreset; label: string; days: number }[] = [
+  { value: "7d", label: "Last 7 days", days: 7 },
+  { value: "30d", label: "Last 30 days", days: 30 },
+  { value: "90d", label: "Last 90 days", days: 90 },
+];
+
+type SuperAdminConnectedAccountApiRow = {
+  id: string;
+  name: string;
+  detail: string;
+  plan: string;
+  instagram: string;
+  lastActive: string;
+  conversations?: string;
+  messages: string;
+  opportunities?: string;
+  revenue: string;
+  status: string;
+  statusTone: SuperAdminTableRow["statusTone"];
+  createdAt?: string | null;
+  lastActiveAt?: string | null;
+  accountStatus?: "active" | "trial" | "inactive" | "cancelled";
+  owner?: string;
+  revenueAmount?: number;
+  opportunityCount?: number;
+  riskLevel?: "High" | "Medium" | "Low";
+  riskSignal?: string;
+  paymentStatus?: string;
+  paymentMethod?: string;
+  invoiceId?: string;
+  billingDate?: string | null;
+  refundAmount?: number;
+  refundReason?: string;
+  refundStatus?: string;
+  source?: "creator" | "instagram";
+};
+
+type SuperAdminConnectedAccountsResponse = {
+  metrics?: {
+    totalConnected: number;
+    healthyTokens: number;
+    expiredTokens: number;
+    disconnected: number;
+    reconnectRequired: number;
+    automationReady: number;
+    creatorAccounts: number;
+    totalMessages: number;
+    totalConversations?: number;
+    totalOpportunities?: number;
+    activeCreators?: number;
+    trialAccounts?: number;
+    paidAccounts?: number;
+    mrr?: number;
+    arr?: number;
+    newSignups?: number;
+    statusBreakdown?: {
+      active: number;
+      trial: number;
+      inactive: number;
+      cancelled: number;
+    };
+    signupSeries?: number[];
+    mrrSeries?: number[];
+    platformHealth?: {
+      label: string;
+      status: string;
+      tone: "green" | "amber" | "red" | "purple";
+    }[];
+  };
+  rows?: SuperAdminConnectedAccountApiRow[];
+  health?: {
+    reconnectRequired: number;
+    automationReady: number;
+  };
+  error?: string;
+};
+
+type SuperAdminPlatformResponse = {
+  metrics?: {
+    instagramAccounts: number;
+    messagesStored: number;
+    messagesToday: number;
+    latestWebhookAt?: number | null;
+    databaseLatencyMs: number;
+    databaseHealthy: boolean;
+    metaConfigured: boolean;
+    webhookConfigured: boolean;
+    openAiConfigured: boolean;
+    emailConfigured: boolean;
+    paymentConfigured: boolean;
+    healthyServices: number;
+    warningServices: number;
+    pendingJobs: number;
+    processedToday: number;
+    retries: number;
+    failedJobs: number;
+    manualReview: number;
+  };
+  services?: {
+    name: string;
+    detail: string;
+    status: string;
+    tone: SuperAdminTableRow["statusTone"];
+    latency: string;
+    config: string;
+    incidents: string;
+    owner: string;
+  }[];
+  queues?: {
+    name: string;
+    detail: string;
+    queue: string;
+    pending: string;
+    oldest: string;
+    retries: string;
+    worker: string;
+    status: string;
+    tone: SuperAdminTableRow["statusTone"];
+  }[];
+  error?: string;
+};
+
+type SuperAdminAiTone = SuperAdminTableRow["statusTone"];
+
+type SuperAdminAiUsageRow = {
+  name: string;
+  detail: string;
+  messages: number;
+  replies: number;
+  opportunities: number;
+  escalations: number;
+  health: string;
+  status: string;
+  tone: SuperAdminAiTone;
+};
+
+type SuperAdminAiCostRow = {
+  name: string;
+  detail: string;
+  spend: number;
+  tokens: number;
+  replies: number;
+  costPerReply: number;
+  trend: string;
+  status: string;
+  tone: SuperAdminAiTone;
+};
+
+type SuperAdminAiEscalationRow = {
+  name: string;
+  detail: string;
+  reason: string;
+  count: number;
+  avgTime: string;
+  owner: string;
+  trend: string;
+  status: string;
+  tone: SuperAdminAiTone;
+};
+
+type SuperAdminAiResponse = {
+  metrics?: {
+    creators: number;
+    configuredCreators: number;
+    autoSendCreators: number;
+    totalMessages: number;
+    messagesToday: number;
+    aiReadyMessages: number;
+    opportunitySignals: number;
+    handoffSignals: number;
+    urgentSignals: number;
+    humanRequestedSignals: number;
+    trackedReplies: number;
+    trackedSpend: number;
+    trackedTokens: number;
+    estimatedTokens: number;
+    grossMargin: number;
+    replyLogsStored: boolean;
+    spendLogsStored: boolean;
+    messagesTableAvailable: boolean;
+    messagesTableError?: string;
+    workflows: {
+      startConversation: number;
+      answerQuestions: number;
+      qualifyLeads: number;
+      moveToCta: number;
+    };
+  };
+  usage?: SuperAdminAiUsageRow[];
+  costs?: SuperAdminAiCostRow[];
+  escalations?: SuperAdminAiEscalationRow[];
+  error?: string;
+};
+
+type SuperAdminSupportTone = SuperAdminTableRow["statusTone"];
+
+type SuperAdminSupportTicketRow = {
+  id: string;
+  name: string;
+  detail: string;
+  priority: string;
+  topic: string;
+  age: string;
+  assignee: string;
+  sla: string;
+  status: string;
+  tone: SuperAdminSupportTone;
+};
+
+type SuperAdminSupportIssueRow = {
+  id: string;
+  name: string;
+  detail: string;
+  category: string;
+  impact: string;
+  age: string;
+  owner: string;
+  nextStep: string;
+  status: string;
+  tone: SuperAdminSupportTone;
+};
+
+type SuperAdminSupportResponse = {
+  metrics?: {
+    openTickets: number;
+    inProgressTickets: number;
+    resolvedToday: number;
+    satisfaction: string;
+    creatorIssues: number;
+    productIssues: number;
+    onboardingIssues: number;
+    resolvedIssuesToday: number;
+    supportSignals: number;
+    messageRows: number;
+    ticketTableAvailable: boolean;
+    ticketTableName: string;
+    ticketTableError: string;
+    issueTableAvailable: boolean;
+    issueTableName: string;
+    issueTableError: string;
+    messagesTableAvailable: boolean;
+    messagesTableError: string;
+    avgResponse: string;
+    firstResponse: string;
+    platformBlockers: number;
+    successFollowUp: number;
+  };
+  tickets?: SuperAdminSupportTicketRow[];
+  issues?: SuperAdminSupportIssueRow[];
+  error?: string;
 };
 
 const superAdminNavGroups: {
@@ -1865,70 +1569,15 @@ const superAdminPageMeta: Record<SuperAdminPage, { title: string; subtitle: stri
     title: "Creator Issues",
     subtitle: "Creator-reported blockers and operational follow-up.",
   },
+  profile: {
+    title: "Superadmin Profile",
+    subtitle: "Update your profile details, login email, and Cloudinary profile image.",
+  },
   settings: {
     title: "Settings",
     subtitle: "Superadmin controls, workspace preferences, and platform defaults.",
   },
 };
-
-const superAdminOverviewMetrics: SuperAdminMetric[] = [
-  {
-    label: "Connected Accounts",
-    value: "1,284",
-    detail: "Instagram accounts",
-    change: "18.6% vs last 30 days",
-    tone: "bg-[#f0edff] text-[#4b3cff]",
-    icon: Globe2,
-  },
-  {
-    label: "Active Creators",
-    value: "892",
-    detail: "Active this month",
-    change: "14.2% vs last 30 days",
-    tone: "bg-[#eaf4ff] text-[#246bff]",
-    icon: Users,
-  },
-  {
-    label: "Trial Accounts",
-    value: "412",
-    detail: "In trial",
-    change: "8.7% vs last 30 days",
-    tone: "bg-[#fff6e8] text-[#d98613]",
-    icon: User,
-  },
-  {
-    label: "Paid Accounts",
-    value: "872",
-    detail: "Paying customers",
-    change: "16.3% vs last 30 days",
-    tone: "bg-[#eafaf0] text-[#13a84f]",
-    icon: Handshake,
-  },
-  {
-    label: "MRR",
-    value: "$216,928",
-    detail: "Monthly recurring revenue",
-    change: "19.8% vs last 30 days",
-    tone: "bg-[#f0edff] text-[#4b3cff]",
-    icon: DollarSign,
-  },
-  {
-    label: "ARR",
-    value: "$2.6M",
-    detail: "Annual recurring revenue",
-    change: "19.8% vs last 30 days",
-    tone: "bg-[#f0edff] text-[#4b3cff]",
-    icon: CircleDollarSign,
-  },
-];
-
-const superAdminCreatorRows = [
-  ["Sarah Creates", "@sarah.creates", "Pro", "Connected", "2 min ago", "328", "12", "$18,400", "Active"],
-  ["Mike Coach", "@mike.coach", "Founder", "Connected", "1 hour ago", "243", "6", "$9,800", "Active"],
-  ["Emma Fitness", "@emma.fitness", "Pro", "Connected", "3 hours ago", "182", "5", "$7,200", "Active"],
-  ["James Wilson", "@james.wilson", "Trial", "Not connected", "1 day ago", "0", "0", "$0", "Trial"],
-  ["GlowSkin", "@glowskin.co", "Founder", "Connected", "1 hour ago", "412", "9", "$15,200", "Active"],
-];
 
 const statusToneClasses = {
   green: "bg-[#e8f8ed] text-[#0a9b3f]",
@@ -1937,7 +1586,7 @@ const statusToneClasses = {
   purple: "bg-[#f0edff] text-[#4b3cff]",
 };
 
-const superAdminDetailConfigs: Record<Exclude<SuperAdminPage, "overview" | "settings">, SuperAdminDetailConfig> = {
+const superAdminDetailConfigs: Record<Exclude<SuperAdminPage, "overview" | "profile" | "settings">, SuperAdminDetailConfig> = {
   "creators-connected": {
     metrics: [
       { label: "Total connected", value: "1,284", detail: "Instagram accounts", change: "+18.6%", tone: "bg-[#f0edff] text-[#4b3cff]", icon: Globe2 },
@@ -2215,7 +1864,7 @@ function SuperAdminBrandMark() {
         <div className="absolute right-0.5 top-[6px] h-2.5 w-2.5 rounded-full bg-[#8a70ff]" />
       </div>
       <span className="text-[18px] font-extrabold leading-none text-white">TractionFlo</span>
-      <span className="rounded-[5px] bg-[#5b38ff] px-2 py-1 text-[10px] font-extrabold text-white">Admin</span>
+      <span className="rounded-[5px] bg-[#5b38ff] px-2.5 py-1 text-[10px] font-extrabold text-white">Superadmin</span>
     </div>
   );
 }
@@ -2237,7 +1886,7 @@ function SuperAdminSidebar({
     .toUpperCase();
 
   return (
-    <aside className="sticky top-0 hidden h-screen min-h-screen w-[238px] shrink-0 flex-col overflow-hidden bg-[#071022] px-3.5 py-5 text-white lg:flex">
+    <aside className="sticky top-0 hidden h-screen min-h-screen w-[260px] shrink-0 flex-col overflow-hidden bg-[#071022] px-4 py-5 text-white lg:flex">
       <SuperAdminBrandMark />
 
       <nav className="mt-7 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
@@ -2293,7 +1942,13 @@ function SuperAdminSidebar({
       </nav>
 
       <div className="shrink-0 space-y-3 pt-4">
-        <div className="flex h-[58px] items-center gap-3 rounded-[10px] bg-white/6 px-3">
+        <button
+          type="button"
+          onClick={() => onChangePage("profile")}
+          className={`flex h-[58px] w-full items-center gap-3 rounded-[10px] px-3 text-left transition ${
+            activePage === "profile" ? "bg-[#5b38ff] shadow-[0_16px_35px_rgba(91,56,255,0.28)]" : "bg-white/6 hover:bg-white/10"
+          }`}
+        >
           {profile.avatarUrl ? (
             <span
               aria-label={profile.name}
@@ -2311,7 +1966,7 @@ function SuperAdminSidebar({
             <span className="block truncate text-[11px] font-semibold text-[#9faac0]">Super Admin</span>
           </span>
           <ChevronRight size={15} className="text-[#9faac0]" strokeWidth={2.4} />
-        </div>
+        </button>
 
         <form action={signout}>
           <button
@@ -2327,8 +1982,25 @@ function SuperAdminSidebar({
   );
 }
 
-function SuperAdminHeader({ page }: { page: SuperAdminPage }) {
+function SuperAdminHeader({
+  page,
+  dateRangePreset,
+  isAutoRefreshOn,
+  exportStatus,
+  onDateRangeChange,
+  onAutoRefreshChange,
+  onExport,
+}: {
+  page: SuperAdminPage;
+  dateRangePreset: AdminDateRangePreset;
+  isAutoRefreshOn: boolean;
+  exportStatus?: string;
+  onDateRangeChange: (preset: AdminDateRangePreset) => void;
+  onAutoRefreshChange: (enabled: boolean) => void;
+  onExport: () => void;
+}) {
   const meta = superAdminPageMeta[page];
+  const dateRangeLabel = getAdminDateRangeLabel(dateRangePreset);
 
   return (
     <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -2343,27 +2015,43 @@ function SuperAdminHeader({ page }: { page: SuperAdminPage }) {
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
-          className="flex h-11 items-center gap-3 rounded-[8px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.035)]"
-        >
-          May 12 - May 18, 2025
+        <label className="relative flex h-11 cursor-pointer items-center gap-3 rounded-[8px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.035)]">
+          <span>{dateRangeLabel}</span>
           <CalendarDays size={16} strokeWidth={2.3} />
-        </button>
-        <button
-          type="button"
-          className="flex h-11 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.035)]"
-        >
-          <span className="h-2.5 w-2.5 rounded-full bg-[#13a84f]" />
-          Auto refresh: On
+          <select
+            aria-label="Dashboard date range"
+            value={dateRangePreset}
+            onChange={(event) => onDateRangeChange(event.target.value as AdminDateRangePreset)}
+            className="absolute inset-0 cursor-pointer opacity-0"
+          >
+            {adminDateRangeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="relative flex h-11 cursor-pointer items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.035)]">
+          <span className={`h-2.5 w-2.5 rounded-full ${isAutoRefreshOn ? "bg-[#13a84f]" : "bg-[#98a2b3]"}`} />
+          Auto refresh: {isAutoRefreshOn ? "On" : "Off"}
           <ChevronDown size={14} strokeWidth={2.4} />
-        </button>
+          <select
+            aria-label="Auto refresh"
+            value={isAutoRefreshOn ? "on" : "off"}
+            onChange={(event) => onAutoRefreshChange(event.target.value === "on")}
+            className="absolute inset-0 cursor-pointer opacity-0"
+          >
+            <option value="on">Auto refresh on</option>
+            <option value="off">Auto refresh off</option>
+          </select>
+        </label>
         <button
           type="button"
+          onClick={onExport}
           className="flex h-11 items-center gap-2 rounded-[8px] bg-[#5b38ff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_35px_rgba(91,56,255,0.22)]"
         >
           <Download size={15} strokeWidth={2.4} />
-          Export
+          {exportStatus || "Export"}
         </button>
       </div>
     </header>
@@ -2393,22 +2081,37 @@ function SuperAdminMetricCard({ metric }: { metric: SuperAdminMetric }) {
   );
 }
 
-function AdminLineChart({ bars = false }: { bars?: boolean }) {
+function AdminLineChart({ bars = false, values }: { bars?: boolean; values?: number[] }) {
   if (bars) {
-    const values = [14, 34, 11, 28, 16, 38, 19, 26, 51, 18, 13, 45, 24, 31, 55, 20, 36, 27, 48, 62];
+    const chartValues = values?.length ? values : [14, 34, 11, 28, 16, 38, 19, 26, 51, 18, 13, 45, 24, 31, 55, 20, 36, 27, 48, 62];
+    const maxValue = Math.max(...chartValues, 1);
 
     return (
       <div className="flex h-[190px] items-end gap-2 rounded-[8px] bg-[#fbfbff] px-4 pb-5 pt-3">
-        {values.map((value, index) => (
+        {chartValues.map((value, index) => (
           <span
             key={`${value}-${index}`}
             className="flex-1 rounded-t-[5px] bg-gradient-to-t from-[#5b38ff] to-[#9a89ff]"
-            style={{ height: `${Math.max(18, value * 2.1)}px` }}
+            style={{ height: `${Math.max(8, (value / maxValue) * 160)}px` }}
           />
         ))}
       </div>
     );
   }
+
+  const chartValues = values?.length ? values : [102000, 112000, 118000, 124000, 138000, 156000, 174000, 188000, 198000, 216928];
+  const maxValue = Math.max(...chartValues, 1);
+  const minValue = Math.min(...chartValues);
+  const range = Math.max(1, maxValue - minValue);
+  const width = 640;
+  const height = 230;
+  const points = chartValues.map((value, index) => {
+    const x = chartValues.length === 1 ? width / 2 : 24 + (index / (chartValues.length - 1)) * (width - 48);
+    const y = height - 35 - ((value - minValue) / range) * 155;
+    return { x, y };
+  });
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+  const areaPath = `${path} L ${points[points.length - 1]?.x.toFixed(1) || width - 24} 220 L ${points[0]?.x.toFixed(1) || 24} 220 Z`;
 
   return (
     <div className="relative h-[230px] rounded-[8px] bg-[#fbfbff]">
@@ -2419,31 +2122,43 @@ function AdminLineChart({ bars = false }: { bars?: boolean }) {
             <stop offset="100%" stopColor="#5b38ff" stopOpacity="0" />
           </linearGradient>
         </defs>
-        <path
-          d="M24 180 C88 156 132 160 185 142 C230 126 271 114 318 92 C366 70 412 82 462 55 C520 25 562 45 616 22 L616 220 L24 220 Z"
-          fill="url(#adminMrrFill)"
-        />
-        <path
-          d="M24 180 C88 156 132 160 185 142 C230 126 271 114 318 92 C366 70 412 82 462 55 C520 25 562 45 616 22"
-          fill="none"
-          stroke="#5b38ff"
-          strokeLinecap="round"
-          strokeWidth="3"
-        />
-        {[24, 185, 318, 462, 616].map((x, index) => (
-          <circle key={x} cx={x} cy={[180, 142, 92, 55, 22][index]} r="4" fill="#5b38ff" />
+        <path d={areaPath} fill="url(#adminMrrFill)" />
+        <path d={path} fill="none" stroke="#5b38ff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
+        {points.map((point) => (
+          <circle key={`${point.x}-${point.y}`} cx={point.x} cy={point.y} r="4" fill="#5b38ff" />
         ))}
       </svg>
     </div>
   );
 }
 
-function AdminDonut({ label, value }: { label: string; value: string }) {
+function AdminDonut({
+  label,
+  value,
+  segments,
+}: {
+  label: string;
+  value: string;
+  segments?: { value: number; color: string }[];
+}) {
+  const total = segments?.reduce((sum, segment) => sum + segment.value, 0) || 0;
+  let cursor = 0;
+  const background = total > 0 && segments?.length
+    ? `conic-gradient(${segments
+        .map((segment) => {
+          const start = cursor;
+          const end = cursor + (segment.value / total) * 100;
+          cursor = end;
+          return `${segment.color} ${start}% ${end}%`;
+        })
+        .join(", ")})`
+    : "conic-gradient(#e9edf5 0 100%)";
+
   return (
     <div className="flex items-center justify-center py-4">
       <div
         className="relative flex h-[154px] w-[154px] items-center justify-center rounded-full"
-        style={{ background: "conic-gradient(#16b364 0 69.5%, #3154ff 69.5% 89.5%, #ff850d 89.5% 95.8%, #98a2b3 95.8% 100%)" }}
+        style={{ background }}
       >
         <div className="flex h-[92px] w-[92px] flex-col items-center justify-center rounded-full bg-white">
           <span className="text-[24px] font-extrabold text-black">{value}</span>
@@ -2454,11 +2169,268 @@ function AdminDonut({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SuperAdminOverviewPage() {
+function formatAdminNumber(value?: number) {
+  return new Intl.NumberFormat("en-US").format(value || 0);
+}
+
+function formatAdminCurrency(value?: number, compact = false) {
+  if (compact && value && value >= 1000000) {
+    return `$${(value / 1000000).toFixed(value >= 10000000 ? 0 : 1)}M`;
+  }
+
+  return `$${formatAdminNumber(value || 0)}`;
+}
+
+function formatAdminMoneyPrecise(value?: number, decimals = 2) {
+  const amount = value || 0;
+
+  if (amount === 0) {
+    return "$0";
+  }
+
+  return `$${amount.toFixed(decimals)}`;
+}
+
+function formatAdminTokenVolume(value?: number) {
+  const tokens = value || 0;
+
+  if (tokens >= 1000000000) {
+    return `${(tokens / 1000000000).toFixed(1)}B`;
+  }
+
+  if (tokens >= 1000000) {
+    return `${(tokens / 1000000).toFixed(tokens >= 10000000 ? 0 : 1)}M`;
+  }
+
+  if (tokens >= 1000) {
+    return `${(tokens / 1000).toFixed(tokens >= 10000 ? 0 : 1)}K`;
+  }
+
+  return formatAdminNumber(tokens);
+}
+
+function getAdminRangeOption(preset: AdminDateRangePreset) {
+  return adminDateRangeOptions.find((option) => option.value === preset) || adminDateRangeOptions[0];
+}
+
+function getAdminDateRangeLabel(preset: AdminDateRangePreset = "7d") {
+  const range = getAdminRangeOption(preset);
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  startDate.setDate(endDate.getDate() - (range.days - 1));
+
+  return `${startDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  })} - ${endDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })}`;
+}
+
+function getAdminRangeLabel(preset: AdminDateRangePreset) {
+  return getAdminRangeOption(preset).label;
+}
+
+function sliceAdminSeries(values: number[] | undefined, preset: AdminDateRangePreset) {
+  const range = getAdminRangeOption(preset);
+
+  if (!values?.length) {
+    return values;
+  }
+
+  return values.slice(-range.days);
+}
+
+function formatAdminPercent(value: number, total: number) {
+  if (total <= 0) {
+    return "0%";
+  }
+
+  return `${((value / total) * 100).toFixed(1)}%`;
+}
+
+function getPlatformHealthToneClass(tone: "green" | "amber" | "red" | "purple") {
+  if (tone === "green") {
+    return "text-[#13a84f]";
+  }
+
+  if (tone === "red") {
+    return "text-[#df405b]";
+  }
+
+  if (tone === "purple") {
+    return "text-[#4b3cff]";
+  }
+
+  return "text-[#c07800]";
+}
+
+function SuperAdminOverviewPage({ refreshKey = 0 }: { refreshKey?: number }) {
+  const [data, setData] = useState<SuperAdminConnectedAccountsResponse | null>(null);
+  const [mrrRangePreset, setMrrRangePreset] = useState<AdminDateRangePreset>("30d");
+  const [signupRangePreset, setSignupRangePreset] = useState<AdminDateRangePreset>("30d");
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const fetchOverviewData = useCallback(async () => {
+    const response = await fetch("/api/admin/connected-accounts", {
+      cache: "no-store",
+    });
+    const nextData = (await response.json()) as SuperAdminConnectedAccountsResponse;
+
+    if (!response.ok || nextData.error) {
+      throw new Error(nextData.error || "Could not load overview data");
+    }
+
+    return nextData;
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadOverviewData() {
+      try {
+        const nextData = await fetchOverviewData();
+
+        if (isMounted) {
+          setData(nextData);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load overview data");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadOverviewData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchOverviewData, refreshKey]);
+
+  const metrics = data?.metrics;
+  const emptySeries = Array.from({ length: 20 }, () => 0);
+  const statusBreakdown = metrics?.statusBreakdown || { active: 0, trial: 0, inactive: 0, cancelled: 0 };
+  const statusTotal = Math.max(
+    0,
+    statusBreakdown.active + statusBreakdown.trial + statusBreakdown.inactive + statusBreakdown.cancelled
+  );
+  const overviewMetrics: SuperAdminMetric[] = [
+    {
+      label: "Connected Accounts",
+      value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.totalConnected),
+      detail: "Instagram accounts",
+      change: `${formatAdminNumber(metrics?.healthyTokens)} healthy tokens`,
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: Globe2,
+    },
+    {
+      label: "Active Creators",
+      value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.activeCreators),
+      detail: "Active this month",
+      change: `${formatAdminNumber(metrics?.newSignups)} new signups`,
+      tone: "bg-[#eaf4ff] text-[#246bff]",
+      icon: Users,
+    },
+    {
+      label: "Trial Accounts",
+      value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.trialAccounts),
+      detail: "In trial",
+      change: `${formatAdminPercent(metrics?.trialAccounts || 0, metrics?.creatorAccounts || 0)} of creators`,
+      tone: "bg-[#fff6e8] text-[#d98613]",
+      icon: User,
+    },
+    {
+      label: "Paid Accounts",
+      value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.paidAccounts),
+      detail: "Paying customers",
+      change: `${formatAdminPercent(metrics?.paidAccounts || 0, metrics?.creatorAccounts || 0)} of creators`,
+      tone: "bg-[#eafaf0] text-[#13a84f]",
+      icon: Handshake,
+    },
+    {
+      label: "MRR",
+      value: isLoading && !metrics ? "..." : formatAdminCurrency(metrics?.mrr),
+      detail: "Monthly recurring revenue",
+      change: "From account metadata",
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: DollarSign,
+    },
+    {
+      label: "ARR",
+      value: isLoading && !metrics ? "..." : formatAdminCurrency(metrics?.arr, true),
+      detail: "Annual recurring revenue",
+      change: "Annualized from MRR",
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: CircleDollarSign,
+    },
+  ];
+  const statusItems = [
+    { label: "Active", value: statusBreakdown.active, color: "#16b364" },
+    { label: "Trial", value: statusBreakdown.trial, color: "#3154ff" },
+    { label: "Inactive", value: statusBreakdown.inactive, color: "#ff850d" },
+    { label: "Cancelled", value: statusBreakdown.cancelled, color: "#98a2b3" },
+  ];
+  const recentRows = data?.rows || [];
+  const instagramSegments = [
+    { value: metrics?.healthyTokens || 0, color: "#16b364" },
+    { value: metrics?.expiredTokens || 0, color: "#ff850d" },
+    { value: metrics?.disconnected || 0, color: "#df405b" },
+  ];
+  const instagramTotal = instagramSegments.reduce((sum, segment) => sum + segment.value, 0);
+  const platformHealthItems = metrics?.platformHealth || [
+    { label: "Instagram API", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
+    { label: "OpenAI API", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
+    { label: "Database", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
+    { label: "Webhook Queue", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
+    { label: "Email Service", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
+    { label: "Payment Service", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
+  ];
+  const platformHealthIcons: Record<string, LucideIcon> = {
+    "Instagram API": Globe2,
+    "OpenAI API": BrainCircuit,
+    Database,
+    "Webhook Queue": TriangleAlert,
+    "Email Service": Mail,
+    "Payment Service": CreditCard,
+  };
+  const aiUsageItems: [string, string, LucideIcon, string][] = [
+    ["Messages Processed", formatAdminNumber(metrics?.totalMessages), Bot, "bg-[#f0edff] text-[#4b3cff]"],
+    ["AI Conversations", formatAdminNumber(metrics?.totalConversations), Sparkles, "bg-[#f0edff] text-[#4b3cff]"],
+    ["Opportunities Found", formatAdminNumber(metrics?.totalOpportunities), Target, "bg-[#fff6e8] text-[#d98613]"],
+    ["Escalations", "0", TriangleAlert, "bg-[#fff0f3] text-[#df405b]"],
+  ];
+  const recentTableConfig: SuperAdminDetailConfig = {
+    metrics: [],
+    columns: ["Plan", "Instagram", "Last active", "Conversations", "Opportunities", "Revenue found"],
+    rows: recentRows.map((row) => ({
+      name: row.name,
+      detail: row.detail,
+      values: [row.plan, row.instagram, row.lastActive, row.conversations || "0", row.opportunities || "0", row.revenue],
+      status: row.status,
+      statusTone: row.statusTone,
+    })),
+    insightTitle: "Recently Active Creators",
+    insightItems: [],
+  };
+
   return (
     <div className="space-y-5">
+      {errorMessage ? (
+        <div className="rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-4 text-[12px] font-bold text-[#df405b]">
+          {errorMessage}
+        </div>
+      ) : null}
+
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        {superAdminOverviewMetrics.map((metric) => (
+        {overviewMetrics.map((metric) => (
           <SuperAdminMetricCard key={metric.label} metric={metric} />
         ))}
       </section>
@@ -2468,44 +2440,65 @@ function SuperAdminOverviewPage() {
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="text-[14px] font-extrabold text-black">MRR Growth</h2>
-              <p className="mt-2 text-[26px] font-extrabold leading-none text-black">$216,928</p>
+              <p className="mt-2 text-[26px] font-extrabold leading-none text-black">{formatAdminCurrency(metrics?.mrr)}</p>
             </div>
-            <button type="button" className="flex h-8 items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold">
-              Last 30 days
+            <label className="relative flex h-8 cursor-pointer items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold">
+              {getAdminRangeLabel(mrrRangePreset)}
               <ChevronDown size={13} />
-            </button>
+              <select
+                aria-label="MRR growth range"
+                value={mrrRangePreset}
+                onChange={(event) => setMrrRangePreset(event.target.value as AdminDateRangePreset)}
+                className="absolute inset-0 cursor-pointer opacity-0"
+              >
+                {adminDateRangeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
-          <AdminLineChart />
+          <AdminLineChart values={isLoading && !metrics ? emptySeries : sliceAdminSeries(metrics?.mrrSeries, mrrRangePreset)} />
         </article>
 
         <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="text-[14px] font-extrabold text-black">New Signups</h2>
-              <p className="mt-2 text-[22px] font-extrabold leading-none text-black">341</p>
+              <p className="mt-2 text-[22px] font-extrabold leading-none text-black">{formatAdminNumber(metrics?.newSignups)}</p>
             </div>
-            <button type="button" className="flex h-8 items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold">
-              Last 30 days
+            <label className="relative flex h-8 cursor-pointer items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold">
+              {getAdminRangeLabel(signupRangePreset)}
               <ChevronDown size={13} />
-            </button>
+              <select
+                aria-label="New signups range"
+                value={signupRangePreset}
+                onChange={(event) => setSignupRangePreset(event.target.value as AdminDateRangePreset)}
+                className="absolute inset-0 cursor-pointer opacity-0"
+              >
+                {adminDateRangeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
-          <AdminLineChart bars />
+          <AdminLineChart bars values={isLoading && !metrics ? emptySeries : sliceAdminSeries(metrics?.signupSeries, signupRangePreset)} />
         </article>
 
         <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
           <h2 className="text-[14px] font-extrabold text-black">Account Status</h2>
-          <AdminDonut label="Total" value="1,284" />
+          <AdminDonut label="Total" value={formatAdminNumber(statusTotal)} segments={statusItems.map((item) => ({ value: item.value, color: item.color }))} />
           <div className="space-y-2 text-[11px] font-bold">
-            {[
-              ["Active", "892 (69.5%)", "#16b364"],
-              ["Trial", "412 (32.1%)", "#3154ff"],
-              ["Inactive", "72 (6.6%)", "#ff850d"],
-              ["Cancelled", "54 (4.2%)", "#98a2b3"],
-            ].map(([label, value, color]) => (
-              <div key={label} className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-                <span className="flex-1 text-[#30384d]">{label}</span>
-                <span className="text-[#596175]">{value}</span>
+            {statusItems.map((item) => (
+              <div key={item.label} className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                <span className="flex-1 text-[#30384d]">{item.label}</span>
+                <span className="text-[#596175]">
+                  {formatAdminNumber(item.value)} ({formatAdminPercent(item.value, statusTotal)})
+                </span>
               </div>
             ))}
           </div>
@@ -2517,22 +2510,15 @@ function SuperAdminOverviewPage() {
             <button type="button" className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
           </div>
           <div className="space-y-3">
-            {[
-              ["Instagram API", "Healthy", Globe2, "green"],
-              ["OpenAI API", "Healthy", BrainCircuit, "green"],
-              ["Database", "Healthy", Database, "green"],
-              ["Webhook Queue", "Warning", TriangleAlert, "amber"],
-              ["Email Service", "Healthy", Mail, "green"],
-              ["Payment Service", "Healthy", CreditCard, "green"],
-            ].map(([label, status, IconValue, tone]) => {
-              const Icon = IconValue as LucideIcon;
+            {platformHealthItems.map((item) => {
+              const Icon = platformHealthIcons[item.label] || CircleHelp;
               return (
-                <div key={label as string} className="flex items-center gap-3 text-[12px] font-bold">
+                <div key={item.label} className="flex items-center gap-3 text-[12px] font-bold">
                   <span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-[#f6f7fb] text-[#4b3cff]">
                     <Icon size={15} strokeWidth={2.35} />
                   </span>
-                  <span className="flex-1 text-[#30384d]">{label as string}</span>
-                  <span className={tone === "green" ? "text-[#13a84f]" : "text-[#c07800]"}>{status as string}</span>
+                  <span className="flex-1 text-[#30384d]">{item.label}</span>
+                  <span className={getPlatformHealthToneClass(item.tone)}>{item.status}</span>
                 </div>
               );
             })}
@@ -2546,38 +2532,15 @@ function SuperAdminOverviewPage() {
             <h2 className="text-[14px] font-extrabold text-black">Recently Active Creators</h2>
             <button type="button" className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-[12px]">
-              <thead className="border-b border-[#edf0f6] text-[10px] uppercase text-[#687089]">
-                <tr>
-                  {["Creator", "Plan", "Instagram", "Last active", "Conversations", "Opportunities", "Revenue found", "Status"].map((header) => (
-                    <th key={header} className="py-3 font-extrabold">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {superAdminCreatorRows.map((row) => (
-                  <tr key={row[0]} className="border-b border-[#edf0f6] last:border-b-0">
-                    <td className="py-3">
-                      <p className="font-extrabold text-black">{row[0]}</p>
-                      <p className="text-[11px] font-semibold text-[#687089]">{row[1]}</p>
-                    </td>
-                    <td className="py-3 font-bold text-[#4b3cff]">{row[2]}</td>
-                    <td className={`py-3 font-bold ${row[3] === "Connected" ? "text-[#13a84f]" : "text-[#df405b]"}`}>{row[3]}</td>
-                    <td className="py-3 font-semibold text-[#30384d]">{row[4]}</td>
-                    <td className="py-3 font-extrabold text-black">{row[5]}</td>
-                    <td className="py-3 font-extrabold text-black">{row[6]}</td>
-                    <td className="py-3 font-extrabold text-black">{row[7]}</td>
-                    <td className="py-3">
-                      <span className={`rounded-full px-2 py-1 text-[10px] font-extrabold ${row[8] === "Active" ? statusToneClasses.green : statusToneClasses.amber}`}>
-                        {row[8]}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {recentTableConfig.rows.length > 0 ? (
+            <SuperAdminTable config={recentTableConfig} />
+          ) : (
+            <div className="rounded-[8px] border border-dashed border-[#d9deea] p-8 text-center">
+              <p className="text-[13px] font-extrabold text-black">
+                {isLoading ? "Loading real creator accounts..." : "No creator accounts found yet."}
+              </p>
+            </div>
+          )}
         </article>
 
         <div className="grid gap-4">
@@ -2586,12 +2549,12 @@ function SuperAdminOverviewPage() {
               <h2 className="text-[14px] font-extrabold text-black">Instagram Accounts</h2>
               <button type="button" className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
             </div>
-            <AdminDonut label="Connected" value="1,284" />
+            <AdminDonut label="Tracked" value={formatAdminNumber(instagramTotal)} segments={instagramSegments} />
             <div className="space-y-2 text-[12px] font-bold">
               {[
-                ["Healthy", "1,242 (96.7%)", "text-[#13a84f]"],
-                ["Expired Token", "28 (2.2%)", "text-[#c07800]"],
-                ["Disconnected", "14 (1.1%)", "text-[#df405b]"],
+                ["Healthy", `${formatAdminNumber(metrics?.healthyTokens)} (${formatAdminPercent(metrics?.healthyTokens || 0, instagramTotal)})`, "text-[#13a84f]"],
+                ["Expired Token", `${formatAdminNumber(metrics?.expiredTokens)} (${formatAdminPercent(metrics?.expiredTokens || 0, instagramTotal)})`, "text-[#c07800]"],
+                ["Disconnected", `${formatAdminNumber(metrics?.disconnected)} (${formatAdminPercent(metrics?.disconnected || 0, instagramTotal)})`, "text-[#df405b]"],
               ].map(([label, value, tone]) => (
                 <div key={label} className="flex justify-between">
                   <span className={tone}>{label}</span>
@@ -2604,20 +2567,14 @@ function SuperAdminOverviewPage() {
           <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
             <h2 className="text-[14px] font-extrabold text-black">AI Usage Today</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {[
-                ["Messages Processed", "124,580", Bot, "bg-[#f0edff] text-[#4b3cff]"],
-                ["AI Conversations", "18,420", Sparkles, "bg-[#f0edff] text-[#4b3cff]"],
-                ["Opportunities Found", "3,281", Target, "bg-[#fff6e8] text-[#d98613]"],
-                ["Escalations", "284", TriangleAlert, "bg-[#fff0f3] text-[#df405b]"],
-              ].map(([label, value, IconValue, tone]) => {
-                const Icon = IconValue as LucideIcon;
+              {aiUsageItems.map(([label, value, Icon, tone]) => {
                 return (
-                  <div key={label as string} className="rounded-[8px] border border-[#edf0f6] p-3">
-                    <span className={`mb-3 flex h-8 w-8 items-center justify-center rounded-[8px] ${tone as string}`}>
+                  <div key={label} className="rounded-[8px] border border-[#edf0f6] p-3">
+                    <span className={`mb-3 flex h-8 w-8 items-center justify-center rounded-[8px] ${tone}`}>
                       <Icon size={16} strokeWidth={2.35} />
                     </span>
-                    <p className="text-[11px] font-bold text-[#687089]">{label as string}</p>
-                    <p className="mt-1 text-[18px] font-extrabold text-black">{value as string}</p>
+                    <p className="text-[11px] font-bold text-[#687089]">{label}</p>
+                    <p className="mt-1 text-[18px] font-extrabold text-black">{value}</p>
                   </div>
                 );
               })}
@@ -2629,50 +2586,1043 @@ function SuperAdminOverviewPage() {
   );
 }
 
-function SuperAdminTable({ config }: { config: SuperAdminDetailConfig }) {
+function SuperAdminPagination({
+  page,
+  totalItems,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const startItem = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endItem = Math.min(totalItems, page * pageSize);
+  const pageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1).filter((pageNumber) => {
+    if (totalPages <= 5) {
+      return true;
+    }
+
+    return pageNumber === 1 || pageNumber === totalPages || Math.abs(pageNumber - page) <= 1;
+  });
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-left text-[12px]">
-        <thead className="border-b border-[#edf0f6] text-[10px] uppercase text-[#687089]">
-          <tr>
-            <th className="py-3 font-extrabold">Name</th>
-            {config.columns.map((column) => (
-              <th key={column} className="py-3 font-extrabold">{column}</th>
-            ))}
-            <th className="py-3 font-extrabold">Status</th>
-            <th className="py-3 text-right font-extrabold">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {config.rows.map((row) => (
-            <tr key={row.name} className="border-b border-[#edf0f6] last:border-b-0">
-              <td className="py-4">
-                <p className="font-extrabold text-black">{row.name}</p>
-                <p className="mt-1 text-[11px] font-semibold text-[#687089]">{row.detail}</p>
-              </td>
-              {row.values.map((value, index) => (
-                <td key={`${row.name}-${index}`} className="py-4 font-bold text-[#30384d]">{value}</td>
-              ))}
-              <td className="py-4">
-                <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${statusToneClasses[row.statusTone]}`}>
-                  {row.status}
-                </span>
-              </td>
-              <td className="py-4 text-right">
-                <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#e0e4ef] text-black">
-                  <MoreHorizontal size={16} strokeWidth={2.4} />
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="mt-4 flex flex-col gap-3 border-t border-[#edf0f6] pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-[12px] font-bold text-[#46506a]">
+        Showing {formatAdminNumber(startItem)}-{formatAdminNumber(endItem)} of {formatAdminNumber(totalItems)} records
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold text-[#30384d] disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          <ChevronLeft size={14} strokeWidth={2.4} />
+          Previous
+        </button>
+        {pageNumbers.map((pageNumber, index) => {
+          const previousPageNumber = pageNumbers[index - 1];
+          const hasGap = typeof previousPageNumber === "number" && pageNumber - previousPageNumber > 1;
+
+          return (
+            <span key={pageNumber} className="flex items-center gap-2">
+              {hasGap ? <span className="text-[12px] font-extrabold text-[#8a92a6]">...</span> : null}
+              <button
+                type="button"
+                onClick={() => onPageChange(pageNumber)}
+                className={`flex h-9 min-w-9 items-center justify-center rounded-[8px] px-3 text-[12px] font-extrabold ${
+                  pageNumber === page
+                    ? "bg-[#3044ff] text-white shadow-[0_12px_28px_rgba(48,68,255,0.22)]"
+                    : "border border-[#e0e4ef] bg-white text-[#30384d]"
+                }`}
+              >
+                {pageNumber}
+              </button>
+            </span>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold text-[#30384d] disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Next
+          <ChevronRight size={14} strokeWidth={2.4} />
+        </button>
+      </div>
     </div>
   );
 }
 
-function SuperAdminDetailPage({ page }: { page: Exclude<SuperAdminPage, "overview" | "settings"> }) {
-  const config = superAdminDetailConfigs[page];
+function SuperAdminTable({ config }: { config: SuperAdminDetailConfig }) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(config.rows.length / superAdminTablePageSize));
+  const safePage = Math.min(page, totalPages);
+  const startIndex = (safePage - 1) * superAdminTablePageSize;
+  const visibleRows = config.rows.slice(startIndex, startIndex + superAdminTablePageSize);
+
+  return (
+    <div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-left text-[12px]">
+          <thead className="border-b border-[#edf0f6] text-[10px] uppercase text-[#687089]">
+            <tr>
+              <th className="py-3 font-extrabold">Name</th>
+              {config.columns.map((column) => (
+                <th key={column} className="py-3 font-extrabold">{column}</th>
+              ))}
+              <th className="py-3 font-extrabold">Status</th>
+              <th className="py-3 text-right font-extrabold">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, rowIndex) => (
+              <tr key={`${row.name}-${startIndex + rowIndex}`} className="border-b border-[#edf0f6] last:border-b-0">
+                <td className="py-4">
+                  <p className="font-extrabold text-black">{row.name}</p>
+                  <p className="mt-1 text-[11px] font-semibold text-[#687089]">{row.detail}</p>
+                </td>
+                {row.values.map((value, index) => (
+                  <td key={`${row.name}-${startIndex + rowIndex}-${index}`} className="py-4 font-bold text-[#30384d]">{value}</td>
+                ))}
+                <td className="py-4">
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${statusToneClasses[row.statusTone]}`}>
+                    {row.status}
+                  </span>
+                </td>
+                <td className="py-4 text-right">
+                  <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#e0e4ef] text-black">
+                    <MoreHorizontal size={16} strokeWidth={2.4} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <SuperAdminPagination
+        page={safePage}
+        totalItems={config.rows.length}
+        pageSize={superAdminTablePageSize}
+        onPageChange={setPage}
+      />
+    </div>
+  );
+}
+
+function SuperAdminConnectedAccountsPage({ refreshKey = 0 }: { refreshKey?: number }) {
+  const [data, setData] = useState<SuperAdminConnectedAccountsResponse | null>(null);
+  const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const fetchConnectedAccounts = useCallback(async () => {
+    const response = await fetch("/api/admin/connected-accounts", {
+      cache: "no-store",
+    });
+    const nextData = (await response.json()) as SuperAdminConnectedAccountsResponse;
+
+    if (!response.ok || nextData.error) {
+      throw new Error(nextData.error || "Could not load connected accounts");
+    }
+
+    return nextData;
+  }, []);
+
+  const loadConnectedAccounts = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      const nextData = await fetchConnectedAccounts();
+      setData(nextData);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load connected accounts");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchConnectedAccounts]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialConnectedAccounts() {
+      try {
+        const nextData = await fetchConnectedAccounts();
+
+        if (isMounted) {
+          setData(nextData);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load connected accounts");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadInitialConnectedAccounts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchConnectedAccounts, refreshKey]);
+
+  const metrics = data?.metrics;
+  const rows = data?.rows || [];
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredRows = rows.filter((row) => {
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    return [row.name, row.detail, row.plan, row.instagram, row.status]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery);
+  });
+  const numberFormatter = new Intl.NumberFormat("en-US");
+  const metricCards: SuperAdminMetric[] = [
+    {
+      label: "Total connected",
+      value: isLoading && !metrics ? "..." : numberFormatter.format(metrics?.totalConnected || 0),
+      detail: "Instagram accounts",
+      change: `${numberFormatter.format(metrics?.creatorAccounts || 0)} creator accounts`,
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: Globe2,
+    },
+    {
+      label: "Healthy tokens",
+      value: isLoading && !metrics ? "..." : numberFormatter.format(metrics?.healthyTokens || 0),
+      detail: "Ready for automation",
+      change: `${numberFormatter.format(metrics?.automationReady || 0)} automation ready`,
+      tone: "bg-[#eafaf0] text-[#13a84f]",
+      icon: Check,
+    },
+    {
+      label: "Expired tokens",
+      value: isLoading && !metrics ? "..." : numberFormatter.format(metrics?.expiredTokens || 0),
+      detail: "Need reconnect",
+      change: `${numberFormatter.format(metrics?.reconnectRequired || 0)} total issues`,
+      tone: "bg-[#fff4df] text-[#c07800]",
+      icon: Clock,
+    },
+    {
+      label: "Disconnected",
+      value: isLoading && !metrics ? "..." : numberFormatter.format(metrics?.disconnected || 0),
+      detail: "No active Instagram link",
+      change: `${numberFormatter.format(metrics?.totalMessages || 0)} tracked messages`,
+      tone: "bg-[#fff0f3] text-[#df405b]",
+      icon: TriangleAlert,
+    },
+  ];
+  const tableConfig: SuperAdminDetailConfig = {
+    metrics: [],
+    columns: ["Plan", "Instagram", "Last active", "Messages", "Revenue"],
+    rows: filteredRows.map((row) => ({
+      name: row.name,
+      detail: row.detail,
+      values: [row.plan, row.instagram, row.lastActive, row.messages, row.revenue],
+      status: row.status,
+      statusTone: row.statusTone,
+    })),
+    insightTitle: "Account health",
+    insightItems: [],
+  };
+  const reconnectRequired = data?.health?.reconnectRequired || 0;
+  const automationReady = data?.health?.automationReady || 0;
+
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {metricCards.map((metric) => (
+          <SuperAdminMetricCard key={metric.label} metric={metric} />
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-[15px] font-extrabold text-black">Connected Accounts activity</h2>
+              <p className="mt-1 text-[11px] font-semibold text-[#687089]">
+                Real creator accounts and Instagram token status from Supabase.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold">
+                <Search size={14} strokeWidth={2.4} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search"
+                  className="w-full min-w-0 bg-transparent text-[12px] font-bold outline-none placeholder:text-[#687089] sm:w-28"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void loadConnectedAccounts()}
+                disabled={isLoading}
+                className="flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw size={14} strokeWidth={2.4} className={isLoading ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {errorMessage ? (
+            <div className="rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-4 text-[12px] font-bold text-[#df405b]">
+              {errorMessage}
+            </div>
+          ) : tableConfig.rows.length > 0 ? (
+            <SuperAdminTable config={tableConfig} />
+          ) : (
+            <div className="rounded-[8px] border border-dashed border-[#d9deea] p-8 text-center">
+              <p className="text-[13px] font-extrabold text-black">
+                {isLoading ? "Loading real accounts..." : "No connected creator accounts found yet."}
+              </p>
+              <p className="mt-2 text-[12px] font-semibold text-[#687089]">
+                {isLoading
+                  ? "Checking Supabase Auth and Instagram token records."
+                  : "Connect Instagram or create creator accounts to populate this table."}
+              </p>
+            </div>
+          )}
+        </article>
+
+        <aside className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <h2 className="text-[15px] font-extrabold text-black">Account health</h2>
+          <div className="mt-4 space-y-3">
+            {[
+              {
+                label: "Reconnect required",
+                value: numberFormatter.format(reconnectRequired),
+                detail: "Expired, invalid, or missing Instagram tokens",
+                tone: "bg-[#fff4df] text-[#c07800]",
+                icon: RefreshCw,
+              },
+              {
+                label: "Automation ready",
+                value: numberFormatter.format(automationReady),
+                detail: "Accounts with healthy token state",
+                tone: "bg-[#eafaf0] text-[#13a84f]",
+                icon: Check,
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <div key={item.label} className="rounded-[8px] border border-[#edf0f6] p-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${item.tone}`}>
+                      <Icon size={18} strokeWidth={2.35} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-extrabold text-black">{item.label}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-[#687089]">{item.detail}</p>
+                    </div>
+                    <span className="text-[20px] font-extrabold text-black">{item.value}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function formatAdminDate(value?: string | null) {
+  if (!value) {
+    return "No date";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "No date";
+  }
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function getAdminRowNumber(value?: string) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getTrialSignal(row: SuperAdminConnectedAccountApiRow) {
+  const messages = getAdminRowNumber(row.messages);
+  const opportunities = getAdminRowNumber(row.opportunities);
+
+  if (opportunities > 0) {
+    return "Opportunity signals";
+  }
+
+  if (messages > 0) {
+    return "Message activity";
+  }
+
+  if (row.instagram === "Connected") {
+    return "Connected";
+  }
+
+  return "Setup pending";
+}
+
+function getChurnStatus(row: SuperAdminConnectedAccountApiRow) {
+  if (row.riskLevel === "High") {
+    return { label: "At risk", tone: "red" as const };
+  }
+
+  if (row.riskLevel === "Medium") {
+    return { label: "Watch", tone: "amber" as const };
+  }
+
+  return { label: "Monitor", tone: "purple" as const };
+}
+
+function buildCreatorLifecycleConfig(
+  page: "creators-trials" | "creators-churn",
+  data: SuperAdminConnectedAccountsResponse | null,
+  isLoading: boolean,
+  query: string
+) {
+  const metrics = data?.metrics;
+  const creatorRows = (data?.rows || []).filter((row) => row.source !== "instagram");
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchesQuery = (row: SuperAdminConnectedAccountApiRow) => {
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    return [row.name, row.detail, row.plan, row.instagram, row.status, row.riskSignal, row.owner]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery);
+  };
+
+  if (page === "creators-trials") {
+    const trialRows = creatorRows
+      .filter((row) => row.accountStatus === "trial" || row.plan.toLowerCase().includes("trial"))
+      .filter(matchesQuery);
+    const allTrialRows = creatorRows.filter((row) => row.accountStatus === "trial" || row.plan.toLowerCase().includes("trial"));
+    const conversionReady = allTrialRows.filter((row) => row.instagram === "Connected" && (getAdminRowNumber(row.messages) > 0 || getAdminRowNumber(row.opportunities) > 0)).length;
+    const needsActivation = allTrialRows.filter((row) => row.instagram !== "Connected" || getAdminRowNumber(row.messages) === 0).length;
+    const expiringThisWeek = allTrialRows.filter((row) => {
+      if (!row.createdAt) {
+        return false;
+      }
+
+      const ageDays = (Date.now() - new Date(row.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+      return ageDays >= 23 && ageDays <= 30;
+    }).length;
+    const trialPipeline = allTrialRows.reduce((sum, row) => sum + (row.revenueAmount || 0), 0);
+
+    return {
+      config: {
+        metrics: [
+          { label: "Trial accounts", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.trialAccounts), detail: "Currently evaluating", change: `${formatAdminPercent(metrics?.trialAccounts || 0, metrics?.creatorAccounts || 0)} of creators`, tone: "bg-[#fff6e8] text-[#d98613]", icon: User },
+          { label: "Conversion ready", value: isLoading && !metrics ? "..." : formatAdminNumber(conversionReady), detail: "High engagement trials", change: `${formatAdminNumber(conversionReady)} ready`, tone: "bg-[#eafaf0] text-[#13a84f]", icon: Target },
+          { label: "Expiring this week", value: isLoading && !metrics ? "..." : formatAdminNumber(expiringThisWeek), detail: "Need outreach", change: "Based on signup age", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+          { label: "Trial pipeline", value: isLoading && !metrics ? "..." : formatAdminCurrency(trialPipeline, true), detail: "Potential MRR", change: "From metadata", tone: "bg-[#f0edff] text-[#4b3cff]", icon: DollarSign },
+        ],
+        columns: ["Start", "Plan target", "Messages", "Signals", "Owner"],
+        rows: trialRows.map((row) => {
+          const ready = row.instagram === "Connected" && (getAdminRowNumber(row.messages) > 0 || getAdminRowNumber(row.opportunities) > 0);
+
+          return {
+            name: row.name,
+            detail: row.detail,
+            values: [formatAdminDate(row.createdAt), row.plan, row.messages, getTrialSignal(row), row.owner || "Success"],
+            status: ready ? "Ready" : "Trial",
+            statusTone: ready ? "green" as const : "amber" as const,
+          };
+        }),
+        insightTitle: "Trial actions",
+        insightItems: [
+          { label: "Needs activation", value: formatAdminNumber(needsActivation), detail: "Trials with low first-week usage", tone: "bg-[#fff4df] text-[#c07800]", icon: Play },
+          { label: "Upgrade nudges", value: formatAdminNumber(conversionReady), detail: "Trials ready for payment follow-up", tone: "bg-[#eafaf0] text-[#13a84f]", icon: ArrowRight },
+        ],
+      },
+      emptyText: "No real trial accounts found.",
+    };
+  }
+
+  const allRiskRows = creatorRows.filter((row) => row.riskSignal && row.riskSignal !== "Healthy");
+  const riskRows = allRiskRows.filter(matchesQuery);
+  const lowUsage = allRiskRows.filter((row) => row.riskSignal?.toLowerCase().includes("low") || row.riskSignal?.toLowerCase().includes("no activity")).length;
+  const failedPayment = allRiskRows.filter((row) => row.riskSignal?.toLowerCase().includes("failed")).length;
+  const recovered = creatorRows.filter((row) => row.accountStatus === "active" && row.riskSignal === "Healthy").length;
+  const revenueAtRisk = allRiskRows.reduce((sum, row) => sum + (row.revenueAmount || 0), 0);
+
+  return {
+    config: {
+      metrics: [
+        { label: "At-risk creators", value: isLoading && !metrics ? "..." : formatAdminNumber(allRiskRows.length), detail: "Usage or billing risk", change: "Real signals", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+        { label: "Low usage", value: isLoading && !metrics ? "..." : formatAdminNumber(lowUsage), detail: "No activity in 7 days", change: "Needs review", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+        { label: "Failed payment", value: isLoading && !metrics ? "..." : formatAdminNumber(failedPayment), detail: "Card action needed", change: formatAdminCurrency(allRiskRows.filter((row) => row.riskSignal?.toLowerCase().includes("failed")).reduce((sum, row) => sum + (row.revenueAmount || 0), 0)), tone: "bg-[#fff0f3] text-[#df405b]", icon: CreditCard },
+        { label: "Recovered", value: isLoading && !metrics ? "..." : formatAdminNumber(recovered), detail: "Healthy active creators", change: "No risk signal", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Heart },
+      ],
+      columns: ["Risk", "Plan", "MRR", "Last signal", "Owner"],
+      rows: riskRows.map((row) => {
+        const status = getChurnStatus(row);
+
+        return {
+          name: row.name,
+          detail: row.detail,
+          values: [row.riskLevel || "Low", row.plan, formatAdminCurrency(row.revenueAmount), row.riskSignal || "Healthy", row.owner || "Success"],
+          status: status.label,
+          statusTone: status.tone,
+        };
+      }),
+      insightTitle: "Retention queue",
+      insightItems: [
+        { label: "Save playbooks", value: formatAdminNumber(allRiskRows.length), detail: "Accounts queued for retention outreach", tone: "bg-[#f0edff] text-[#4b3cff]", icon: BriefcaseBusiness },
+        { label: "Revenue at risk", value: formatAdminCurrency(revenueAtRisk, true), detail: "MRR attached to current risk signals", tone: "bg-[#fff0f3] text-[#df405b]", icon: DollarSign },
+      ],
+    },
+    emptyText: "No real churn-risk accounts found.",
+  };
+}
+
+type RevenueAdminPage = "revenue-subscriptions" | "revenue-payments" | "revenue-refunds";
+
+function getCreatorAdminRows(data: SuperAdminConnectedAccountsResponse | null) {
+  return (data?.rows || []).filter((row) => row.source !== "instagram");
+}
+
+function getNormalizedStatus(value?: string) {
+  return (value || "").trim().toLowerCase();
+}
+
+function formatAdminStatus(value?: string) {
+  const normalized = getNormalizedStatus(value);
+
+  if (!normalized) {
+    return "Unpaid";
+  }
+
+  return normalized
+    .split(/[\s_-]+/)
+    .map((item) => item.charAt(0).toUpperCase() + item.slice(1))
+    .join(" ");
+}
+
+function isPaidAdminRow(row: SuperAdminConnectedAccountApiRow) {
+  const status = getNormalizedStatus(row.paymentStatus);
+  return (row.revenueAmount || 0) > 0 || status === "paid" || status === "active";
+}
+
+function isFailedPaymentRow(row: SuperAdminConnectedAccountApiRow) {
+  const status = getNormalizedStatus(row.paymentStatus);
+  return status.includes("failed") || status.includes("past_due") || row.riskSignal?.toLowerCase().includes("failed payment");
+}
+
+function isPendingPaymentRow(row: SuperAdminConnectedAccountApiRow) {
+  const status = getNormalizedStatus(row.paymentStatus);
+  return status.includes("pending") || status.includes("processing");
+}
+
+function getPaymentTone(row: SuperAdminConnectedAccountApiRow): SuperAdminTableRow["statusTone"] {
+  if (isFailedPaymentRow(row)) {
+    return "red";
+  }
+
+  if (isPendingPaymentRow(row)) {
+    return "amber";
+  }
+
+  if (isPaidAdminRow(row)) {
+    return "green";
+  }
+
+  return "purple";
+}
+
+function getPaymentStatus(row: SuperAdminConnectedAccountApiRow) {
+  if (isFailedPaymentRow(row)) {
+    return "Failed";
+  }
+
+  if (isPendingPaymentRow(row)) {
+    return "Processing";
+  }
+
+  if (isPaidAdminRow(row)) {
+    return "Paid";
+  }
+
+  return formatAdminStatus(row.paymentStatus);
+}
+
+function getRetryLabel(row: SuperAdminConnectedAccountApiRow) {
+  const status = getNormalizedStatus(row.paymentStatus);
+
+  if (status.includes("retry")) {
+    return formatAdminStatus(row.paymentStatus);
+  }
+
+  if (isFailedPaymentRow(row)) {
+    return "Needs retry";
+  }
+
+  return "None";
+}
+
+function getRefundRows(rows: SuperAdminConnectedAccountApiRow[]) {
+  return rows.filter((row) => (row.refundAmount || 0) > 0 || Boolean(row.refundReason || row.refundStatus));
+}
+
+function isResolvedRefund(row: SuperAdminConnectedAccountApiRow) {
+  const status = getNormalizedStatus(row.refundStatus);
+  return status.includes("resolved") || status.includes("saved");
+}
+
+function isOpenRefund(row: SuperAdminConnectedAccountApiRow) {
+  const status = getNormalizedStatus(row.refundStatus);
+  return status.includes("open") || status.includes("review") || status.includes("dispute");
+}
+
+function getRefundTone(row: SuperAdminConnectedAccountApiRow): SuperAdminTableRow["statusTone"] {
+  if (isResolvedRefund(row)) {
+    return "green";
+  }
+
+  if (isOpenRefund(row)) {
+    return "red";
+  }
+
+  return "amber";
+}
+
+function getPlanGroupKey(plan: string) {
+  const normalized = plan.trim().toLowerCase();
+
+  if (normalized.includes("founder")) return "Founder Plan";
+  if (normalized.includes("pro")) return "Pro Plan";
+  if (normalized.includes("starter")) return "Starter Plan";
+  if (normalized.includes("trial")) return "Trial pool";
+
+  return plan.trim() || "Creator";
+}
+
+function buildRevenueConfig(
+  page: RevenueAdminPage,
+  data: SuperAdminConnectedAccountsResponse | null,
+  isLoading: boolean,
+  query: string
+) {
+  const metrics = data?.metrics;
+  const creatorRows = getCreatorAdminRows(data);
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchesQuery = (values: string[]) => !normalizedQuery || values.join(" ").toLowerCase().includes(normalizedQuery);
+  const paidRows = creatorRows.filter(isPaidAdminRow);
+  const failedRows = creatorRows.filter(isFailedPaymentRow);
+  const pendingRows = creatorRows.filter(isPendingPaymentRow);
+  const totalMrr = paidRows.reduce((sum, row) => sum + (row.revenueAmount || 0), 0);
+  const churnedRows = creatorRows.filter((row) => row.accountStatus === "inactive" || row.accountStatus === "cancelled");
+  const churnRate = creatorRows.length > 0 ? `${((churnedRows.length / creatorRows.length) * 100).toFixed(1)}%` : "0%";
+
+  if (page === "revenue-subscriptions") {
+    const groupedPlans = new Map<string, { name: string; count: number; mrr: number; active: number; trial: boolean }>();
+
+    creatorRows.forEach((row) => {
+      const name = getPlanGroupKey(row.plan);
+      const current = groupedPlans.get(name) || {
+        name,
+        count: 0,
+        mrr: 0,
+        active: 0,
+        trial: name.toLowerCase().includes("trial"),
+      };
+
+      current.count += 1;
+      current.mrr += row.revenueAmount || 0;
+
+      if (row.accountStatus === "active") {
+        current.active += 1;
+      }
+
+      groupedPlans.set(name, current);
+    });
+
+    const planRows = Array.from(groupedPlans.values())
+      .sort((first, second) => second.mrr - first.mrr || second.count - first.count)
+      .filter((group) => matchesQuery([group.name, String(group.count), formatAdminCurrency(group.mrr)]));
+    const paidGroupCounts = paidRows.reduce<Record<string, number>>((counts, row) => {
+      const name = getPlanGroupKey(row.plan);
+      counts[name] = (counts[name] || 0) + 1;
+      return counts;
+    }, {});
+    const paidInsightItems = Object.entries(paidGroupCounts).sort((first, second) => second[1] - first[1]);
+
+    return {
+      config: {
+        metrics: [
+          { label: "MRR", value: isLoading && !metrics ? "..." : formatAdminCurrency(metrics?.mrr || totalMrr), detail: "Monthly recurring revenue", change: "From billing metadata", tone: "bg-[#f0edff] text-[#4b3cff]", icon: DollarSign },
+          { label: "ARR", value: isLoading && !metrics ? "..." : formatAdminCurrency(metrics?.arr || totalMrr * 12, true), detail: "Annual recurring revenue", change: "Annualized from MRR", tone: "bg-[#f0edff] text-[#4b3cff]", icon: CircleDollarSign },
+          { label: "Paid accounts", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.paidAccounts || paidRows.length), detail: "Active subscriptions", change: `${formatAdminPercent(paidRows.length, creatorRows.length)} of creators`, tone: "bg-[#eafaf0] text-[#13a84f]", icon: Handshake },
+          { label: "Churn rate", value: isLoading && !metrics ? "..." : churnRate, detail: "Inactive or cancelled", change: `${formatAdminNumber(churnedRows.length)} accounts`, tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
+        ],
+        columns: ["Plan", "MRR", "Accounts", "Growth", "Retention"],
+        rows: planRows.map((group) => ({
+          name: group.name,
+          detail: group.trial ? "Not billed yet" : `${formatAdminCurrency(group.count > 0 ? group.mrr / group.count : 0)} average MRR`,
+          values: [
+            group.name.replace(" Plan", ""),
+            formatAdminCurrency(group.mrr),
+            formatAdminNumber(group.count),
+            "Live",
+            group.trial ? "Pending" : formatAdminPercent(group.active, group.count),
+          ],
+          status: group.trial ? "Pipeline" : group.mrr > 0 ? "Strong" : "Monitor",
+          statusTone: group.trial ? "purple" as const : group.mrr > 0 ? "green" as const : "amber" as const,
+        })),
+        insightTitle: "Revenue mix",
+        insightItems: (paidInsightItems.length > 0
+          ? paidInsightItems.slice(0, 2).map(([name, count]) => ({
+              label: `${name.replace(" Plan", "")} share`,
+              value: formatAdminPercent(count, paidRows.length),
+              detail: "Of paid accounts",
+              tone: name.toLowerCase().includes("pro") ? "bg-[#eaf4ff] text-[#246bff]" : "bg-[#f0edff] text-[#4b3cff]",
+              icon: name.toLowerCase().includes("founder") ? Crown : Sparkles,
+            }))
+          : planRows.slice(0, 2).map((group) => ({
+              label: `${group.name.replace(" Plan", "")} share`,
+              value: formatAdminPercent(group.count, creatorRows.length),
+              detail: "Of creators",
+              tone: group.name.toLowerCase().includes("pro") ? "bg-[#eaf4ff] text-[#246bff]" : "bg-[#f0edff] text-[#4b3cff]",
+              icon: group.name.toLowerCase().includes("founder") ? Crown : Sparkles,
+            }))),
+      },
+      emptyText: "No real subscription records found.",
+    };
+  }
+
+  if (page === "revenue-payments") {
+    const paymentRows = creatorRows
+      .filter((row) => isPaidAdminRow(row) || isFailedPaymentRow(row) || isPendingPaymentRow(row))
+      .filter((row) => matchesQuery([row.name, row.detail, row.invoiceId || "", row.paymentStatus || "", row.paymentMethod || ""]));
+    const recoveredRows = creatorRows.filter((row) => getNormalizedStatus(row.paymentStatus).includes("recover"));
+    const processingAmount = pendingRows.reduce((sum, row) => sum + (row.revenueAmount || 0), 0);
+    const settledCount = paidRows.length;
+    const settlementTotal = paidRows.length + failedRows.length + pendingRows.length;
+
+    return {
+      config: {
+        metrics: [
+          { label: "Successful charges", value: isLoading && !metrics ? "..." : formatAdminNumber(paidRows.length), detail: "Current paid users", change: formatAdminCurrency(totalMrr), tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+          { label: "Failed payments", value: isLoading && !metrics ? "..." : formatAdminNumber(failedRows.length), detail: "Needs retry", change: formatAdminCurrency(failedRows.reduce((sum, row) => sum + (row.revenueAmount || 0), 0)), tone: "bg-[#fff0f3] text-[#df405b]", icon: CreditCard },
+          { label: "Processing", value: isLoading && !metrics ? "..." : formatAdminCurrency(processingAmount), detail: "Pending settlement", change: `${formatAdminNumber(pendingRows.length)} accounts`, tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+          { label: "Recovered revenue", value: isLoading && !metrics ? "..." : formatAdminCurrency(recoveredRows.reduce((sum, row) => sum + (row.revenueAmount || 0), 0)), detail: "Dunning wins", change: `${formatAdminNumber(recoveredRows.length)} recovered`, tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
+        ],
+        columns: ["Amount", "Method", "Date", "Retry", "Owner"],
+        rows: paymentRows.map((row) => ({
+          name: row.name,
+          detail: row.invoiceId ? `Invoice ${row.invoiceId}` : row.detail,
+          values: [
+            formatAdminCurrency(row.revenueAmount),
+            row.paymentMethod || "Unknown",
+            formatAdminDate(row.billingDate || row.createdAt),
+            getRetryLabel(row),
+            row.owner || "Billing",
+          ],
+          status: getPaymentStatus(row),
+          statusTone: getPaymentTone(row),
+        })),
+        insightTitle: "Payment ops",
+        insightItems: [
+          { label: "Retry queue", value: formatAdminNumber(failedRows.length), detail: "Failed invoices in retry workflow", tone: "bg-[#fff0f3] text-[#df405b]", icon: RefreshCw },
+          { label: "Settlement health", value: formatAdminPercent(settledCount, settlementTotal), detail: "Charges settled successfully", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Shield },
+        ],
+      },
+      emptyText: "No real payment records found.",
+    };
+  }
+
+  const refundRows = getRefundRows(creatorRows);
+  const visibleRefundRows = refundRows.filter((row) =>
+    matchesQuery([row.name, row.detail, row.refundReason || "", row.refundStatus || "", row.plan])
+  );
+  const refundTotal = refundRows.reduce((sum, row) => sum + (row.refundAmount || 0), 0);
+  const savedRefunds = refundRows.filter(isResolvedRefund).reduce((sum, row) => sum + (row.refundAmount || 0), 0);
+  const openRefunds = refundRows.filter(isOpenRefund);
+  const reasonCounts = refundRows.reduce<Record<string, number>>((counts, row) => {
+    const reason = row.refundReason || "Unspecified";
+    counts[reason] = (counts[reason] || 0) + 1;
+    return counts;
+  }, {});
+  const reasonItems = Object.entries(reasonCounts)
+    .sort((first, second) => second[1] - first[1])
+    .slice(0, 2);
+
+  return {
+    config: {
+      metrics: [
+        { label: "Refunds", value: isLoading && !metrics ? "..." : formatAdminCurrency(refundTotal), detail: "Recorded in metadata", change: `${formatAdminNumber(refundRows.length)} accounts`, tone: "bg-[#fff0f3] text-[#df405b]", icon: CreditCard },
+        { label: "Refund rate", value: isLoading && !metrics ? "..." : formatAdminPercent(refundTotal, metrics?.mrr || totalMrr), detail: "Of paid revenue", change: "Live metadata", tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
+        { label: "Open disputes", value: isLoading && !metrics ? "..." : formatAdminNumber(openRefunds.length), detail: "Needs evidence", change: "Review queue", tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+        { label: "Saved refunds", value: isLoading && !metrics ? "..." : formatAdminCurrency(savedRefunds), detail: "Resolved by support", change: `${formatAdminNumber(refundRows.filter(isResolvedRefund).length)} saved`, tone: "bg-[#eafaf0] text-[#13a84f]", icon: Heart },
+      ],
+      columns: ["Amount", "Reason", "Date", "Plan", "Owner"],
+      rows: visibleRefundRows.map((row) => ({
+        name: row.name,
+        detail: row.detail,
+        values: [
+          formatAdminCurrency(row.refundAmount),
+          row.refundReason || "Unspecified",
+          formatAdminDate(row.billingDate || row.createdAt),
+          row.plan,
+          row.owner || "Support",
+        ],
+        status: row.refundStatus ? formatAdminStatus(row.refundStatus) : "Open",
+        statusTone: getRefundTone(row),
+      })),
+      insightTitle: "Refund reasons",
+      insightItems: (reasonItems.length > 0 ? reasonItems : [["No refunds", 0] as [string, number]]).map(([label, value], index) => ({
+        label,
+        value: formatAdminPercent(value, Math.max(1, refundRows.length)),
+        detail: index === 0 ? "Most common reason" : "Secondary reason",
+        tone: index === 0 ? "bg-[#fff4df] text-[#c07800]" : "bg-[#f0edff] text-[#4b3cff]",
+        icon: index === 0 ? CreditCard : SlidersHorizontal,
+      })),
+    },
+    emptyText: "No real refund records found.",
+  };
+}
+
+function SuperAdminPricingSection() {
+  const [plans, setPlans] = useState<PricingPlan[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialPricing() {
+      try {
+        const response = await fetch("/api/pricing", {
+          cache: "no-store",
+        });
+        const data = (await response.json()) as PricingResponse;
+
+        if (!response.ok || data.error) {
+          throw new Error(data.error || "Could not load pricing");
+        }
+
+        if (isMounted) {
+          setPlans(data.plans || []);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setMessage(error instanceof Error ? error.message : "Could not load pricing");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadInitialPricing();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  function updatePlan(planId: string, partial: Partial<PricingPlan>) {
+    setPlans((current) => current.map((plan) => (plan.id === planId ? { ...plan, ...partial } : plan)));
+  }
+
+  async function savePricing() {
+    setIsSaving(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/pricing", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ plans }),
+      });
+      const data = (await response.json()) as PricingResponse;
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Could not save pricing");
+      }
+
+      setPlans(data.plans || plans);
+      setMessage("Pricing saved. New purchases will use these prices.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save pricing");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-[15px] font-extrabold text-black">Pricing plans</h2>
+          <p className="mt-1 text-[11px] font-semibold text-[#687089]">
+            Prices here power creator checkout and admin revenue totals after purchase.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void savePricing()}
+          disabled={isSaving || isLoading}
+          className="flex h-9 items-center justify-center gap-2 rounded-[8px] bg-[#5b38ff] px-4 text-[12px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSaving ? <RefreshCw size={14} strokeWidth={2.4} className="animate-spin" /> : <Check size={14} strokeWidth={2.6} />}
+          Save pricing
+        </button>
+      </div>
+
+      {message && <p className="mt-3 rounded-[8px] bg-[#f6f7fb] px-3 py-2 text-[11px] font-semibold text-[#46506a]">{message}</p>}
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {(isLoading && plans.length === 0 ? Array.from({ length: 3 }) : plans).map((planValue, index) => {
+          const plan = planValue as PricingPlan | undefined;
+
+          if (!plan) {
+            return (
+              <div key={index} className="h-[210px] animate-pulse rounded-[9px] border border-[#edf0f6] bg-[#f6f7fb]" />
+            );
+          }
+
+          return (
+            <article key={plan.id} className="rounded-[9px] border border-[#edf0f6] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <input
+                    value={plan.name}
+                    onChange={(event) => updatePlan(plan.id, { name: event.target.value })}
+                    className="w-full rounded-[7px] border border-transparent bg-transparent px-1 text-[14px] font-extrabold text-black outline-none focus:border-[#dfe4ee]"
+                  />
+                  <input
+                    value={plan.description}
+                    onChange={(event) => updatePlan(plan.id, { description: event.target.value })}
+                    className="mt-1 w-full rounded-[7px] border border-transparent bg-transparent px-1 text-[11px] font-semibold text-[#687089] outline-none focus:border-[#dfe4ee]"
+                  />
+                </div>
+                <span className={`rounded-full px-2 py-1 text-[10px] font-extrabold ${plan.status === "active" ? "bg-[#e8f8ed] text-[#0a9b3f]" : "bg-[#f6f7fb] text-[#687089]"}`}>
+                  {plan.status}
+                </span>
+              </div>
+              <label className="mt-4 block">
+                <span className="text-[10px] font-extrabold uppercase text-[#687089]">Monthly price</span>
+                <div className="mt-2 flex h-10 items-center rounded-[8px] border border-[#dfe4ee] px-3">
+                  <span className="text-[13px] font-extrabold text-[#687089]">$</span>
+                  <input
+                    value={plan.monthlyPrice}
+                    type="number"
+                    min={0}
+                    onChange={(event) => updatePlan(plan.id, { monthlyPrice: Math.max(0, Number(event.target.value) || 0) })}
+                    className="h-full min-w-0 flex-1 bg-transparent px-2 text-[13px] font-extrabold text-black outline-none"
+                  />
+                  <span className="text-[11px] font-semibold text-[#687089]">/mo</span>
+                </div>
+              </label>
+              <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                <SettingsSelect
+                  ariaLabel={`${plan.name} status`}
+                  value={plan.status}
+                  options={["active", "hidden"]}
+                  onChange={(value) => updatePlan(plan.id, { status: value === "hidden" ? "hidden" : "active" })}
+                />
+                <p className="text-[10px] font-semibold text-[#687089]">
+                  {plan.features.length} features
+                </p>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function SuperAdminRevenuePage({ page, refreshKey = 0 }: { page: RevenueAdminPage; refreshKey?: number }) {
+  const [data, setData] = useState<SuperAdminConnectedAccountsResponse | null>(null);
+  const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const fetchRevenueData = useCallback(async () => {
+    const response = await fetch("/api/admin/connected-accounts", {
+      cache: "no-store",
+    });
+    const nextData = (await response.json()) as SuperAdminConnectedAccountsResponse;
+
+    if (!response.ok || nextData.error) {
+      throw new Error(nextData.error || "Could not load revenue data");
+    }
+
+    return nextData;
+  }, []);
+
+  const loadRevenueData = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      const nextData = await fetchRevenueData();
+      setData(nextData);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load revenue data");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchRevenueData]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialRevenueData() {
+      try {
+        const nextData = await fetchRevenueData();
+
+        if (isMounted) {
+          setData(nextData);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load revenue data");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadInitialRevenueData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchRevenueData, refreshKey]);
+
+  const { config, emptyText } = buildRevenueConfig(page, data, isLoading, query);
 
   return (
     <div className="space-y-5">
@@ -2685,7 +3635,1110 @@ function SuperAdminDetailPage({ page }: { page: Exclude<SuperAdminPage, "overvie
       <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
         <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
           <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-[15px] font-extrabold text-black">{superAdminPageMeta[page].title} activity</h2>
+            <div>
+              <h2 className="text-[15px] font-extrabold text-black">{superAdminPageMeta[page].title} activity</h2>
+              <p className="mt-1 text-[11px] font-semibold text-[#687089]">Live billing values from Supabase user metadata.</p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold">
+                <Search size={14} strokeWidth={2.4} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search"
+                  className="w-full min-w-0 bg-transparent text-[12px] font-bold outline-none placeholder:text-[#687089] sm:w-28"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void loadRevenueData()}
+                disabled={isLoading}
+                className="flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw size={14} strokeWidth={2.4} className={isLoading ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {errorMessage ? (
+            <div className="rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-4 text-[12px] font-bold text-[#df405b]">
+              {errorMessage}
+            </div>
+          ) : config.rows.length > 0 ? (
+            <SuperAdminTable config={config} />
+          ) : (
+            <div className="rounded-[8px] border border-dashed border-[#d9deea] p-8 text-center">
+              <p className="text-[13px] font-extrabold text-black">{isLoading ? "Loading real revenue data..." : emptyText}</p>
+              <p className="mt-2 text-[12px] font-semibold text-[#687089]">
+                {isLoading ? "Checking Supabase billing metadata." : "Use the Billing pricing cards to create real plan metadata."}
+              </p>
+            </div>
+          )}
+        </article>
+
+        <aside className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <h2 className="text-[15px] font-extrabold text-black">{config.insightTitle}</h2>
+          <div className="mt-4 space-y-3">
+            {config.insightItems.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <div key={item.label} className="rounded-[8px] border border-[#edf0f6] p-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${item.tone}`}>
+                      <Icon size={18} strokeWidth={2.35} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-extrabold text-black">{item.label}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-[#687089]">{item.detail}</p>
+                    </div>
+                    <span className="text-[20px] font-extrabold text-black">{item.value}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      </section>
+
+      {page === "revenue-subscriptions" && <SuperAdminPricingSection />}
+    </div>
+  );
+}
+
+type PlatformAdminPage = "platform-instagram" | "platform-api" | "platform-queue";
+
+function getInstagramTokenLabel(row: SuperAdminConnectedAccountApiRow) {
+  if (row.instagram !== "Connected") {
+    return "Disconnected";
+  }
+
+  if (row.statusTone === "green") {
+    return "Healthy";
+  }
+
+  return "Reconnect";
+}
+
+function getInstagramWebhookLabel(row: SuperAdminConnectedAccountApiRow, webhookConfigured?: boolean) {
+  if (!webhookConfigured) {
+    return "Not configured";
+  }
+
+  if (row.instagram !== "Connected") {
+    return "Paused";
+  }
+
+  return row.statusTone === "green" ? "Live" : "Reconnect";
+}
+
+function buildPlatformConfig({
+  page,
+  connectedData,
+  platformData,
+  isLoading,
+  query,
+}: {
+  page: PlatformAdminPage;
+  connectedData: SuperAdminConnectedAccountsResponse | null;
+  platformData: SuperAdminPlatformResponse | null;
+  isLoading: boolean;
+  query: string;
+}) {
+  const connectedMetrics = connectedData?.metrics;
+  const platformMetrics = platformData?.metrics;
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchesQuery = (values: string[]) => !normalizedQuery || values.join(" ").toLowerCase().includes(normalizedQuery);
+
+  if (page === "platform-instagram") {
+    const rows = (connectedData?.rows || [])
+      .filter((row) => matchesQuery([row.name, row.detail, row.instagram, row.status, row.owner || ""]))
+      .map((row) => {
+        const token = getInstagramTokenLabel(row);
+        const webhook = getInstagramWebhookLabel(row, platformMetrics?.webhookConfigured);
+        const statusTone = token === "Healthy" ? "green" as const : token === "Disconnected" ? "red" as const : "amber" as const;
+
+        return {
+          name: row.name,
+          detail: row.detail,
+          values: [token, row.messages, webhook, row.lastActive, row.owner || "Platform"],
+          status: token === "Healthy" ? "Healthy" : token === "Disconnected" ? "Issue" : "Reconnect",
+          statusTone,
+        };
+      });
+    const totalAccounts = connectedMetrics?.totalConnected || platformMetrics?.instagramAccounts || 0;
+    const healthyTokens = connectedMetrics?.healthyTokens || 0;
+    const needsAction = (connectedMetrics?.expiredTokens || 0) + (connectedMetrics?.disconnected || 0);
+
+    return {
+      config: {
+        metrics: [
+          { label: "Instagram accounts", value: isLoading && !connectedMetrics ? "..." : formatAdminNumber(totalAccounts), detail: "Connected total", change: `${formatAdminPercent(healthyTokens, Math.max(1, totalAccounts))} healthy`, tone: "bg-[#f0edff] text-[#4b3cff]", icon: Globe2 },
+          { label: "Webhook messages", value: isLoading && !platformMetrics ? "..." : formatAdminNumber(platformMetrics?.messagesToday), detail: "Stored today", change: `${formatAdminNumber(platformMetrics?.messagesStored)} total stored`, tone: "bg-[#eafaf0] text-[#13a84f]", icon: Code2 },
+          { label: "Expired tokens", value: isLoading && !connectedMetrics ? "..." : formatAdminNumber(connectedMetrics?.expiredTokens), detail: "Reconnect required", change: `${formatAdminPercent(connectedMetrics?.expiredTokens || 0, Math.max(1, totalAccounts))} of accounts`, tone: "bg-[#fff4df] text-[#c07800]", icon: RefreshCw },
+          { label: "Disconnected", value: isLoading && !connectedMetrics ? "..." : formatAdminNumber(connectedMetrics?.disconnected), detail: "No active channel", change: `${formatAdminPercent(connectedMetrics?.disconnected || 0, Math.max(1, totalAccounts))} of creators`, tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+        ],
+        columns: ["Token", "Messages", "Webhook", "Last sync", "Owner"],
+        rows,
+        insightTitle: "Instagram status",
+        insightItems: [
+          { label: "Healthy", value: formatAdminNumber(healthyTokens), detail: "Accounts ready for automation", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+          { label: "Needs action", value: formatAdminNumber(needsAction), detail: "Expired or disconnected tokens", tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+        ],
+      },
+      emptyText: "No real Instagram account records found.",
+    };
+  }
+
+  if (page === "platform-api") {
+    const serviceRows = (platformData?.services || []).filter((service) =>
+      matchesQuery([service.name, service.detail, service.status, service.config, service.owner])
+    );
+    const topServices = serviceRows.slice(0, 4);
+
+    return {
+      config: {
+        metrics: topServices.map((service) => ({
+          label: service.name,
+          value: isLoading && !platformData ? "..." : service.status,
+          detail: service.config,
+          change: service.latency,
+          tone: statusToneClasses[service.tone].replace("bg-", "bg-"),
+          icon:
+            service.name === "Instagram API"
+              ? Globe2
+              : service.name === "OpenAI API"
+                ? BrainCircuit
+                : service.name === "Database"
+                  ? Database
+                  : service.name === "Webhook endpoint"
+                    ? Code2
+                    : CircleHelp,
+        })),
+        columns: ["Status", "Latency", "Config", "Incidents", "Owner"],
+        rows: serviceRows.map((service) => ({
+          name: service.name,
+          detail: service.detail,
+          values: [service.status, service.latency, service.config, service.incidents, service.owner],
+          status: service.status,
+          statusTone: service.tone,
+        })),
+        insightTitle: "Service health",
+        insightItems: [
+          { label: "Healthy services", value: formatAdminNumber(platformMetrics?.healthyServices), detail: "Configured and ready", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+          { label: "Warnings", value: formatAdminNumber(platformMetrics?.warningServices), detail: "Missing config or attention needed", tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+        ],
+      },
+      emptyText: "No platform service records found.",
+    };
+  }
+
+  const queueRows = (platformData?.queues || []).filter((queue) =>
+    matchesQuery([queue.name, queue.detail, queue.queue, queue.worker, queue.status])
+  );
+
+  return {
+    config: {
+      metrics: [
+        { label: "Pending jobs", value: isLoading && !platformMetrics ? "..." : formatAdminNumber(platformMetrics?.pendingJobs), detail: "Queued work", change: "Actual queue state", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+        { label: "Processed today", value: isLoading && !platformMetrics ? "..." : formatAdminNumber(platformMetrics?.processedToday), detail: "Webhook messages stored", change: `${formatAdminNumber(platformMetrics?.messagesStored)} total`, tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+        { label: "Retries", value: isLoading && !platformMetrics ? "..." : formatAdminNumber(platformMetrics?.retries), detail: "Automatic retry", change: "No retry table", tone: "bg-[#fff4df] text-[#c07800]", icon: RefreshCw },
+        { label: "Failed jobs", value: isLoading && !platformMetrics ? "..." : formatAdminNumber(platformMetrics?.failedJobs), detail: "Needs operator", change: `${formatAdminNumber(platformMetrics?.manualReview)} warnings`, tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+      ],
+      columns: ["Queue", "Pending", "Oldest", "Retries", "Worker"],
+      rows: queueRows.map((queue) => ({
+        name: queue.name,
+        detail: queue.detail,
+        values: [queue.queue, queue.pending, queue.oldest, queue.retries, queue.worker],
+        status: queue.status,
+        statusTone: queue.tone,
+      })),
+      insightTitle: "Queue operations",
+      insightItems: [
+        { label: "Stored today", value: formatAdminNumber(platformMetrics?.processedToday), detail: "Messages saved by webhook", tone: "bg-[#eaf4ff] text-[#246bff]", icon: Clock },
+        { label: "Manual review", value: formatAdminNumber(platformMetrics?.manualReview), detail: "Configured warnings and queue issues", tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+      ],
+    },
+    emptyText: "No queue records found.",
+  };
+}
+
+function SuperAdminPlatformPage({ page, refreshKey = 0 }: { page: PlatformAdminPage; refreshKey?: number }) {
+  const [connectedData, setConnectedData] = useState<SuperAdminConnectedAccountsResponse | null>(null);
+  const [platformData, setPlatformData] = useState<SuperAdminPlatformResponse | null>(null);
+  const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const fetchPlatformData = useCallback(async () => {
+    const [connectedResponse, platformResponse] = await Promise.all([
+      fetch("/api/admin/connected-accounts", { cache: "no-store" }),
+      fetch("/api/admin/platform", { cache: "no-store" }),
+    ]);
+    const connectedPayload = (await connectedResponse.json()) as SuperAdminConnectedAccountsResponse;
+    const platformPayload = (await platformResponse.json()) as SuperAdminPlatformResponse;
+
+    if (!connectedResponse.ok || connectedPayload.error) {
+      throw new Error(connectedPayload.error || "Could not load Instagram account data");
+    }
+
+    if (!platformResponse.ok || platformPayload.error) {
+      throw new Error(platformPayload.error || "Could not load platform data");
+    }
+
+    return { connectedPayload, platformPayload };
+  }, []);
+
+  const loadPlatformData = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      const nextData = await fetchPlatformData();
+      setConnectedData(nextData.connectedPayload);
+      setPlatformData(nextData.platformPayload);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load platform data");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchPlatformData]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialPlatformData() {
+      try {
+        const nextData = await fetchPlatformData();
+
+        if (isMounted) {
+          setConnectedData(nextData.connectedPayload);
+          setPlatformData(nextData.platformPayload);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load platform data");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadInitialPlatformData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchPlatformData, refreshKey]);
+
+  const { config, emptyText } = buildPlatformConfig({ page, connectedData, platformData, isLoading, query });
+
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {config.metrics.map((metric) => (
+          <SuperAdminMetricCard key={metric.label} metric={metric} />
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-[15px] font-extrabold text-black">{superAdminPageMeta[page].title} activity</h2>
+              <p className="mt-1 text-[11px] font-semibold text-[#687089]">
+                Real Supabase records, environment config, and webhook storage state.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold">
+                <Search size={14} strokeWidth={2.4} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search"
+                  className="w-full min-w-0 bg-transparent text-[12px] font-bold outline-none placeholder:text-[#687089] sm:w-28"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void loadPlatformData()}
+                disabled={isLoading}
+                className="flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw size={14} strokeWidth={2.4} className={isLoading ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {errorMessage ? (
+            <div className="rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-4 text-[12px] font-bold text-[#df405b]">
+              {errorMessage}
+            </div>
+          ) : config.rows.length > 0 ? (
+            <SuperAdminTable config={config} />
+          ) : (
+            <div className="rounded-[8px] border border-dashed border-[#d9deea] p-8 text-center">
+              <p className="text-[13px] font-extrabold text-black">{isLoading ? "Loading real platform data..." : emptyText}</p>
+              <p className="mt-2 text-[12px] font-semibold text-[#687089]">
+                {isLoading ? "Checking Supabase and environment state." : "No demo rows are shown on this page."}
+              </p>
+            </div>
+          )}
+        </article>
+
+        <aside className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <h2 className="text-[15px] font-extrabold text-black">{config.insightTitle}</h2>
+          <div className="mt-4 space-y-3">
+            {config.insightItems.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <div key={item.label} className="rounded-[8px] border border-[#edf0f6] p-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${item.tone}`}>
+                      <Icon size={18} strokeWidth={2.35} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-extrabold text-black">{item.label}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-[#687089]">{item.detail}</p>
+                    </div>
+                    <span className="text-[20px] font-extrabold text-black">{item.value}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+type AiAdminPage = "ai-usage" | "ai-costs" | "ai-escalations";
+
+function buildAiConfig({
+  page,
+  data,
+  isLoading,
+  query,
+}: {
+  page: AiAdminPage;
+  data: SuperAdminAiResponse | null;
+  isLoading: boolean;
+  query: string;
+}) {
+  const metrics = data?.metrics;
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchesQuery = (values: string[]) => !normalizedQuery || values.join(" ").toLowerCase().includes(normalizedQuery);
+  const totalMessages = metrics?.totalMessages || 0;
+  const aiReadyMessages = metrics?.aiReadyMessages || 0;
+  const trackedSpend = metrics?.trackedSpend || 0;
+  const trackedReplies = metrics?.trackedReplies || 0;
+  const trackedTokens = metrics?.trackedTokens || 0;
+  const estimatedTokens = metrics?.estimatedTokens || 0;
+  const effectiveTokens = trackedTokens > 0 ? trackedTokens : estimatedTokens;
+  const costPerReply = trackedReplies > 0 ? trackedSpend / trackedReplies : 0;
+  const spendDetail = metrics?.spendLogsStored ? "Tracked metadata" : "No spend log stored";
+  const tokenDetail = trackedTokens > 0 ? "Tracked token metadata" : "Estimated from messages";
+
+  if (page === "ai-usage") {
+    const rows = (data?.usage || [])
+      .filter((row) => matchesQuery([row.name, row.detail, row.status, row.health]))
+      .map((row) => ({
+        name: row.name,
+        detail: row.detail,
+        values: [
+          formatAdminNumber(row.messages),
+          row.replies > 0 ? formatAdminNumber(row.replies) : "Not tracked",
+          formatAdminNumber(row.opportunities),
+          formatAdminNumber(row.escalations),
+          row.health,
+        ],
+        status: row.status,
+        statusTone: row.tone,
+      }));
+
+    return {
+      config: {
+        metrics: [
+          { label: "Messages processed", value: isLoading && !metrics ? "..." : formatAdminNumber(totalMessages), detail: "Stored webhook messages", change: `${formatAdminNumber(metrics?.messagesToday)} today`, tone: "bg-[#f0edff] text-[#4b3cff]", icon: Bot },
+          { label: "AI conversations", value: isLoading && !metrics ? "..." : formatAdminNumber(aiReadyMessages), detail: "Ready without handoff keywords", change: `${formatAdminPercent(aiReadyMessages, totalMessages)} of stored`, tone: "bg-[#f0edff] text-[#4b3cff]", icon: Sparkles },
+          { label: "Opportunities found", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.opportunitySignals), detail: "Buying signal keywords", change: "Live message scan", tone: "bg-[#fff6e8] text-[#d98613]", icon: Target },
+          { label: "Escalations", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.handoffSignals), detail: "Human handoff signals", change: `${formatAdminNumber(metrics?.urgentSignals)} urgent`, tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+        ],
+        columns: ["Messages", "AI replies", "Opportunities", "Escalations", "Health"],
+        rows,
+        insightTitle: "Automation coverage",
+        insightItems: [
+          { label: "AI-ready chats", value: formatAdminPercent(aiReadyMessages, totalMessages), detail: "Stored messages without handoff keywords", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+          { label: "Auto-send creators", value: formatAdminNumber(metrics?.autoSendCreators), detail: "Creators with automatic AI replies enabled", tone: "bg-[#f0edff] text-[#4b3cff]", icon: Sparkles },
+          { label: "Configured creators", value: formatAdminNumber(metrics?.configuredCreators), detail: "Creators with an OpenAI key saved", tone: "bg-[#eaf4ff] text-[#246bff]", icon: BrainCircuit },
+        ],
+      },
+      emptyText: "No real AI usage records found.",
+    };
+  }
+
+  if (page === "ai-costs") {
+    const rows = (data?.costs || [])
+      .filter((row) => matchesQuery([row.name, row.detail, row.status, row.trend]))
+      .map((row) => ({
+        name: row.name,
+        detail: row.detail,
+        values: [
+          row.spend > 0 ? formatAdminMoneyPrecise(row.spend) : "$0",
+          row.tokens > 0 ? formatAdminTokenVolume(row.tokens) : "No logs",
+          row.replies > 0 ? formatAdminNumber(row.replies) : "0",
+          row.costPerReply > 0 ? formatAdminMoneyPrecise(row.costPerReply, 3) : "Not tracked",
+          row.trend,
+        ],
+        status: row.status,
+        statusTone: row.tone,
+      }));
+
+    return {
+      config: {
+        metrics: [
+          { label: "AI spend", value: isLoading && !metrics ? "..." : formatAdminCurrency(trackedSpend), detail: spendDetail, change: metrics?.spendLogsStored ? "Actual metadata" : "Add spend logging", tone: "bg-[#f0edff] text-[#4b3cff]", icon: DollarSign },
+          { label: "Cost per reply", value: isLoading && !metrics ? "..." : costPerReply > 0 ? formatAdminMoneyPrecise(costPerReply, 3) : "Not tracked", detail: "Requires reply and spend logs", change: trackedReplies > 0 ? `${formatAdminNumber(trackedReplies)} replies` : "No reply log", tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
+          { label: "Token volume", value: isLoading && !metrics ? "..." : formatAdminTokenVolume(effectiveTokens), detail: tokenDetail, change: trackedTokens > 0 ? "Actual metadata" : "Estimated", tone: "bg-[#eaf4ff] text-[#246bff]", icon: BrainCircuit },
+          { label: "Gross margin", value: isLoading && !metrics ? "..." : metrics?.grossMargin ? `${metrics.grossMargin.toFixed(1)}%` : "No revenue", detail: "After tracked AI costs", change: trackedSpend > 0 ? "Actual spend" : "No cost log", tone: "bg-[#eafaf0] text-[#13a84f]", icon: CircleDollarSign },
+        ],
+        columns: ["Spend", "Tokens", "Replies", "Cost/reply", "Trend"],
+        rows,
+        insightTitle: "Cost controls",
+        insightItems: [
+          { label: "Usage logs", value: metrics?.spendLogsStored ? "Stored" : "Missing", detail: "Persist spend and token usage after OpenAI calls", tone: metrics?.spendLogsStored ? "bg-[#eafaf0] text-[#13a84f]" : "bg-[#fff4df] text-[#c07800]", icon: Database },
+          { label: "Estimated tokens", value: formatAdminTokenVolume(estimatedTokens), detail: "Approximation from stored message text", tone: "bg-[#f0edff] text-[#4b3cff]", icon: BrainCircuit },
+        ],
+      },
+      emptyText: "No real AI cost records found.",
+    };
+  }
+
+  const rows = (data?.escalations || [])
+    .filter((row) => matchesQuery([row.name, row.detail, row.reason, row.owner, row.status]))
+    .map((row) => ({
+      name: row.name,
+      detail: row.detail,
+      values: [row.reason, formatAdminNumber(row.count), row.avgTime, row.owner, row.trend],
+      status: row.status,
+      statusTone: row.tone,
+    }));
+
+  return {
+    config: {
+      metrics: [
+        { label: "Escalations", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.handoffSignals), detail: "Stored handoff signals", change: "Live keyword scan", tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
+        { label: "Urgent", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.urgentSignals), detail: "High-priority handoffs", change: "Urgent keywords", tone: "bg-[#fff0f3] text-[#df405b]", icon: Flame },
+        { label: "Avg handoff time", value: "Not tracked", detail: "Needs event timestamps", change: "Add handoff logs", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+        { label: "Resolved", value: "Not tracked", detail: "No resolution log stored", change: "Add status tracking", tone: "bg-[#fff4df] text-[#c07800]", icon: Check },
+      ],
+      columns: ["Reason", "Count", "Avg time", "Owner", "Trend"],
+      rows,
+      insightTitle: "Handoff signals",
+      insightItems: [
+        { label: "Needs tuning", value: formatAdminNumber(metrics?.handoffSignals), detail: "Messages matching handoff keywords", tone: "bg-[#fff4df] text-[#c07800]", icon: SlidersHorizontal },
+        { label: "Human load", value: formatAdminNumber(metrics?.humanRequestedSignals), detail: "Customer asks for a person or agent", tone: "bg-[#fff0f3] text-[#df405b]", icon: Flame },
+      ],
+    },
+    emptyText: "No real AI escalation records found.",
+  };
+}
+
+function SuperAdminAiPage({ page, refreshKey = 0 }: { page: AiAdminPage; refreshKey?: number }) {
+  const [data, setData] = useState<SuperAdminAiResponse | null>(null);
+  const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const fetchAiData = useCallback(async () => {
+    const response = await fetch("/api/admin/ai", {
+      cache: "no-store",
+    });
+    const payload = (await response.json()) as SuperAdminAiResponse;
+
+    if (!response.ok || payload.error) {
+      throw new Error(payload.error || "Could not load AI admin data");
+    }
+
+    return payload;
+  }, []);
+
+  const loadAiData = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      const nextData = await fetchAiData();
+      setData(nextData);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load AI admin data");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchAiData]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialAiData() {
+      try {
+        const nextData = await fetchAiData();
+
+        if (isMounted) {
+          setData(nextData);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load AI admin data");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadInitialAiData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchAiData, refreshKey]);
+
+  const { config, emptyText } = buildAiConfig({ page, data, isLoading, query });
+  const tableWarning = data?.metrics?.messagesTableAvailable === false ? data.metrics.messagesTableError : "";
+
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {config.metrics.map((metric) => (
+          <SuperAdminMetricCard key={metric.label} metric={metric} />
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-[15px] font-extrabold text-black">{superAdminPageMeta[page].title} activity</h2>
+              <p className="mt-1 text-[11px] font-semibold text-[#687089]">
+                Real creator AI settings, stored messages, and saved usage metadata.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold">
+                <Search size={14} strokeWidth={2.4} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search"
+                  className="w-full min-w-0 bg-transparent text-[12px] font-bold outline-none placeholder:text-[#687089] sm:w-28"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void loadAiData()}
+                disabled={isLoading}
+                className="flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw size={14} strokeWidth={2.4} className={isLoading ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {errorMessage ? (
+            <div className="rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-4 text-[12px] font-bold text-[#df405b]">
+              {errorMessage}
+            </div>
+          ) : tableWarning ? (
+            <div className="rounded-[8px] border border-[#ffe0a3] bg-[#fffaf0] p-4 text-[12px] font-bold text-[#c07800]">
+              Messages table is not available: {tableWarning}
+            </div>
+          ) : config.rows.length > 0 ? (
+            <SuperAdminTable config={config} />
+          ) : (
+            <div className="rounded-[8px] border border-dashed border-[#d9deea] p-8 text-center">
+              <p className="text-[13px] font-extrabold text-black">{isLoading ? "Loading real AI data..." : emptyText}</p>
+              <p className="mt-2 text-[12px] font-semibold text-[#687089]">
+                {isLoading ? "Checking AI metadata and stored messages." : "No demo rows are shown on this page."}
+              </p>
+            </div>
+          )}
+        </article>
+
+        <aside className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <h2 className="text-[15px] font-extrabold text-black">{config.insightTitle}</h2>
+          <div className="mt-4 space-y-3">
+            {config.insightItems.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <div key={item.label} className="rounded-[8px] border border-[#edf0f6] p-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${item.tone}`}>
+                      <Icon size={18} strokeWidth={2.35} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-extrabold text-black">{item.label}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-[#687089]">{item.detail}</p>
+                    </div>
+                    <span className="text-[20px] font-extrabold text-black">{item.value}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+type SupportAdminPage = "support-tickets" | "support-issues";
+
+function buildSupportConfig({
+  page,
+  data,
+  isLoading,
+  query,
+}: {
+  page: SupportAdminPage;
+  data: SuperAdminSupportResponse | null;
+  isLoading: boolean;
+  query: string;
+}) {
+  const metrics = data?.metrics;
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchesQuery = (values: string[]) => !normalizedQuery || values.join(" ").toLowerCase().includes(normalizedQuery);
+
+  if (page === "support-tickets") {
+    const rows = (data?.tickets || [])
+      .filter((row) => matchesQuery([row.name, row.detail, row.priority, row.topic, row.assignee, row.status]))
+      .map((row) => ({
+        name: row.name,
+        detail: row.detail,
+        values: [row.priority, row.topic, row.age, row.assignee, row.sla],
+        status: row.status,
+        statusTone: row.tone,
+      }));
+
+    return {
+      config: {
+        metrics: [
+          { label: "Open tickets", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.openTickets), detail: metrics?.ticketTableAvailable ? `From ${metrics.ticketTableName}` : "Open support signals", change: `${formatAdminNumber(metrics?.supportSignals)} message signals`, tone: "bg-[#fff0f3] text-[#df405b]", icon: Mail },
+          { label: "In progress", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.inProgressTickets), detail: "Review or watch status", change: metrics?.avgResponse || "Not tracked", tone: "bg-[#fff4df] text-[#c07800]", icon: Clock },
+          { label: "Resolved today", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.resolvedToday), detail: "Closed ticket records", change: metrics?.ticketTableAvailable ? "Actual tickets" : "No ticket table", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+          { label: "Satisfaction", value: isLoading && !metrics ? "..." : metrics?.satisfaction || "Not tracked", detail: "Latest support score", change: metrics?.ticketTableAvailable ? "Ticket metadata" : "No CSAT log", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Star },
+        ],
+        columns: ["Priority", "Topic", "Age", "Assignee", "SLA"],
+        rows,
+        insightTitle: "Support summary",
+        insightItems: [
+          { label: "Avg response", value: metrics?.avgResponse || "Not tracked", detail: metrics?.ticketTableAvailable ? "Across ticket records" : "No response-time field stored", tone: "bg-[#eaf4ff] text-[#246bff]", icon: Clock },
+          { label: "First response", value: metrics?.firstResponse || "Not tracked", detail: metrics?.ticketTableAvailable ? "Median first support reply" : "No first-response field stored", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Send },
+          { label: "Message rows", value: formatAdminNumber(metrics?.messageRows), detail: "Stored Instagram message records", tone: "bg-[#f0edff] text-[#4b3cff]", icon: MessageSquare },
+        ],
+      },
+      emptyText: "No real support ticket records or support message signals found.",
+      sourceNote: metrics?.ticketTableAvailable
+        ? `Showing real records from ${metrics.ticketTableName}.`
+        : "No support ticket table was found, so this page is showing real support signals from stored Instagram messages.",
+    };
+  }
+
+  const rows = (data?.issues || [])
+    .filter((row) => matchesQuery([row.name, row.detail, row.category, row.impact, row.owner, row.status]))
+    .map((row) => ({
+      name: row.name,
+      detail: row.detail,
+      values: [row.category, row.impact, row.age, row.owner, row.nextStep],
+      status: row.status,
+      statusTone: row.tone,
+    }));
+
+  return {
+    config: {
+      metrics: [
+        { label: "Creator issues", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.creatorIssues), detail: metrics?.issueTableAvailable ? `From ${metrics.issueTableName}` : "Derived from creator state", change: `${formatAdminNumber(metrics?.supportSignals)} support signals`, tone: "bg-[#fff4df] text-[#c07800]", icon: TriangleAlert },
+        { label: "Product issues", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.productIssues), detail: "Platform or AI blockers", change: `${formatAdminNumber(metrics?.platformBlockers)} platform blockers`, tone: "bg-[#fff0f3] text-[#df405b]", icon: Code2 },
+        { label: "Onboarding issues", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.onboardingIssues), detail: "Setup help needed", change: "Real config state", tone: "bg-[#fff4df] text-[#c07800]", icon: GraduationCap },
+        { label: "Resolved today", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.resolvedIssuesToday), detail: "Closed issue records", change: metrics?.issueTableAvailable ? "Actual issues" : "No issue table", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
+      ],
+      columns: ["Category", "Impact", "Age", "Owner", "Next step"],
+      rows,
+      insightTitle: "Issue themes",
+      insightItems: [
+        { label: "Platform blockers", value: formatAdminNumber(metrics?.platformBlockers), detail: "Platform or AI follow-up needed", tone: "bg-[#fff0f3] text-[#df405b]", icon: Code2 },
+        { label: "Success follow-up", value: formatAdminNumber(metrics?.successFollowUp), detail: "Support, billing, or creator-success issues", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Handshake },
+      ],
+    },
+    emptyText: "No real creator issue records found.",
+    sourceNote: metrics?.issueTableAvailable
+      ? `Showing real records from ${metrics.issueTableName}.`
+      : "No creator issue table was found, so this page is showing real creator metadata and platform setup issues.",
+  };
+}
+
+function SuperAdminSupportPage({ page, refreshKey = 0 }: { page: SupportAdminPage; refreshKey?: number }) {
+  const [data, setData] = useState<SuperAdminSupportResponse | null>(null);
+  const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const fetchSupportData = useCallback(async () => {
+    const response = await fetch("/api/admin/support", {
+      cache: "no-store",
+    });
+    const payload = (await response.json()) as SuperAdminSupportResponse;
+
+    if (!response.ok || payload.error) {
+      throw new Error(payload.error || "Could not load support admin data");
+    }
+
+    return payload;
+  }, []);
+
+  const loadSupportData = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      const nextData = await fetchSupportData();
+      setData(nextData);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load support admin data");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchSupportData]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialSupportData() {
+      try {
+        const nextData = await fetchSupportData();
+
+        if (isMounted) {
+          setData(nextData);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load support admin data");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadInitialSupportData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchSupportData, refreshKey]);
+
+  const { config, emptyText, sourceNote } = buildSupportConfig({ page, data, isLoading, query });
+  const tableWarning =
+    data?.metrics?.messagesTableAvailable === false
+      ? data.metrics.messagesTableError
+      : page === "support-tickets" && data?.metrics?.ticketTableAvailable === false && !data.metrics.supportSignals
+        ? data.metrics.ticketTableError
+        : page === "support-issues" && data?.metrics?.issueTableAvailable === false && !config.rows.length
+          ? data.metrics.issueTableError
+          : "";
+
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {config.metrics.map((metric) => (
+          <SuperAdminMetricCard key={metric.label} metric={metric} />
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-[15px] font-extrabold text-black">{superAdminPageMeta[page].title} activity</h2>
+              <p className="mt-1 text-[11px] font-semibold text-[#687089]">{sourceNote}</p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold">
+                <Search size={14} strokeWidth={2.4} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search"
+                  className="w-full min-w-0 bg-transparent text-[12px] font-bold outline-none placeholder:text-[#687089] sm:w-28"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void loadSupportData()}
+                disabled={isLoading}
+                className="flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw size={14} strokeWidth={2.4} className={isLoading ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {errorMessage ? (
+            <div className="rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-4 text-[12px] font-bold text-[#df405b]">
+              {errorMessage}
+            </div>
+          ) : tableWarning ? (
+            <div className="rounded-[8px] border border-[#ffe0a3] bg-[#fffaf0] p-4 text-[12px] font-bold text-[#c07800]">
+              {tableWarning}
+            </div>
+          ) : config.rows.length > 0 ? (
+            <SuperAdminTable config={config} />
+          ) : (
+            <div className="rounded-[8px] border border-dashed border-[#d9deea] p-8 text-center">
+              <p className="text-[13px] font-extrabold text-black">{isLoading ? "Loading real support data..." : emptyText}</p>
+              <p className="mt-2 text-[12px] font-semibold text-[#687089]">
+                {isLoading ? "Checking support tables, messages, and creator metadata." : "No demo rows are shown on this page."}
+              </p>
+            </div>
+          )}
+        </article>
+
+        <aside className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <h2 className="text-[15px] font-extrabold text-black">{config.insightTitle}</h2>
+          <div className="mt-4 space-y-3">
+            {config.insightItems.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <div key={item.label} className="rounded-[8px] border border-[#edf0f6] p-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${item.tone}`}>
+                      <Icon size={18} strokeWidth={2.35} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-extrabold text-black">{item.label}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-[#687089]">{item.detail}</p>
+                    </div>
+                    <span className="text-[20px] font-extrabold text-black">{item.value}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminCreatorLifecyclePage({
+  page,
+  refreshKey = 0,
+}: {
+  page: "creators-trials" | "creators-churn";
+  refreshKey?: number;
+}) {
+  const [data, setData] = useState<SuperAdminConnectedAccountsResponse | null>(null);
+  const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const fetchLifecycleData = useCallback(async () => {
+    const response = await fetch("/api/admin/connected-accounts", {
+      cache: "no-store",
+    });
+    const nextData = (await response.json()) as SuperAdminConnectedAccountsResponse;
+
+    if (!response.ok || nextData.error) {
+      throw new Error(nextData.error || "Could not load creator data");
+    }
+
+    return nextData;
+  }, []);
+
+  const loadLifecycleData = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      const nextData = await fetchLifecycleData();
+      setData(nextData);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load creator data");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fetchLifecycleData]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialLifecycleData() {
+      try {
+        const nextData = await fetchLifecycleData();
+
+        if (isMounted) {
+          setData(nextData);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load creator data");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadInitialLifecycleData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fetchLifecycleData, refreshKey]);
+
+  const { config, emptyText } = buildCreatorLifecycleConfig(page, data, isLoading, query);
+
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {config.metrics.map((metric) => (
+          <SuperAdminMetricCard key={metric.label} metric={metric} />
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-[15px] font-extrabold text-black">{superAdminPageMeta[page].title} activity</h2>
+              <p className="mt-1 text-[11px] font-semibold text-[#687089]">Real creator accounts from Supabase Auth and Instagram activity.</p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold">
+                <Search size={14} strokeWidth={2.4} />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search"
+                  className="w-full min-w-0 bg-transparent text-[12px] font-bold outline-none placeholder:text-[#687089] sm:w-28"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void loadLifecycleData()}
+                disabled={isLoading}
+                className="flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw size={14} strokeWidth={2.4} className={isLoading ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {errorMessage ? (
+            <div className="rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-4 text-[12px] font-bold text-[#df405b]">
+              {errorMessage}
+            </div>
+          ) : config.rows.length > 0 ? (
+            <SuperAdminTable config={config} />
+          ) : (
+            <div className="rounded-[8px] border border-dashed border-[#d9deea] p-8 text-center">
+              <p className="text-[13px] font-extrabold text-black">{isLoading ? "Loading real creator data..." : emptyText}</p>
+              <p className="mt-2 text-[12px] font-semibold text-[#687089]">
+                {isLoading ? "Checking Supabase Auth, metadata, and Instagram activity." : "No sample records are shown on this page."}
+              </p>
+            </div>
+          )}
+        </article>
+
+        <aside className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <h2 className="text-[15px] font-extrabold text-black">{config.insightTitle}</h2>
+          <div className="mt-4 space-y-3">
+            {config.insightItems.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <div key={item.label} className="rounded-[8px] border border-[#edf0f6] p-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${item.tone}`}>
+                      <Icon size={18} strokeWidth={2.35} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-extrabold text-black">{item.label}</p>
+                      <p className="mt-1 text-[11px] font-semibold text-[#687089]">{item.detail}</p>
+                    </div>
+                    <span className="text-[20px] font-extrabold text-black">{item.value}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminDetailPage({
+  page,
+  refreshKey = 0,
+}: {
+  page: Exclude<SuperAdminPage, "overview" | "profile" | "settings">;
+  refreshKey?: number;
+}) {
+  if (page === "creators-connected") {
+    return <SuperAdminConnectedAccountsPage refreshKey={refreshKey} />;
+  }
+
+  if (page === "creators-trials" || page === "creators-churn") {
+    return <SuperAdminCreatorLifecyclePage page={page} refreshKey={refreshKey} />;
+  }
+
+  if (page === "revenue-subscriptions" || page === "revenue-payments" || page === "revenue-refunds") {
+    return <SuperAdminRevenuePage page={page} refreshKey={refreshKey} />;
+  }
+
+  if (page === "platform-instagram" || page === "platform-api" || page === "platform-queue") {
+    return <SuperAdminPlatformPage page={page} refreshKey={refreshKey} />;
+  }
+
+  if (page === "ai-usage" || page === "ai-costs" || page === "ai-escalations") {
+    return <SuperAdminAiPage page={page} refreshKey={refreshKey} />;
+  }
+
+  if (page === "support-tickets" || page === "support-issues") {
+    return <SuperAdminSupportPage page={page} refreshKey={refreshKey} />;
+  }
+
+  const fallbackPage = page as keyof typeof superAdminDetailConfigs;
+  const config = superAdminDetailConfigs[fallbackPage];
+
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {config.metrics.map((metric) => (
+          <SuperAdminMetricCard key={metric.label} metric={metric} />
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-[15px] font-extrabold text-black">{superAdminPageMeta[fallbackPage].title} activity</h2>
             <div className="flex gap-2">
               <button type="button" className="flex h-9 items-center gap-2 rounded-[8px] border border-[#e0e4ef] bg-white px-3 text-[12px] font-extrabold">
                 <Search size={14} strokeWidth={2.4} />
@@ -2728,18 +4781,191 @@ function SuperAdminDetailPage({ page }: { page: Exclude<SuperAdminPage, "overvie
   );
 }
 
-function SuperAdminSettingsPage({ profile }: { profile: AccountProfile }) {
+function SuperAdminProfilePage({
+  profile,
+  onProfileChange,
+}: {
+  profile: AccountProfile;
+  onProfileChange: (profile: AccountProfile) => Promise<AccountProfile>;
+}) {
+  const initials = profile.name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+      <SettingsAccountCard profile={profile} onProfileChange={onProfileChange} defaultEditing />
+
+      <aside className="space-y-4">
+        <section className="rounded-[9px] border border-[#e7eaf2] bg-white p-5 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <h2 className="text-[17px] font-extrabold text-black">Profile preview</h2>
+          <div className="mt-5 flex items-center gap-4">
+            {profile.avatarUrl ? (
+              <span
+                aria-label={profile.name}
+                role="img"
+                className="h-16 w-16 shrink-0 rounded-full bg-cover bg-center shadow-[0_16px_34px_rgba(20,28,53,0.08)]"
+                style={{ backgroundImage: `url(${profile.avatarUrl})` }}
+              />
+            ) : (
+              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-[16px] font-extrabold text-white shadow-[0_16px_34px_rgba(124,58,237,0.18)]">
+                {initials || "SA"}
+              </span>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-[16px] font-extrabold text-black">{profile.name || "Super Admin"}</p>
+              <p className="mt-1 truncate text-[12px] font-semibold text-[#596175]">{profile.email}</p>
+              <span className="mt-2 inline-flex rounded-full bg-[#f0edff] px-2.5 py-1 text-[10px] font-extrabold text-[#4b3cff]">
+                Superadmin
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-[9px] border border-[#e7eaf2] bg-white p-5 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <span className="flex h-11 w-11 items-center justify-center rounded-[12px] bg-[#f0edff] text-[#4b3cff]">
+            <UploadCloud size={20} strokeWidth={2.4} />
+          </span>
+          <h2 className="mt-4 text-[17px] font-extrabold text-black">Cloudinary uploads</h2>
+          <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#596175]">
+            Profile images are resized to a square WebP before upload, then saved as Cloudinary URLs in your Supabase profile metadata.
+          </p>
+        </section>
+
+        <section className="rounded-[9px] border border-[#e7eaf2] bg-white p-5 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+          <span className="flex h-11 w-11 items-center justify-center rounded-[12px] bg-[#eafaf0] text-[#13a84f]">
+            <Shield size={20} strokeWidth={2.4} />
+          </span>
+          <h2 className="mt-4 text-[17px] font-extrabold text-black">Superadmin access</h2>
+          <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#596175]">
+            This profile controls the superadmin sidebar identity and dashboard account details.
+          </p>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function SuperAdminSettingsPage({ profile, refreshKey = 0 }: { profile: AccountProfile; refreshKey?: number }) {
+  const [platformData, setPlatformData] = useState<SuperAdminPlatformResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const loadPlatformStatus = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage("");
+
+    try {
+      const response = await fetch("/api/admin/platform", {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as SuperAdminPlatformResponse;
+
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Could not load platform settings");
+      }
+
+      setPlatformData(payload);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not load platform settings");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialPlatformStatus() {
+      try {
+        const response = await fetch("/api/admin/platform", {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as SuperAdminPlatformResponse;
+
+        if (!response.ok || payload.error) {
+          throw new Error(payload.error || "Could not load platform settings");
+        }
+
+        if (isMounted) {
+          setPlatformData(payload);
+          setErrorMessage("");
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load platform settings");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadInitialPlatformStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [refreshKey]);
+
+  const metrics = platformData?.metrics;
+  const workspaceFields = [
+    ["Workspace name", "TractionFlo"],
+    ["Admin email", profile.email],
+    ["Default timezone", profile.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone],
+    ["Language", profile.language || "English"],
+    ["Billing currency", profile.currency || "USD ($)"],
+    ["Access level", profile.isSuperAdmin ? "Super Admin" : profile.role || "Admin"],
+  ];
+  const integrationStatusItems = [
+    {
+      title: "Meta ecosystem",
+      detail: isLoading && !metrics ? "Checking Facebook and Instagram config" : `${formatAdminNumber(metrics?.instagramAccounts)} Instagram accounts`,
+      connected: Boolean(metrics?.metaConfigured && metrics?.webhookConfigured),
+      icon: Globe2,
+    },
+    {
+      title: "OpenAI API",
+      detail: "AI replies and qualification",
+      connected: Boolean(metrics?.openAiConfigured),
+      icon: BrainCircuit,
+    },
+    {
+      title: "Email service",
+      detail: "Operational notifications",
+      connected: Boolean(metrics?.emailConfigured),
+      icon: Mail,
+    },
+    {
+      title: "Stripe payments",
+      detail: "Checkout and subscription billing",
+      connected: Boolean(metrics?.paymentConfigured),
+      icon: CreditCard,
+    },
+    {
+      title: "Database",
+      detail: isLoading && !metrics ? "Checking Supabase" : `${metrics?.databaseLatencyMs || 0}ms latest check`,
+      connected: Boolean(metrics?.databaseHealthy),
+      icon: Database,
+    },
+    {
+      title: "Webhook endpoint",
+      detail: "Meta callback verification",
+      connected: Boolean(metrics?.webhookConfigured),
+      icon: Code2,
+    },
+  ];
+
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
       <section className="rounded-[9px] border border-[#e7eaf2] bg-white p-5 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
         <h2 className="text-[17px] font-extrabold text-black">Workspace settings</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {[
-            ["Workspace name", "TractionFlo"],
-            ["Admin email", profile.email],
-            ["Default timezone", "(GMT-5) Eastern Time"],
-            ["Billing currency", "USD ($)"],
-          ].map(([label, value]) => (
+          {workspaceFields.map(([label, value]) => (
             <label key={label} className="block">
               <span className="text-[12px] font-extrabold text-[#46506a]">{label}</span>
               <input
@@ -2752,28 +4978,44 @@ function SuperAdminSettingsPage({ profile }: { profile: AccountProfile }) {
         </div>
         <button
           type="button"
+          onClick={() => void loadPlatformStatus()}
+          disabled={isLoading}
           className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-[8px] bg-[#5b38ff] px-4 text-[13px] font-extrabold text-white shadow-[0_16px_35px_rgba(91,56,255,0.22)]"
         >
-          <Shield size={16} strokeWidth={2.4} />
-          Save admin settings
+          <RefreshCw size={16} strokeWidth={2.4} className={isLoading ? "animate-spin" : ""} />
+          Refresh settings status
         </button>
+        {errorMessage && (
+          <div className="mt-4 rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-3 text-[12px] font-bold text-[#df405b]">
+            {errorMessage}
+          </div>
+        )}
       </section>
 
       <aside className="space-y-4">
-        {[
-          ["Admin access", "Superadmin can open every platform page.", Shield, "bg-[#f0edff] text-[#4b3cff]"],
-          ["Audit exports", "Reports export with platform-wide data.", Download, "bg-[#eaf4ff] text-[#246bff]"],
-          ["System alerts", "Warnings appear for queues and API health.", Bell, "bg-[#fff4df] text-[#c07800]"],
-        ].map(([title, detail, IconValue, tone]) => {
-          const Icon = IconValue as LucideIcon;
+        {integrationStatusItems.map((item) => {
+          const Icon = item.icon;
+          const tone = isLoading && !metrics
+            ? "bg-[#f0edff] text-[#4b3cff]"
+            : item.connected
+              ? "bg-[#eafaf0] text-[#13a84f]"
+              : "bg-[#fff4df] text-[#c07800]";
+          const status = isLoading && !metrics ? "Checking" : item.connected ? "Connected" : "Not configured";
 
           return (
-            <article key={title as string} className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
-              <span className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${tone as string}`}>
-                <Icon size={18} strokeWidth={2.35} />
+            <article key={item.title} className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+              <div className="flex items-start gap-3">
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] ${tone}`}>
+                  <Icon size={18} strokeWidth={2.35} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[14px] font-extrabold text-black">{item.title}</h3>
+                  <p className="mt-1 text-[12px] font-semibold leading-relaxed text-[#596175]">{item.detail}</p>
+                </div>
+              </div>
+              <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-[10px] font-extrabold ${item.connected ? statusToneClasses.green : isLoading && !metrics ? statusToneClasses.purple : statusToneClasses.amber}`}>
+                {status}
               </span>
-              <h3 className="mt-3 text-[14px] font-extrabold text-black">{title as string}</h3>
-              <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#596175]">{detail as string}</p>
             </article>
           );
         })}
@@ -2817,8 +5059,18 @@ function SuperAdminMobileNavigation({
   );
 }
 
-function SuperAdminDashboard({ profile }: { profile: AccountProfile }) {
+function SuperAdminDashboard({
+  profile,
+  onProfileChange,
+}: {
+  profile: AccountProfile;
+  onProfileChange: (profile: AccountProfile) => Promise<AccountProfile>;
+}) {
   const [activePage, setActivePage] = useState<SuperAdminPage>("overview");
+  const [dateRangePreset, setDateRangePreset] = useState<AdminDateRangePreset>("7d");
+  const [isAutoRefreshOn, setIsAutoRefreshOn] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [exportStatus, setExportStatus] = useState("");
 
   useEffect(() => {
     const syncFromUrl = () => {
@@ -2839,21 +5091,82 @@ function SuperAdminDashboard({ profile }: { profile: AccountProfile }) {
     }
   }
 
+  function handleDateRangeChange(preset: AdminDateRangePreset) {
+    setDateRangePreset(preset);
+    setRefreshKey((current) => current + 1);
+  }
+
+  function handleExport() {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const pageTitle = superAdminPageMeta[activePage].title;
+    const content = document.querySelector("[data-superadmin-content='true']");
+    const tableRows = Array.from(content?.querySelectorAll("table tr") || []).map((row) =>
+      Array.from(row.querySelectorAll("th, td")).map((cell) => cell.textContent?.replace(/\s+/g, " ").trim() || "")
+    );
+    const rows = tableRows.length > 0
+      ? tableRows
+      : [
+          ["Page", pageTitle],
+          ["Date range", getAdminDateRangeLabel(dateRangePreset)],
+          ["Exported", new Date().toISOString()],
+        ];
+    const csv = rows
+      .map((row) => row.map((value) => `"${value.replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `tractionflo-${activePage}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+    setExportStatus("Downloaded");
+    window.setTimeout(() => setExportStatus(""), 1800);
+  }
+
+  useEffect(() => {
+    if (!isAutoRefreshOn) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setRefreshKey((current) => current + 1);
+    }, 30000);
+
+    return () => window.clearInterval(interval);
+  }, [isAutoRefreshOn]);
+
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-[#f8f9fd] font-sans text-black">
       <SuperAdminSidebar activePage={activePage} onChangePage={handlePageChange} profile={profile} />
 
       <main className="h-dvh flex-1 overflow-y-auto px-4 pb-24 pt-5 sm:px-6 lg:px-7 lg:pb-8 xl:px-9">
         <div className="mx-auto max-w-[1440px]">
-          <SuperAdminHeader page={activePage} />
+          <SuperAdminHeader
+            page={activePage}
+            dateRangePreset={dateRangePreset}
+            isAutoRefreshOn={isAutoRefreshOn}
+            exportStatus={exportStatus}
+            onDateRangeChange={handleDateRangeChange}
+            onAutoRefreshChange={setIsAutoRefreshOn}
+            onExport={handleExport}
+          />
 
-          <div className="mt-6">
+          <div className="mt-6" data-superadmin-content="true">
             {activePage === "overview" ? (
-              <SuperAdminOverviewPage />
+              <SuperAdminOverviewPage refreshKey={refreshKey} />
+            ) : activePage === "profile" ? (
+              <SuperAdminProfilePage profile={profile} onProfileChange={onProfileChange} />
             ) : activePage === "settings" ? (
-              <SuperAdminSettingsPage profile={profile} />
+              <SuperAdminSettingsPage profile={profile} refreshKey={refreshKey} />
             ) : (
-              <SuperAdminDetailPage page={activePage} />
+              <SuperAdminDetailPage page={activePage} refreshKey={refreshKey} />
             )}
           </div>
         </div>
@@ -3071,7 +5384,7 @@ function OpportunityReviewButton({ children, tone }: { children: string; tone: s
   );
 }
 
-function OpportunitiesPage() {
+function OpportunitiesPage({ summary, isLoading, error }: { summary: CreatorLiveSummary; isLoading: boolean; error: string }) {
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
       <div className="mx-auto max-w-[1286px]">
@@ -3092,7 +5405,7 @@ function OpportunitiesPage() {
               type="button"
               className="flex h-11 min-w-0 items-center justify-between rounded-[9px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] sm:h-12 sm:w-[252px] sm:px-5 sm:text-[13px]"
             >
-              <span className="min-w-0 truncate">May 12 - May 18, 2025</span>
+              <span className="min-w-0 truncate">{summary.dateRangeLabel}</span>
               <CalendarDays size={16} strokeWidth={2.3} />
             </button>
             <button
@@ -3107,7 +5420,7 @@ function OpportunitiesPage() {
 
         <div className="-mx-4 mt-5 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:mt-6 lg:px-0">
           <div className="grid w-max grid-cols-[135px_185px_165px_230px_195px] lg:grid-cols-[150px_210px_190px_260px_220px]">
-            {opportunityTabs.map((tab, index) => {
+            {summary.opportunityTabs.map((tab, index) => {
               const Icon = tab.icon;
               const isActive = index === 0;
               return (
@@ -3116,7 +5429,7 @@ function OpportunitiesPage() {
                   type="button"
                   className={`relative flex h-11 items-center justify-center gap-2 text-[11px] font-extrabold sm:gap-3 sm:text-[12px] ${
                     isActive ? "text-[#4b3cff]" : "text-black"
-                  } ${index < opportunityTabs.length - 1 ? "border-r border-[#e2e6f0]" : ""}`}
+                  } ${index < summary.opportunityTabs.length - 1 ? "border-r border-[#e2e6f0]" : ""}`}
                 >
                   <Icon size={17} strokeWidth={isActive ? 2.4 : 2.1} />
                   <span>{tab.label}</span>
@@ -3130,14 +5443,20 @@ function OpportunitiesPage() {
           </div>
         </div>
 
+        {(isLoading || error) && (
+          <div className="mt-4 rounded-[10px] border border-[#edf0f6] bg-white px-4 py-3 text-[12px] font-semibold text-[#46506a] shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+            {isLoading ? "Loading real Instagram conversations..." : error}
+          </div>
+        )}
+
         <section className="mt-4 grid rounded-[12px] border border-[#e5e8f0] bg-white shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:grid-cols-2 xl:h-[112px] xl:grid-cols-4">
-          {opportunityMetrics.map((metric, index) => {
+          {summary.opportunityMetrics.map((metric, index) => {
             const Icon = metric.icon;
             return (
               <div
                 key={metric.label}
                 className={`flex min-h-[96px] items-center gap-4 px-4 sm:px-5 xl:min-h-0 xl:gap-5 xl:px-7 ${
-                  index < opportunityMetrics.length - 1 ? "border-b border-[#e5e8f0] sm:border-r sm:last:border-r-0 xl:border-b-0" : ""
+                  index < summary.opportunityMetrics.length - 1 ? "border-b border-[#e5e8f0] sm:border-r sm:last:border-r-0 xl:border-b-0" : ""
                 }`}
               >
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] bg-[#f0edff] text-[#4b3cff]">
@@ -3156,21 +5475,26 @@ function OpportunitiesPage() {
           })}
         </section>
 
-        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {opportunityPageCards.map((opportunity) => (
-            <OpportunityPageCardView key={`${opportunity.name}-${opportunity.badge}`} opportunity={opportunity} />
-          ))}
-        </div>
+        {summary.opportunityCards.length > 0 ? (
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {summary.opportunityCards.map((opportunity) => (
+              <OpportunityPageCardView key={`${opportunity.name}-${opportunity.badge}-${opportunity.time}`} opportunity={opportunity} />
+            ))}
+          </div>
+        ) : (
+          <section className="mt-5 rounded-[12px] border border-dashed border-[#d7deeb] bg-white p-8 text-center shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+            <Target className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
+            <h2 className="mt-3 text-[15px] font-extrabold text-black">No opportunity signals yet</h2>
+            <p className="mx-auto mt-2 max-w-[440px] text-[12px] font-medium leading-relaxed text-[#596175]">
+              TractionFlo is reading real Instagram conversations. Pricing, buying, booking, partnership, or engagement keywords will appear here.
+            </p>
+          </section>
+        )}
 
         <footer className="relative mt-4 flex items-center justify-center pb-2">
-          <p className="text-[12px] font-medium text-[#596175]">Showing 1 to 8 of 12 opportunities</p>
-          <button
-            type="button"
-            className="absolute right-4 flex h-10 w-[118px] items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white text-[12px] font-extrabold text-black"
-          >
-            Load more
-            <ChevronDown size={15} strokeWidth={2.5} />
-          </button>
+          <p className="text-[12px] font-medium text-[#596175]">
+            Showing {summary.opportunityCards.length > 0 ? `1 to ${summary.opportunityCards.length}` : "0"} of {formatCreatorInteger(summary.opportunityCount)} opportunities
+          </p>
         </footer>
       </div>
     </main>
@@ -3186,11 +5510,11 @@ function InstagramDot() {
   );
 }
 
-function EscalationTabs() {
+function EscalationTabs({ tabs }: { tabs: EscalationTab[] }) {
   return (
     <div className="-mx-4 mt-8 overflow-x-auto px-4 no-scrollbar sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
       <div className="grid w-max grid-flow-col auto-cols-max lg:grid-cols-[88px_142px_162px_178px_180px_160px]">
-        {escalationTabs.map((tab, index) => {
+        {tabs.map((tab, index) => {
           const Icon = tab.icon;
           const isActive = index === 0;
 
@@ -3273,7 +5597,19 @@ function EscalationCard({ escalation }: { escalation: EscalationItem }) {
   );
 }
 
-function EscalationDetailPanel() {
+function EscalationDetailPanel({ escalation, rows }: { escalation?: EscalationItem; rows: EscalationDetailRow[] }) {
+  if (!escalation) {
+    return (
+      <aside className="rounded-[13px] border border-dashed border-[#d7deeb] bg-white p-5 text-center shadow-[0_22px_60px_rgba(20,28,53,0.025)] xl:sticky xl:top-6">
+        <TriangleAlert className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
+        <h2 className="mt-3 text-[15px] font-extrabold text-black">No escalation selected</h2>
+        <p className="mx-auto mt-2 max-w-[260px] text-[12px] font-medium leading-relaxed text-[#596175]">
+          Real refund, issue, support, or human handoff keywords will show details here.
+        </p>
+      </aside>
+    );
+  }
+
   return (
     <aside className="rounded-[13px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)] xl:sticky xl:top-6">
       <div className="flex items-center justify-between">
@@ -3285,14 +5621,14 @@ function EscalationDetailPanel() {
 
       <div className="mt-7 grid grid-cols-[52px_minmax(0,1fr)] items-center gap-4 sm:grid-cols-[52px_minmax(0,1fr)_118px]">
         <span
-          aria-label="Ava Thompson"
+          aria-label={escalation.name}
           role="img"
           className="h-[52px] w-[52px] shrink-0 rounded-full bg-cover bg-center"
-          style={{ backgroundImage: "url(https://i.pravatar.cc/96?img=47)" }}
+          style={{ backgroundImage: `url(${escalation.avatar})` }}
         />
         <div className="min-w-0">
-          <h3 className="whitespace-nowrap text-[14px] font-extrabold text-black">Ava Thompson</h3>
-          <p className="mt-1 truncate text-[12px] font-medium text-[#46506a]">@ava.thompson</p>
+          <h3 className="whitespace-nowrap text-[14px] font-extrabold text-black">{escalation.name}</h3>
+          <p className="mt-1 truncate text-[12px] font-medium text-[#46506a]">{escalation.handle}</p>
         </div>
         <button
           type="button"
@@ -3306,12 +5642,12 @@ function EscalationDetailPanel() {
       <div className="mt-8">
         <h3 className="text-[13px] font-extrabold text-black">Summary</h3>
         <p className="mt-3 text-[12px] font-medium leading-[1.75] text-[#253049]">
-          Ava is requesting a full refund for Order #1024. She says the course content didn&apos;t meet her expectations and is not as advertised.
+          {escalation.detail}
         </p>
       </div>
 
       <div className="mt-5 divide-y divide-[#edf0f6] border-y border-[#edf0f6]">
-        {escalationDetailRows.map((row) => {
+        {rows.map((row) => {
           const Icon = row.icon;
           return (
             <div key={row.label} className="flex min-h-[38px] items-center gap-3 py-2 text-[12px]">
@@ -3330,7 +5666,7 @@ function EscalationDetailPanel() {
       <div className="mt-6">
         <h3 className="text-[13px] font-extrabold text-black">AI Recommended Response</h3>
         <div className="mt-3 rounded-[8px] bg-[#f0efff] p-4 text-[12px] font-medium leading-[1.7] text-[#253049]">
-          We&apos;re sorry to hear the course didn&apos;t meet your expectations. We want you to get the most value from your purchase. Can you share what specific parts fell short for you? We&apos;d love to make this right.
+          Thanks for reaching out. I&apos;m going to take a closer look at this conversation and help you directly.
         </div>
         <p className="mt-3 flex items-center gap-2 text-[11px] font-medium text-[#46506a]">
           <Sparkles size={13} className="text-[#6d3cff]" strokeWidth={2.2} />
@@ -3356,7 +5692,7 @@ function EscalationDetailPanel() {
   );
 }
 
-function EscalationsPage() {
+function EscalationsPage({ summary, isLoading, error }: { summary: CreatorLiveSummary; isLoading: boolean; error: string }) {
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
       <div className="mx-auto max-w-[1286px]">
@@ -3396,17 +5732,35 @@ function EscalationsPage() {
           </div>
         </header>
 
-        <EscalationTabs />
+        <EscalationTabs tabs={summary.escalationTabs} />
+
+        {(isLoading || error) && (
+          <div className="mt-4 rounded-[10px] border border-[#edf0f6] bg-white px-4 py-3 text-[12px] font-semibold text-[#46506a] shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+            {isLoading ? "Loading real Instagram conversations..." : error}
+          </div>
+        )}
 
         <div className="mt-6 grid gap-7 xl:grid-cols-[minmax(0,1fr)_380px]">
           <section className="space-y-5">
-            {escalationItems.map((escalation) => (
-              <EscalationCard key={escalation.title} escalation={escalation} />
-            ))}
-            <p className="pt-2 text-center text-[13px] font-medium text-[#46506a]">Showing 1 to 3 of 3 escalations</p>
+            {summary.escalations.length > 0 ? (
+              summary.escalations.map((escalation) => (
+                <EscalationCard key={`${escalation.handle}-${escalation.badge}-${escalation.time}`} escalation={escalation} />
+              ))
+            ) : (
+              <section className="rounded-[13px] border border-dashed border-[#d7deeb] bg-white p-8 text-center shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+                <TriangleAlert className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
+                <h2 className="mt-3 text-[15px] font-extrabold text-black">No escalation signals yet</h2>
+                <p className="mx-auto mt-2 max-w-[430px] text-[12px] font-medium leading-relaxed text-[#596175]">
+                  Refunds, complaints, support issues, or human handoff requests from real Instagram messages will appear here.
+                </p>
+              </section>
+            )}
+            <p className="pt-2 text-center text-[13px] font-medium text-[#46506a]">
+              Showing {summary.escalations.length > 0 ? `1 to ${summary.escalations.length}` : "0"} of {formatCreatorInteger(summary.escalationCount)} escalations
+            </p>
           </section>
 
-          <EscalationDetailPanel />
+          <EscalationDetailPanel escalation={summary.escalations[0]} rows={summary.escalationDetailRows} />
         </div>
       </div>
     </main>
@@ -3534,62 +5888,49 @@ const timeZoneOptions = [
 const languageOptions = ["English", "Spanish", "French", "German", "Urdu", "Arabic"];
 const currencyOptions = ["USD ($)", "EUR (€)", "GBP (£)", "PKR (₨)", "AED (د.إ)"];
 
-function readProfileImage(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    if (!file.type.startsWith("image/")) {
-      reject(new Error("Choose an image file."));
-      return;
-    }
+async function uploadProfileImage(file: File) {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Choose an image file.");
+  }
 
-    if (file.size > 8 * 1024 * 1024) {
-      reject(new Error("Choose an image smaller than 8MB."));
-      return;
-    }
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error("Choose an image smaller than 8MB.");
+  }
 
-    const objectUrl = URL.createObjectURL(file);
-    const image = new Image();
+  const formData = new FormData();
+  formData.append("image", file);
 
-    image.onload = () => {
-      const size = 192;
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-
-      if (!context) {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error("Could not process image."));
-        return;
-      }
-
-      canvas.width = size;
-      canvas.height = size;
-
-      const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
-      const sourceX = (image.naturalWidth - sourceSize) / 2;
-      const sourceY = (image.naturalHeight - sourceSize) / 2;
-
-      context.clearRect(0, 0, size, size);
-      context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
-      URL.revokeObjectURL(objectUrl);
-      resolve(canvas.toDataURL("image/jpeg", 0.82));
-    };
-
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Could not load image."));
-    };
-
-    image.src = objectUrl;
+  const response = await fetch("/api/auth/profile/image", {
+    method: "POST",
+    body: formData,
   });
+  const payload = (await response.json()) as {
+    url?: string;
+    originalBytes?: number;
+    compressedBytes?: number;
+    error?: string;
+  };
+
+  if (!response.ok || payload.error || !payload.url) {
+    throw new Error(payload.error || "Could not upload image");
+  }
+
+  return {
+    ...payload,
+    url: payload.url,
+  };
 }
 
 function SettingsAccountCard({
   profile,
   onProfileChange,
+  defaultEditing = false,
 }: {
   profile: AccountProfile;
   onProfileChange: (profile: AccountProfile) => Promise<AccountProfile>;
+  defaultEditing?: boolean;
 }) {
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(defaultEditing);
   const [draft, setDraft] = useState<AccountProfile>(profile);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -3628,13 +5969,14 @@ function SettingsAccountCard({
     }
 
     setSaveError("");
-    setImageUploadMessage("Preparing image...");
+    setImageUploadMessage("Compressing and uploading image...");
 
     try {
-      const avatarDataUrl = await readProfileImage(file);
+      const upload = await uploadProfileImage(file);
 
-      updateDraft("avatarUrl", avatarDataUrl);
-      setImageUploadMessage("Image ready. Save profile to apply it.");
+      updateDraft("avatarUrl", upload.url);
+      const savedBytes = Math.max(0, (upload.originalBytes || 0) - (upload.compressedBytes || 0));
+      setImageUploadMessage(savedBytes > 0 ? "Image compressed, uploaded, and ready to save." : "Image uploaded and ready to save.");
     } catch (error) {
       setImageUploadMessage("");
       setSaveError(error instanceof Error ? error.message : "Could not upload image");
@@ -5271,17 +7613,119 @@ function SettingsNotificationsCard({
   onChange: (notifications: NotificationSetting[]) => void;
   onManage?: () => void;
 }) {
+  const [savedMessage, setSavedMessage] = useState("");
+  const [pushPermission, setPushPermission] = useState<BrowserNotificationPermission>(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return "unsupported";
+    }
+
+    return Notification.permission;
+  });
+
+  useEffect(() => {
+    if (!savedMessage) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => setSavedMessage(""), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [savedMessage]);
+
+  const activeCount = notifications.filter((notification) => notification.enabled).length;
+  const emailSetting = notifications.find((notification) => notification.id === "email");
+  const pushSetting = notifications.find((notification) => notification.id === "push");
+
   function updateNotification(id: string, partial: Partial<NotificationSetting>) {
-    onChange(notifications.map((notification) => (notification.id === id ? { ...notification, ...partial } : notification)));
+    onChange(
+      notifications.map((notification) => {
+        if (notification.id !== id) {
+          return notification;
+        }
+
+        const nextNotification = { ...notification, ...partial };
+
+        if (partial.enabled === false) {
+          return { ...nextNotification, value: "Off" };
+        }
+
+        if (partial.enabled === true && nextNotification.value === "Off") {
+          return { ...nextNotification, value: getDefaultNotificationValue(id) };
+        }
+
+        return nextNotification;
+      })
+    );
+    setSavedMessage("Saved automatically");
+  }
+
+  async function requestPushPermission(nextValue = getDefaultNotificationValue("push")) {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setPushPermission("unsupported");
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setPushPermission(permission);
+    updateNotification("push", {
+      enabled: permission === "granted",
+      value: permission === "granted" ? nextValue : "Off",
+    });
+  }
+
+  function handleToggle(id: string, checked: boolean) {
+    if (id === "push" && checked && pushPermission !== "granted") {
+      void requestPushPermission();
+      return;
+    }
+
+    updateNotification(id, { enabled: checked });
+  }
+
+  function handleSelect(id: string, value: string) {
+    if (id === "push" && value !== "Off" && pushPermission !== "granted") {
+      void requestPushPermission(value);
+      return;
+    }
+
+    updateNotification(id, { value, enabled: value !== "Off" });
+  }
+
+  async function sendTestNotification() {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      await requestPushPermission();
+    }
+
+    try {
+      const response = await fetch("/api/notifications/test", {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Could not send test notification");
+      }
+
+      setSavedMessage("Realtime test sent");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not send test notification";
+      setSavedMessage(message);
+    }
   }
 
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
-      <div className="flex items-center gap-2">
-        <Bell size={17} strokeWidth={2.35} />
-        <h2 className="text-[15px] font-extrabold text-black">Notifications</h2>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Bell size={17} strokeWidth={2.35} />
+            <h2 className="text-[15px] font-extrabold text-black">Notifications</h2>
+          </div>
+          <p className="mt-3 text-[11px] font-medium text-[#46506a]">Choose how and when you are notified.</p>
+        </div>
+        <span className="inline-flex h-8 items-center rounded-[8px] bg-[#f0edff] px-3 text-[11px] font-extrabold text-[#3044ff]">
+          {activeCount} active
+        </span>
       </div>
-      <p className="mt-3 text-[11px] font-medium text-[#46506a]">Choose how and when you are notified.</p>
 
       <div className="mt-4 space-y-4">
         {notifications.map((item) => {
@@ -5295,31 +7739,92 @@ function SettingsNotificationsCard({
               <div className="min-w-0">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
                   <span className="min-w-0 text-[12px] font-extrabold leading-tight text-black">{item.label}</span>
-                  <SettingsToggle ariaLabel={`Toggle ${item.label}`} checked={item.enabled} onChange={(checked) => updateNotification(item.id, { enabled: checked })} />
+                  <SettingsToggle ariaLabel={`Toggle ${item.label}`} checked={item.enabled} onChange={(checked) => handleToggle(item.id, checked)} />
                 </div>
                 <SettingsSelect
                   ariaLabel={`${item.label} delivery`}
                   value={item.value}
-                  options={["Off", "Instant", "Every morning", "All important updates", "On"]}
-                  onChange={(value) => updateNotification(item.id, { value, enabled: value !== "Off" })}
+                  options={getNotificationOptions(item.id)}
+                  onChange={(value) => handleSelect(item.id, value)}
                   className="mt-2 w-full"
                 />
+                {item.id === "push" && pushPermission === "denied" ? (
+                  <p className="mt-2 text-[11px] font-semibold text-[#df405b]">
+                    Push notifications are blocked in this browser. Enable them in browser site settings.
+                  </p>
+                ) : null}
               </div>
             </div>
           );
         })}
       </div>
 
-      <button
-        type="button"
-        onClick={onManage}
-        className="mt-5 flex h-10 w-full items-center justify-between rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black"
-      >
-        Manage notifications
-        <ArrowRight size={15} strokeWidth={2.5} />
-      </button>
+      <div className="mt-5 grid gap-3 rounded-[10px] border border-[#e7eaf2] bg-[#fbfcff] p-4 sm:grid-cols-3">
+        <div>
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.02em] text-[#697083]">Email</p>
+          <p className="mt-1 text-[12px] font-bold text-black">{emailSetting?.enabled ? emailSetting.value : "Off"}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.02em] text-[#697083]">Push access</p>
+          <p className="mt-1 text-[12px] font-bold text-black">{formatBrowserNotificationPermission(pushPermission)}</p>
+        </div>
+        <div>
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.02em] text-[#697083]">Escalations</p>
+          <p className="mt-1 text-[12px] font-bold text-black">
+            {notifications.find((notification) => notification.id === "escalation")?.enabled ? "Instant alerts" : "Off"}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className={`text-[11px] font-extrabold ${savedMessage ? "text-[#13a84f]" : "text-[#697083]"}`}>
+          {savedMessage || "Changes are saved to your account."}
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={sendTestNotification}
+            disabled={pushSetting?.enabled === false}
+            className="flex h-10 items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black transition hover:bg-[#f8f9fc] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Bell size={14} strokeWidth={2.4} />
+            Test push
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (onManage) {
+                onManage();
+                return;
+              }
+
+              setSavedMessage("You are managing notifications now");
+            }}
+            className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_14px_28px_rgba(48,68,255,0.18)]"
+          >
+            Manage notifications
+            <ArrowRight size={15} strokeWidth={2.5} />
+          </button>
+        </div>
+      </div>
     </section>
   );
+}
+
+function formatBrowserNotificationPermission(permission: BrowserNotificationPermission) {
+  if (permission === "granted") {
+    return "Allowed";
+  }
+
+  if (permission === "denied") {
+    return "Blocked";
+  }
+
+  if (permission === "unsupported") {
+    return "Unsupported";
+  }
+
+  return "Not requested";
 }
 
 function SettingsBillingCard({
@@ -6235,11 +8740,86 @@ function SettingsBillingSection({
   onChange: (billing: BillingSettings) => void;
 }) {
   const [billingMessage, setBillingMessage] = useState("");
+  const [pricingPlans, setPricingPlans] = useState<PricingPlan[]>([]);
+  const [isPricingLoading, setIsPricingLoading] = useState(true);
+  const [buyingPlanId, setBuyingPlanId] = useState("");
+  const activePricingPlans = pricingPlans.filter((plan) => plan.status === "active");
+  const planOptions = activePricingPlans.length > 0 ? activePricingPlans.map((plan) => plan.name) : ["Starter Plan", "Pro Plan", "Scale Plan"];
   const invoices = [
-    ["INV-2026-06", "June 2026", "$249", "Paid"],
-    ["INV-2026-05", "May 2026", "$249", "Paid"],
-    ["INV-2026-04", "April 2026", "$249", "Paid"],
+    ["INV-2026-06", "June 2026", billing.price.split(" / ")[0] || "$0", billing.status],
+    ["INV-2026-05", "May 2026", billing.price.split(" / ")[0] || "$0", billing.status],
+    ["INV-2026-04", "April 2026", billing.price.split(" / ")[0] || "$0", billing.status],
   ];
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadPricingPlans() {
+      try {
+        const response = await fetch("/api/pricing", {
+          cache: "no-store",
+        });
+        const data = (await response.json()) as PricingResponse;
+
+        if (!response.ok || data.error) {
+          throw new Error(data.error || "Could not load pricing plans");
+        }
+
+        if (isMounted) {
+          setPricingPlans(data.plans || []);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setBillingMessage(error instanceof Error ? error.message : "Could not load pricing plans");
+        }
+      } finally {
+        if (isMounted) {
+          setIsPricingLoading(false);
+        }
+      }
+    }
+
+    void loadPricingPlans();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  async function activatePlan(plan: PricingPlan) {
+    setBuyingPlanId(plan.id);
+    setBillingMessage("");
+
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ planId: plan.id }),
+      });
+      const data = (await response.json()) as { billing?: Partial<BillingSettings>; error?: string };
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Could not activate plan");
+      }
+
+      onChange({
+        ...billing,
+        plan: data.billing?.plan || plan.name,
+        status: data.billing?.status || "Active",
+        price: data.billing?.price || `$${plan.monthlyPrice} / month`,
+        nextBillingDate: data.billing?.nextBillingDate || billing.nextBillingDate,
+        invoiceEmail: data.billing?.invoiceEmail || billing.invoiceEmail,
+      });
+      setBillingMessage(`${plan.name} activated. Superadmin revenue pages will update after refresh.`);
+    } catch (error) {
+      setBillingMessage(error instanceof Error ? error.message : "Could not activate plan");
+    } finally {
+      setBuyingPlanId("");
+    }
+  }
 
   return (
     <div className="grid gap-5">
@@ -6253,7 +8833,7 @@ function SettingsBillingSection({
             <SettingsSelect
               ariaLabel="Billing plan"
               value={billing.plan}
-              options={["Starter Plan", "Pro Plan", "Scale Plan"]}
+              options={planOptions}
               onChange={(value) => onChange({ ...billing, plan: value })}
             />
           </label>
@@ -6286,6 +8866,76 @@ function SettingsBillingSection({
               </button>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-[15px] font-extrabold text-black">Pricing</h3>
+            <p className="mt-1 text-[11px] font-medium text-[#46506a]">
+              Pick a plan to update your subscription and admin revenue in real time.
+            </p>
+          </div>
+          {isPricingLoading && (
+            <span className="flex items-center gap-2 text-[11px] font-bold text-[#687089]">
+              <RefreshCw size={13} strokeWidth={2.4} className="animate-spin text-[#3044ff]" />
+              Loading prices
+            </span>
+          )}
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          {(isPricingLoading && activePricingPlans.length === 0 ? Array.from({ length: 3 }) : activePricingPlans).map((planValue, index) => {
+            const plan = planValue as PricingPlan | undefined;
+
+            if (!plan) {
+              return <div key={index} className="h-[230px] animate-pulse rounded-[10px] border border-[#edf0f6] bg-[#f6f7fb]" />;
+            }
+
+            const isCurrentPlan = billing.plan === plan.name;
+            const isBuying = buyingPlanId === plan.id;
+
+            return (
+              <article
+                key={plan.id}
+                className={`rounded-[10px] border p-4 ${
+                  isCurrentPlan ? "border-[#cfd7ff] bg-[#f6f7ff]" : "border-[#edf0f6] bg-white"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-[14px] font-extrabold text-black">{plan.name}</h4>
+                    <p className="mt-1 text-[11px] font-medium leading-relaxed text-[#46506a]">{plan.description}</p>
+                  </div>
+                  {isCurrentPlan && <span className="rounded-[8px] bg-[#e7f8ed] px-2 py-1 text-[10px] font-extrabold text-[#0a9b3f]">Current</span>}
+                </div>
+                <p className="mt-4 text-[26px] font-extrabold text-black">
+                  ${plan.monthlyPrice}
+                  <span className="text-[12px] font-semibold text-[#687089]"> / month</span>
+                </p>
+                <ul className="mt-3 space-y-2">
+                  {plan.features.slice(0, 4).map((feature) => (
+                    <li key={feature} className="flex items-center gap-2 text-[11px] font-semibold text-[#46506a]">
+                      <Check size={13} strokeWidth={2.6} className="text-[#0a9b3f]" />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => void activatePlan(plan)}
+                  disabled={isBuying || isCurrentPlan}
+                  className={`mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] px-4 text-[12px] font-extrabold disabled:cursor-not-allowed disabled:opacity-60 ${
+                    isCurrentPlan ? "bg-[#edf0f6] text-[#46506a]" : "bg-[#3044ff] text-white shadow-[0_18px_36px_rgba(48,68,255,0.24)]"
+                  }`}
+                >
+                  {isBuying ? <RefreshCw size={14} strokeWidth={2.4} className="animate-spin" /> : <ShoppingCart size={14} strokeWidth={2.4} />}
+                  {isCurrentPlan ? "Current plan" : plan.cta || "Buy plan"}
+                </button>
+              </article>
+            );
+          })}
         </div>
       </section>
     </div>
@@ -6566,10 +9216,44 @@ function SettingsPage({
   const [settingsState, setSettingsState] = useState<AppSettingsState>(readStoredSettingsState);
   const [quickPanel, setQuickPanel] = useState<"updates" | "help" | null>(null);
   const customRuleCounterRef = useRef(1);
+  const hasChangedNotificationsRef = useRef(false);
 
   useEffect(() => {
     window.localStorage.setItem(settingsStateStorageKey, JSON.stringify(settingsState));
+    dispatchNotificationPreferencesChanged(settingsState.notifications);
   }, [settingsState]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadNotificationPreferences() {
+      try {
+        const response = await fetch("/api/notifications/preferences", { cache: "no-store" });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as { notifications?: unknown };
+        const notifications = normalizeNotificationSettings(payload.notifications);
+
+        if (isMounted && !hasChangedNotificationsRef.current) {
+          setSettingsState((current) => ({
+            ...current,
+            notifications,
+          }));
+        }
+      } catch (error) {
+        console.error("Notification preferences load error:", error);
+      }
+    }
+
+    void loadNotificationPreferences();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const visibleSections = getVisibleSettingsMenuItems(profile);
@@ -6588,6 +9272,22 @@ function SettingsPage({
       ...current,
       [key]: value,
     }));
+  }
+
+  function handleNotificationsChange(notifications: NotificationSetting[]) {
+    const normalizedNotifications = normalizeNotificationSettings(notifications);
+    hasChangedNotificationsRef.current = true;
+    updateSettingsState("notifications", normalizedNotifications);
+
+    void fetch("/api/notifications/preferences", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ notifications: normalizedNotifications }),
+    }).catch((error) => {
+      console.error("Notification preferences save error:", error);
+    });
   }
 
   function addEscalationRule() {
@@ -6701,7 +9401,7 @@ function SettingsPage({
       return (
         <div className="grid gap-5">
           <SettingsSectionHeader section="notifications" />
-          <SettingsNotificationsCard notifications={settingsState.notifications} onChange={(notifications) => updateSettingsState("notifications", notifications)} />
+          <SettingsNotificationsCard notifications={settingsState.notifications} onChange={handleNotificationsChange} />
         </div>
       );
     }
@@ -6736,7 +9436,7 @@ function SettingsPage({
         <div className="grid gap-5 2xl:grid-cols-3">
           <SettingsAssistantCard settings={settingsState.ai} onChange={(ai) => updateSettingsState("ai", ai)} onConfigure={() => setActiveSection("ai-integration")} />
           <SettingsRulesCard rules={settingsState.rules} onChange={(rules) => updateSettingsState("rules", rules)} onManage={() => setActiveSection("escalations")} />
-          <SettingsNotificationsCard notifications={settingsState.notifications} onChange={(notifications) => updateSettingsState("notifications", notifications)} onManage={() => setActiveSection("notifications")} />
+          <SettingsNotificationsCard notifications={settingsState.notifications} onChange={handleNotificationsChange} onManage={() => setActiveSection("notifications")} />
         </div>
 
         <SettingsBillingCard billing={settingsState.billing} onManage={() => setActiveSection("billing")} />
@@ -6802,11 +9502,11 @@ function SettingsPage({
   );
 }
 
-function KnowledgeTabs() {
+function KnowledgeTabs({ tabs }: { tabs: KnowledgeTab[] }) {
   return (
     <div className="-mx-4 mt-8 overflow-x-auto px-4 no-scrollbar sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
       <div className="grid w-max grid-flow-col auto-cols-max">
-        {knowledgeTabs.map((tab, index) => {
+        {tabs.map((tab, index) => {
           const Icon = tab.icon;
           const isActive = index === 0;
 
@@ -6832,7 +9532,7 @@ function KnowledgeTabs() {
   );
 }
 
-function KnowledgeSourceRows() {
+function KnowledgeSourceRows({ sources }: { sources: KnowledgeSource[] }) {
   return (
     <section>
       <div className="hidden grid-cols-[minmax(260px,1fr)_120px_150px_150px_28px] px-3 pb-3 text-[11px] font-semibold text-[#46506a] md:grid">
@@ -6844,7 +9544,15 @@ function KnowledgeSourceRows() {
       </div>
 
       <div>
-        {knowledgeSources.map((source) => {
+        {sources.length === 0 ? (
+          <div className="rounded-[12px] border border-dashed border-[#d7deeb] bg-white px-5 py-10 text-center shadow-[0_18px_45px_rgba(20,28,53,0.025)]">
+            <BookOpen className="mx-auto text-[#3044ff]" size={30} strokeWidth={2.35} />
+            <h2 className="mt-3 text-[15px] font-extrabold text-black">No saved knowledge sources yet</h2>
+            <p className="mx-auto mt-2 max-w-[480px] text-[12px] font-medium leading-relaxed text-[#596175]">
+              This page now shows only real saved sources. Add your website, FAQs, pricing, policies, or PDFs to train the AI.
+            </p>
+          </div>
+        ) : sources.map((source) => {
           const Icon = source.icon;
 
           return (
@@ -6901,7 +9609,10 @@ function KnowledgeSourceRows() {
   );
 }
 
-function TrainingStatusCard() {
+function TrainingStatusCard({ percent, sourceCount }: { percent: number; sourceCount: number }) {
+  const clampedPercent = Math.max(0, Math.min(100, percent));
+  const trainedDegrees = Math.round((clampedPercent / 100) * 360);
+
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <div className="flex items-center justify-between">
@@ -6913,22 +9624,29 @@ function TrainingStatusCard() {
       </div>
 
       <div className="mt-6 flex flex-col gap-5 sm:flex-row sm:items-center">
-        <div className="relative mx-auto flex h-[96px] w-[96px] shrink-0 items-center justify-center rounded-full bg-[conic-gradient(#3044ff_0deg_331deg,#eef0fb_331deg_360deg)] sm:mx-0">
+        <div
+          className="relative mx-auto flex h-[96px] w-[96px] shrink-0 items-center justify-center rounded-full sm:mx-0"
+          style={{
+            background: `conic-gradient(#3044ff 0deg ${trainedDegrees}deg, #eef0fb ${trainedDegrees}deg 360deg)`,
+          }}
+        >
           <div className="absolute inset-[8px] flex flex-col items-center justify-center rounded-full bg-white">
-            <span className="text-[20px] font-extrabold leading-none text-black">92%</span>
+            <span className="text-[20px] font-extrabold leading-none text-black">{clampedPercent}%</span>
             <span className="mt-1.5 text-[10px] font-semibold text-[#596175]">Trained</span>
           </div>
         </div>
         <p className="text-[14px] font-medium leading-[1.55] text-black">
-          Your AI is well trained and ready to represent your brand.
+          {sourceCount > 0
+            ? "Your AI has saved knowledge sources available."
+            : "No saved knowledge sources are connected yet."}
         </p>
       </div>
 
       <div className="mt-5 space-y-4 border-t border-[#edf0f6] pt-4">
         {[
-          ["Sources synced", "11 / 12", "text-[#0a9b3f]"],
-          ["Up to date", "9 / 12", "text-[#0a9b3f]"],
-          ["Needs review", "1", "text-[#ff7a00]"],
+          ["Sources synced", `${sourceCount} / ${sourceCount}`, sourceCount > 0 ? "text-[#0a9b3f]" : "text-[#596175]"],
+          ["Up to date", String(sourceCount), sourceCount > 0 ? "text-[#0a9b3f]" : "text-[#596175]"],
+          ["Needs review", "0", "text-[#596175]"],
         ].map(([label, value, tone]) => (
           <div key={label} className="flex items-center justify-between text-[12px]">
             <span className="font-medium text-[#31394f]">{label}</span>
@@ -6940,7 +9658,7 @@ function TrainingStatusCard() {
   );
 }
 
-function KnowledgeInsightsCard() {
+function KnowledgeInsightsCard({ insights }: { insights: KnowledgeInsight[] }) {
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <h2 className="flex items-center gap-2 text-[14px] font-extrabold text-black">
@@ -6949,7 +9667,7 @@ function KnowledgeInsightsCard() {
       </h2>
 
       <div className="mt-4 space-y-3">
-        {knowledgeInsights.map((insight) => {
+        {insights.map((insight) => {
           const Icon = insight.icon;
           return (
             <button key={insight.title} type="button" className="flex w-full items-center gap-3 rounded-[9px] py-1.5 text-left">
@@ -6969,7 +9687,7 @@ function KnowledgeInsightsCard() {
   );
 }
 
-function KnowledgeUpdatesCard() {
+function KnowledgeUpdatesCard({ updates }: { updates: KnowledgeUpdate[] }) {
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <div className="flex items-center justify-between">
@@ -6978,7 +9696,11 @@ function KnowledgeUpdatesCard() {
       </div>
 
       <div className="mt-4 space-y-4">
-        {knowledgeUpdates.map((update) => {
+        {updates.length === 0 ? (
+          <p className="rounded-[9px] bg-[#f8f9fc] px-3 py-4 text-[12px] font-medium leading-relaxed text-[#596175]">
+            No real knowledge updates have been recorded yet.
+          </p>
+        ) : updates.map((update) => {
           const Icon = update.icon;
           return (
             <div key={update.title} className="flex items-center gap-3">
@@ -6999,7 +9721,7 @@ function KnowledgeUpdatesCard() {
   );
 }
 
-function KnowledgeBasePage() {
+function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLiveSummary; isLoading: boolean; error: string }) {
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
       <div className="mx-auto max-w-[1286px]">
@@ -7039,15 +9761,21 @@ function KnowledgeBasePage() {
           </div>
         </header>
 
-        <KnowledgeTabs />
+        <KnowledgeTabs tabs={summary.knowledgeTabs} />
+
+        {(isLoading || error) && (
+          <div className="mt-4 rounded-[10px] border border-[#edf0f6] bg-white px-4 py-3 text-[12px] font-semibold text-[#46506a] shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+            {isLoading ? "Loading real workspace data..." : error}
+          </div>
+        )}
 
         <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_344px]">
-          <KnowledgeSourceRows />
+          <KnowledgeSourceRows sources={summary.knowledgeSources} />
 
           <aside className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
-            <TrainingStatusCard />
-            <KnowledgeInsightsCard />
-            <KnowledgeUpdatesCard />
+            <TrainingStatusCard percent={summary.knowledgeTrainingPercent} sourceCount={summary.knowledgeSources.length} />
+            <KnowledgeInsightsCard insights={summary.knowledgeInsights} />
+            <KnowledgeUpdatesCard updates={summary.knowledgeUpdates} />
           </aside>
         </div>
       </div>
@@ -7055,12 +9783,12 @@ function KnowledgeBasePage() {
   );
 }
 
-function AudienceMetricStrip() {
+function AudienceMetricStrip({ metrics }: { metrics: AudienceMetric[] }) {
   return (
     <section className="mt-6 grid overflow-hidden rounded-[12px] border border-[#e5e8f0] bg-white shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:grid-cols-2 xl:h-[112px] xl:grid-cols-5">
-      {audienceMetrics.map((metric, index) => {
+      {metrics.map((metric, index) => {
         const Icon = metric.icon;
-        const isLast = index === audienceMetrics.length - 1;
+        const isLast = index === metrics.length - 1;
         const hasMobileRightBorder = index % 2 === 0 && !isLast;
         const hasDesktopRightBorder = !isLast;
 
@@ -7084,7 +9812,6 @@ function AudienceMetricStrip() {
               <p className="mt-2 flex min-w-0 items-center gap-1 text-[10px] font-semibold text-[#13a84f]">
                 <TrendingUp size={11} strokeWidth={2.5} />
                 {metric.change}
-                <span className="truncate text-[#596175]">vs last 7 days</span>
               </p>
             </div>
           </div>
@@ -7094,8 +9821,17 @@ function AudienceMetricStrip() {
   );
 }
 
-function AudienceGrowthChart() {
-  const xLabels = ["May 12", "May 13", "May 14", "May 15", "May 16", "May 17", "May 18"];
+function AudienceGrowthChart({ totalAudience }: { totalAudience: number }) {
+  const xLabels = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (6 - index));
+
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  });
+  const maxValue = Math.max(totalAudience, 1);
+  const yLabels = [maxValue, Math.round(maxValue * 0.66), Math.round(maxValue * 0.33), 0];
+  const points = [60, 162, 263, 365, 467, 568, 640].map((x) => ({ x, y: totalAudience > 0 ? 82 : 198 }));
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`).join(" ");
 
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
@@ -7130,18 +9866,18 @@ function AudienceGrowthChart() {
             <line key={y} x1="58" x2="640" y1={y} y2={y} stroke="#e7eaf2" strokeWidth="1" />
           ))}
 
-          {["150K", "100K", "50K", "0"].map((label, index) => (
+          {yLabels.map((label, index) => (
             <text key={label} x="16" y={32 + index * 58} fill="#46506a" fontSize="12" fontWeight="600">
-              {label}
+              {formatCreatorInteger(label)}
             </text>
           ))}
 
           <path
-            d="M60 116 L162 101 L263 97 L365 82 L467 69 L568 54 L640 46 L640 198 L60 198 Z"
+            d={`${path} L640 198 L60 198 Z`}
             fill="url(#audienceGrowthFill)"
           />
           <path
-            d="M60 116 L162 101 L263 97 L365 82 L467 69 L568 54 L640 46"
+            d={path}
             fill="none"
             stroke="#4b3cff"
             strokeLinecap="round"
@@ -7149,12 +9885,12 @@ function AudienceGrowthChart() {
             strokeWidth="3"
           />
 
-          {[60, 162, 263, 365, 467, 568].map((x, index) => (
-            <circle key={x} cx={x} cy={[116, 101, 97, 82, 69, 54][index]} r="3.5" fill="#4b3cff" />
+          {points.slice(0, -1).map((point) => (
+            <circle key={point.x} cx={point.x} cy={point.y} r="3.5" fill="#4b3cff" />
           ))}
-          <circle cx="640" cy="46" r="9" fill="#edeaff" filter="url(#audienceDotGlow)" />
-          <circle cx="640" cy="46" r="5.5" fill="#4b3cff" />
-          <circle cx="640" cy="46" r="3" fill="#ffffff" />
+          <circle cx={points[6].x} cy={points[6].y} r="9" fill="#edeaff" filter="url(#audienceDotGlow)" />
+          <circle cx={points[6].x} cy={points[6].y} r="5.5" fill="#4b3cff" />
+          <circle cx={points[6].x} cy={points[6].y} r="3" fill="#ffffff" />
 
           {xLabels.map((label, index) => (
             <text key={label} x={60 + index * 97} y="232" textAnchor="middle" fill="#46506a" fontSize="12" fontWeight="600">
@@ -7164,29 +9900,36 @@ function AudienceGrowthChart() {
         </svg>
 
         <div className="pointer-events-none absolute right-8 top-[126px] hidden h-[58px] w-[94px] rounded-[8px] bg-white px-3 py-2.5 shadow-[0_24px_60px_rgba(82,67,210,0.16)] xl:block">
-          <p className="text-[10px] font-semibold text-black">May 18, 2025</p>
-          <p className="mt-1 text-[15px] font-extrabold leading-none text-[#4b3cff]">124,580</p>
+          <p className="text-[10px] font-semibold text-black">Current</p>
+          <p className="mt-1 text-[15px] font-extrabold leading-none text-[#4b3cff]">{formatCreatorInteger(totalAudience)}</p>
         </div>
       </div>
     </section>
   );
 }
 
-function AudienceSourceCard() {
+function AudienceSourceCard({ sources, totalAudience }: { sources: AudienceSource[]; totalAudience: number }) {
+  const instagramSource = sources[0];
+
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <h2 className="text-[15px] font-extrabold text-black">Audience by source</h2>
 
       <div className="mt-5 grid items-center gap-6 md:grid-cols-[190px_minmax(0,1fr)]">
-        <div className="relative mx-auto h-[166px] w-[166px] rounded-full bg-[conic-gradient(#3f3cff_0deg_247deg,#bd35d2_247deg_309deg,#fb3d5d_309deg_340deg,#13a84f_340deg_352deg,#9aa1b5_352deg_360deg)]">
+        <div
+          className="relative mx-auto h-[166px] w-[166px] rounded-full"
+          style={{
+            background: totalAudience > 0 ? `conic-gradient(${instagramSource?.color || "#3f3cff"} 0deg 360deg)` : "#eff1f6",
+          }}
+        >
           <div className="absolute inset-[22px] flex flex-col items-center justify-center rounded-full bg-white">
-            <span className="text-[21px] font-extrabold leading-none text-black">124,580</span>
+            <span className="text-[21px] font-extrabold leading-none text-black">{formatCreatorInteger(totalAudience)}</span>
             <span className="mt-2 text-[12px] font-medium text-[#596175]">Total</span>
           </div>
         </div>
 
         <div className="space-y-4">
-          {audienceSources.map((source) => (
+          {sources.map((source) => (
             <div key={source.label} className="grid grid-cols-[minmax(0,1fr)_54px_64px] items-center gap-3 text-[12px]">
               <div className="flex items-center gap-3 font-medium text-black">
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: source.color }} />
@@ -7199,18 +9942,14 @@ function AudienceSourceCard() {
         </div>
       </div>
 
-      <button
-        type="button"
-        className="mx-auto mt-5 flex h-9 w-[154px] items-center justify-center gap-4 rounded-[8px] border border-[#dde3ee] bg-white text-[12px] font-extrabold text-black"
-      >
-        View all sources
-        <ArrowRight size={14} strokeWidth={2.5} />
-      </button>
+      {sources.length === 0 ? (
+        <p className="mt-5 text-center text-[12px] font-medium text-[#596175]">No audience source data yet.</p>
+      ) : null}
     </section>
   );
 }
 
-function TopAudienceCard() {
+function TopAudienceCard({ people }: { people: AudienceProfile[] }) {
   const filters = ["Most engaged", "Top buyers", "Rising stars", "Most active"];
 
   return (
@@ -7240,7 +9979,12 @@ function TopAudienceCard() {
           <span />
         </div>
 
-        {topAudience.map((person, index) => (
+        {people.length === 0 ? (
+          <div className="rounded-[10px] border border-dashed border-[#d7deeb] bg-white p-6 text-center">
+            <Users className="mx-auto text-[#3044ff]" size={26} strokeWidth={2.35} />
+            <p className="mt-3 text-[12px] font-semibold text-[#596175]">No real audience members loaded yet.</p>
+          </div>
+        ) : people.map((person, index) => (
           <div
             key={person.name}
             className={`grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-2 py-2.5 md:grid-cols-[minmax(210px,1fr)_110px_120px_110px_28px] md:items-center ${
@@ -7274,15 +10018,17 @@ function TopAudienceCard() {
         ))}
       </div>
 
-      <button type="button" className="mx-auto mt-4 flex items-center gap-3 text-[12px] font-extrabold text-[#3044ff]">
-        View all audience
-        <ArrowRight size={15} strokeWidth={2.5} />
-      </button>
+      {people.length > 0 ? (
+        <button type="button" className="mx-auto mt-4 flex items-center gap-3 text-[12px] font-extrabold text-[#3044ff]">
+          View all audience
+          <ArrowRight size={15} strokeWidth={2.5} />
+        </button>
+      ) : null}
     </section>
   );
 }
 
-function AudienceSegmentsCard() {
+function AudienceSegmentsCard({ segments }: { segments: AudienceSegment[] }) {
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <div className="flex items-center justify-between">
@@ -7291,7 +10037,7 @@ function AudienceSegmentsCard() {
       </div>
 
       <div className="mt-4">
-        {audienceSegments.map((segment, index) => {
+        {segments.map((segment, index) => {
           const Icon = segment.icon;
           return (
             <div
@@ -7325,7 +10071,7 @@ function AudienceSegmentsCard() {
   );
 }
 
-function AudiencePage() {
+function AudiencePage({ summary, isLoading, error }: { summary: CreatorLiveSummary; isLoading: boolean; error: string }) {
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
       <div className="mx-auto max-w-[1286px]">
@@ -7346,7 +10092,7 @@ function AudiencePage() {
               type="button"
               className="flex h-11 min-w-0 items-center justify-between rounded-[9px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] sm:h-12 sm:w-[252px] sm:px-5 sm:text-[13px]"
             >
-              May 12 - May 18, 2025
+              {summary.dateRangeLabel}
               <CalendarDays size={16} strokeWidth={2.3} />
             </button>
             <button
@@ -7363,28 +10109,553 @@ function AudiencePage() {
             >
               <Bell size={18} strokeWidth={2.25} />
               <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#3044ff] px-1 text-[10px] font-extrabold text-white">
-                2
+                {formatCreatorInteger(summary.escalationCount)}
               </span>
             </button>
           </div>
         </header>
 
-        <AudienceMetricStrip />
+        {(isLoading || error) && (
+          <div className="mt-4 rounded-[10px] border border-[#edf0f6] bg-white px-4 py-3 text-[12px] font-semibold text-[#46506a] shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+            {isLoading ? "Loading real audience data..." : error}
+          </div>
+        )}
+
+        <AudienceMetricStrip metrics={summary.audienceMetrics} />
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.38fr)_minmax(390px,0.98fr)]">
           <div className="relative">
-            <AudienceGrowthChart />
+            <AudienceGrowthChart totalAudience={summary.totalConversationCount} />
           </div>
-          <AudienceSourceCard />
+          <AudienceSourceCard sources={summary.audienceSources} totalAudience={summary.totalConversationCount} />
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.38fr)_minmax(390px,0.98fr)]">
-          <TopAudienceCard />
-          <AudienceSegmentsCard />
+          <TopAudienceCard people={summary.topAudience} />
+          <AudienceSegmentsCard segments={summary.audienceSegments} />
         </div>
       </div>
     </main>
   );
+}
+
+const creatorBuyerKeywords = ["price", "pricing", "cost", "package", "payment", "pay", "buy", "purchase", "order", "book", "call", "interested", "program", "course", "coaching", "subscription"];
+const creatorPartnershipKeywords = ["partner", "partnership", "collab", "collaboration", "sponsor", "sponsored", "brand", "affiliate"];
+const creatorCommunityKeywords = ["community", "share", "recommend", "refer", "follower", "audience"];
+const creatorEscalationKeywords = ["refund", "cancel", "complaint", "issue", "problem", "support", "angry", "human", "agent", "not working", "failed", "chargeback"];
+
+function formatCreatorInteger(value: number) {
+  return new Intl.NumberFormat("en-US").format(Math.max(0, value || 0));
+}
+
+function formatCreatorMoney(value: number) {
+  return `$${formatCreatorInteger(Math.max(0, Math.round(value)))}`;
+}
+
+function formatCreatorPercent(value: number, total: number) {
+  if (total <= 0) {
+    return "0%";
+  }
+
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+function clampCreatorScore(value: number) {
+  return Math.max(0, Math.min(99, Math.round(value)));
+}
+
+function truncateCreatorText(value: string, maxLength = 116) {
+  const compact = value.replace(/\s+/g, " ").trim();
+
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+
+  return `${compact.slice(0, maxLength - 1).trim()}...`;
+}
+
+function getCreatorMessageText(message: InstagramSettingsMessage) {
+  return `${message.text || ""} ${message.attachments?.map((attachment) => attachment.name || attachment.type).join(" ") || ""}`.toLowerCase();
+}
+
+function getCreatorConversationText(conversation: InstagramSettingsConversation) {
+  return conversation.messages
+    .filter((message) => message.from === "user")
+    .map((message) => getCreatorMessageText(message))
+    .join(" ");
+}
+
+function countCreatorKeywordHits(text: string, keywords: string[]) {
+  return keywords.reduce((total, keyword) => total + (text.includes(keyword) ? 1 : 0), 0);
+}
+
+function hasCreatorKeyword(text: string, keywords: string[]) {
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+function getCreatorMessageTime(message: InstagramSettingsMessage) {
+  return new Date(message.time).getTime();
+}
+
+function getCreatorConversationTime(conversation: InstagramSettingsConversation) {
+  const latestMessageTime = conversation.messages
+    .map((message) => getCreatorMessageTime(message))
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+
+  return latestMessageTime || (conversation.updated_time ? new Date(conversation.updated_time).getTime() : 0);
+}
+
+function getCreatorSortedMessages(conversation: InstagramSettingsConversation) {
+  return [...conversation.messages].sort((a, b) => getCreatorMessageTime(b) - getCreatorMessageTime(a));
+}
+
+function getCreatorLastMessage(conversation: InstagramSettingsConversation) {
+  return getCreatorSortedMessages(conversation)[0];
+}
+
+function getCreatorLastInboundMessage(conversation: InstagramSettingsConversation) {
+  return getCreatorSortedMessages(conversation).find((message) => message.from === "user");
+}
+
+function getCreatorParticipantName(conversation: InstagramSettingsConversation) {
+  return getConversationLabel(conversation);
+}
+
+function getCreatorParticipantHandle(conversation: InstagramSettingsConversation) {
+  if (conversation.participant.username) {
+    return `@${conversation.participant.username}`;
+  }
+
+  if (conversation.participant.name) {
+    return conversation.participant.name;
+  }
+
+  return `ID ${conversation.participant.id.slice(-6)}`;
+}
+
+function getCreatorAvatarNumber(conversation: InstagramSettingsConversation, index = 0) {
+  const seed = `${conversation.id}${conversation.participant.id}${index}`;
+  const total = seed.split("").reduce((sum, character) => sum + character.charCodeAt(0), 0);
+
+  return (total % 65) + 1;
+}
+
+function getCreatorAvatarUrl(conversation: InstagramSettingsConversation, index = 0) {
+  return conversation.participant.profile_pic || `https://i.pravatar.cc/96?img=${getCreatorAvatarNumber(conversation, index)}`;
+}
+
+function getCreatorConversationPreview(conversation: InstagramSettingsConversation) {
+  return formatInstagramMessagePreview(getCreatorLastInboundMessage(conversation) || getCreatorLastMessage(conversation));
+}
+
+function classifyCreatorOpportunity(conversation: InstagramSettingsConversation) {
+  const text = getCreatorConversationText(conversation);
+  const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
+  const buyerHits = countCreatorKeywordHits(text, creatorBuyerKeywords);
+  const partnershipHits = countCreatorKeywordHits(text, creatorPartnershipKeywords);
+  const communityHits = countCreatorKeywordHits(text, creatorCommunityKeywords);
+  const escalationHits = countCreatorKeywordHits(text, creatorEscalationKeywords);
+
+  if (escalationHits > 0 && buyerHits + partnershipHits + communityHits === 0) {
+    return null;
+  }
+
+  if (partnershipHits > 0) {
+    return {
+      badge: "PARTNERSHIP",
+      subtitle: "Partnership inquiry",
+      tone: "purple" as const,
+      icon: Handshake,
+      value: 5000 + partnershipHits * 250,
+      score: clampCreatorScore(72 + partnershipHits * 8 + inboundCount * 2),
+    };
+  }
+
+  if (buyerHits > 0) {
+    return {
+      badge: "HIGH INTENT",
+      subtitle: "Buying intent",
+      tone: "green" as const,
+      icon: ShoppingCart,
+      value: 1800 + buyerHits * 300,
+      score: clampCreatorScore(64 + buyerHits * 7 + inboundCount * 3),
+    };
+  }
+
+  if (communityHits > 0) {
+    return {
+      badge: "COMMUNITY",
+      subtitle: "Community signal",
+      tone: "orange" as const,
+      icon: Users,
+      value: 900 + communityHits * 150,
+      score: clampCreatorScore(58 + communityHits * 6 + inboundCount * 3),
+    };
+  }
+
+  if (inboundCount >= 3) {
+    return {
+      badge: "ENGAGED",
+      subtitle: "Engaged conversation",
+      tone: "blue" as const,
+      icon: Sparkles,
+      value: 750 + inboundCount * 100,
+      score: clampCreatorScore(54 + inboundCount * 5),
+    };
+  }
+
+  return null;
+}
+
+function classifyCreatorEscalation(conversation: InstagramSettingsConversation) {
+  const text = getCreatorConversationText(conversation);
+
+  if (!hasCreatorKeyword(text, creatorEscalationKeywords)) {
+    return null;
+  }
+
+  if (hasCreatorKeyword(text, ["refund", "chargeback", "cancel"])) {
+    return {
+      badge: "Refund Request",
+      badgeTone: "bg-[#fff0f3] text-[#df405b]",
+      borderTone: "border-[#ffc7d0]",
+      glowTone: "bg-[#fffafa]",
+      dotTone: "bg-[#df405b]",
+      icon: TriangleAlert,
+      risk: "High",
+    };
+  }
+
+  if (hasCreatorKeyword(text, ["human", "agent", "support"])) {
+    return {
+      badge: "Human Requested",
+      badgeTone: "bg-[#f0edff] text-[#6d3cff]",
+      borderTone: "border-[#d7ccff]",
+      glowTone: "bg-[#fcfbff]",
+      dotTone: "bg-[#6d3cff]",
+      icon: Users,
+      risk: "Medium",
+    };
+  }
+
+  return {
+    badge: "Issue",
+    badgeTone: "bg-[#fff3e6] text-[#ff850d]",
+    borderTone: "border-[#ffe0ba]",
+    glowTone: "bg-[#fffdf9]",
+    dotTone: "bg-[#ff850d]",
+    icon: CircleHelp,
+    risk: "Medium",
+  };
+}
+
+function buildCreatorLiveSummary(
+  conversations: InstagramSettingsConversation[],
+  totalConversationCount?: number,
+): CreatorLiveSummary {
+  const totalCount = typeof totalConversationCount === "number" ? totalConversationCount : conversations.length;
+  const sortedConversations = [...conversations].sort((a, b) => getCreatorConversationTime(b) - getCreatorConversationTime(a));
+  const allMessages = conversations.flatMap((conversation) => conversation.messages);
+  const inboundMessages = allMessages.filter((message) => message.from === "user");
+  const outboundMessages = allMessages.filter((message) => message.from === "me");
+  const engagedConversations = conversations.filter((conversation) => conversation.messages.some((message) => message.from === "user"));
+
+  const opportunityRecords = sortedConversations
+    .map((conversation) => ({ conversation, opportunity: classifyCreatorOpportunity(conversation) }))
+    .filter((record): record is { conversation: InstagramSettingsConversation; opportunity: NonNullable<ReturnType<typeof classifyCreatorOpportunity>> } => Boolean(record.opportunity));
+  const escalationRecords = sortedConversations
+    .map((conversation) => ({ conversation, escalation: classifyCreatorEscalation(conversation) }))
+    .filter((record): record is { conversation: InstagramSettingsConversation; escalation: NonNullable<ReturnType<typeof classifyCreatorEscalation>> } => Boolean(record.escalation));
+  const estimatedRevenue = opportunityRecords.reduce((total, record) => total + record.opportunity.value, 0);
+  const buyerCount = opportunityRecords.filter((record) => record.opportunity.badge === "HIGH INTENT").length;
+  const partnershipCount = opportunityRecords.filter((record) => record.opportunity.badge === "PARTNERSHIP").length;
+  const superfanCount = opportunityRecords.filter((record) => record.opportunity.badge === "ENGAGED").length;
+  const communityCount = opportunityRecords.filter((record) => record.opportunity.badge === "COMMUNITY").length;
+
+  const opportunityCards: OpportunityPageCard[] = opportunityRecords.map(({ conversation, opportunity }) => {
+    const preview = getCreatorConversationPreview(conversation);
+    const score = opportunity.score;
+
+    return {
+      name: getCreatorParticipantName(conversation),
+      subtitle: opportunity.subtitle,
+      detail: preview === "No messages" ? "Real conversation loaded from Instagram. No user message text is available yet." : truncateCreatorText(preview),
+      badge: opportunity.badge,
+      time: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
+      tone: opportunity.tone,
+      icon: opportunity.icon,
+      value: `${formatCreatorMoney(opportunity.value)} est.`,
+      scoreLabel: "Lead Score",
+      score: `${score}/100`,
+      progress: `${score}%`,
+      action: "Review",
+      verified: Boolean(conversation.participant.username),
+      avatars: [getCreatorAvatarNumber(conversation), getCreatorAvatarNumber(conversation, 1), getCreatorAvatarNumber(conversation, 2)],
+    };
+  });
+
+  const dashboardOpportunities: Opportunity[] = opportunityCards.slice(0, 4).map((card) => ({
+    title: card.subtitle,
+    eyebrow: card.badge,
+    body: [card.name, card.detail],
+    value: card.value,
+    action: card.action,
+    tone: card.tone === "green" ? "blue" : card.tone === "blue" ? "purple" : card.tone,
+    icon: card.icon,
+  }));
+
+  const escalations: EscalationItem[] = escalationRecords.map(({ conversation, escalation }) => {
+    const preview = getCreatorConversationPreview(conversation);
+    const messageCount = conversation.messages.length;
+
+    return {
+      name: getCreatorParticipantName(conversation),
+      handle: getCreatorParticipantHandle(conversation),
+      avatar: getCreatorAvatarUrl(conversation),
+      channel: "instagram",
+      time: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
+      badge: escalation.badge,
+      badgeTone: escalation.badgeTone,
+      title: `${escalation.badge} detected`,
+      detail: preview === "No messages" ? "Escalation keywords were detected in this Instagram conversation." : truncateCreatorText(preview, 150),
+      meta: [`Risk: ${escalation.risk}`, `${formatCreatorInteger(messageCount)} messages`],
+      metaTone: `first:${escalation.badgeTone} bg-[#eff1f6] text-[#31394f]`,
+      borderTone: escalation.borderTone,
+      glowTone: escalation.glowTone,
+      dotTone: escalation.dotTone,
+      icon: escalation.icon,
+    };
+  });
+
+  const topAudience = sortedConversations.slice(0, 6).map((conversation) => {
+    const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
+    const opportunity = classifyCreatorOpportunity(conversation);
+    const escalation = classifyCreatorEscalation(conversation);
+    const engagement = clampCreatorScore(35 + conversation.messages.length * 6 + inboundCount * 5 + (opportunity ? 12 : 0));
+
+    return {
+      name: getCreatorParticipantName(conversation),
+      handle: getCreatorParticipantHandle(conversation),
+      avatar: getCreatorAvatarNumber(conversation),
+      engagement: String(engagement),
+      active: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
+      tag: escalation ? "Needs attention" : opportunity ? "High intent" : inboundCount > 1 ? "Engaged" : "Contact",
+      tagTone: escalation
+        ? "bg-[#fff0f3] text-[#df405b]"
+        : opportunity
+          ? "bg-[#e7f8ed] text-[#0a9b3f]"
+          : "bg-[#eff1f6] text-[#596175]",
+    };
+  });
+
+  const dashboardPipeline: PipelineStep[] = [
+    {
+      label: "Conversations",
+      value: formatCreatorInteger(totalCount),
+      detail: `${formatCreatorInteger(engagedConversations.length)}\nwith messages`,
+      tone: "text-[#4b3cff] bg-[#f0edff]",
+      icon: MessageSquare,
+    },
+    {
+      label: "Inbound",
+      value: formatCreatorInteger(inboundMessages.length),
+      detail: `${formatCreatorPercent(inboundMessages.length, Math.max(1, allMessages.length))}\nof messages`,
+      tone: "text-[#246bff] bg-[#eef4ff]",
+      icon: Users,
+    },
+    {
+      label: "Qualified",
+      value: formatCreatorInteger(opportunityRecords.length),
+      detail: `${formatCreatorPercent(opportunityRecords.length, Math.max(1, totalCount))}\nof chats`,
+      tone: "text-[#13b95f] bg-[#eafaf0]",
+      icon: Sparkles,
+    },
+    {
+      label: "Escalations",
+      value: formatCreatorInteger(escalationRecords.length),
+      detail: `${formatCreatorPercent(escalationRecords.length, Math.max(1, totalCount))}\nneed handoff`,
+      tone: "text-[#ff850d] bg-[#fff3e6]",
+      icon: TriangleAlert,
+    },
+    {
+      label: "Est. value",
+      value: formatCreatorMoney(estimatedRevenue),
+      detail: "based on\nreal intent",
+      tone: "text-[#df405b] bg-[#fff0f3]",
+      icon: Crown,
+    },
+  ];
+
+  const recentActivity: RecentActivityItem[] = sortedConversations.slice(0, 4).map((conversation) => {
+    const opportunity = classifyCreatorOpportunity(conversation);
+    const escalation = classifyCreatorEscalation(conversation);
+    const preview = getCreatorConversationPreview(conversation);
+
+    return {
+      title: escalation ? "Escalation signal received" : opportunity ? "Opportunity signal received" : "Conversation updated",
+      subtitle: `${getCreatorParticipantName(conversation)}: ${truncateCreatorText(preview, 72)}`,
+      time: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
+      icon: escalation ? TriangleAlert : opportunity ? opportunity.icon : MessageSquare,
+      tone: escalation ? "text-[#df405b] bg-[#fff0f3]" : opportunity ? "text-[#4b3cff] bg-[#f0edff]" : "text-[#246bff] bg-[#eef4ff]",
+      meta: opportunity ? `${formatCreatorMoney(opportunity.value)} est.` : undefined,
+    };
+  });
+
+  const audienceMetrics: AudienceMetric[] = [
+    { label: "Total Audience", value: formatCreatorInteger(totalCount), change: "from Instagram", tone: "purple", icon: Users },
+    { label: "Engaged Audience", value: formatCreatorInteger(engagedConversations.length), change: "messaged you", tone: "green", icon: Sparkles },
+    { label: "Leads", value: formatCreatorInteger(opportunityRecords.length), change: "intent detected", tone: "blue", icon: User },
+    { label: "Customers", value: formatCreatorInteger(buyerCount), change: "buying keywords", tone: "violet", icon: ShoppingCart },
+    { label: "Partners", value: formatCreatorInteger(partnershipCount), change: "partnership keywords", tone: "orange", icon: Handshake },
+  ];
+
+  const audienceSources: AudienceSource[] = [
+    {
+      label: "Instagram",
+      percent: formatCreatorPercent(totalCount, Math.max(1, totalCount)),
+      count: formatCreatorInteger(totalCount),
+      color: "#3f3cff",
+    },
+  ];
+
+  const audienceSegments: AudienceSegment[] = [
+    {
+      label: "High Intent Leads",
+      detail: "Pricing, booking, buying, or program intent",
+      count: formatCreatorInteger(buyerCount),
+      change: `${formatCreatorPercent(buyerCount, Math.max(1, totalCount))}`,
+      tone: "bg-[#eafaf0] text-[#13a84f]",
+      icon: User,
+    },
+    {
+      label: "Warm Leads",
+      detail: "Active Instagram conversations without escalation",
+      count: formatCreatorInteger(Math.max(0, engagedConversations.length - escalationRecords.length)),
+      change: `${formatCreatorPercent(Math.max(0, engagedConversations.length - escalationRecords.length), Math.max(1, totalCount))}`,
+      tone: "bg-[#eef4ff] text-[#246bff]",
+      icon: Flame,
+    },
+    {
+      label: "Engaged Followers",
+      detail: "Conversations with two or more inbound messages",
+      count: formatCreatorInteger(conversations.filter((conversation) => conversation.messages.filter((message) => message.from === "user").length >= 2).length),
+      change: "real chats",
+      tone: "bg-[#f0edff] text-[#6d3cff]",
+      icon: Heart,
+    },
+    {
+      label: "Partnership Signals",
+      detail: "Brand, collaboration, sponsor, or affiliate keywords",
+      count: formatCreatorInteger(partnershipCount),
+      change: `${formatCreatorPercent(partnershipCount, Math.max(1, totalCount))}`,
+      tone: "bg-[#fff3e6] text-[#ff850d]",
+      icon: Handshake,
+    },
+    {
+      label: "Needs Attention",
+      detail: "Refund, issue, support, or human handoff keywords",
+      count: formatCreatorInteger(escalationRecords.length),
+      change: `${formatCreatorPercent(escalationRecords.length, Math.max(1, totalCount))}`,
+      tone: "bg-[#fff0f3] text-[#df405b]",
+      icon: TriangleAlert,
+      negative: escalationRecords.length > 0,
+    },
+  ];
+
+  const knowledgeTabs: KnowledgeTab[] = [
+    { label: "All Sources", count: "0", icon: Bot },
+    { label: "FAQs", count: "0", icon: CircleHelp },
+    { label: "Pricing", count: "0", icon: DollarSign },
+    { label: "Products", count: "0", icon: Box },
+    { label: "Services", count: "0", icon: Sparkles },
+    { label: "Courses", count: "0", icon: GraduationCap },
+    { label: "Policies", count: "0", icon: Shield },
+    { label: "Website", count: "0", icon: Globe2 },
+    { label: "PDFs", count: "0", icon: FileText },
+  ];
+
+  const knowledgeInsights: KnowledgeInsight[] = [
+    {
+      title: "Instagram context",
+      detail: `${formatCreatorInteger(inboundMessages.length)} real inbound messages available`,
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: MessageSquare,
+    },
+    {
+      title: "Saved sources missing",
+      detail: "No persisted knowledge sources found yet",
+      tone: "bg-[#fff3e6] text-[#ff850d]",
+      icon: Box,
+    },
+    {
+      title: "Reply examples",
+      detail: `${formatCreatorInteger(outboundMessages.length)} creator replies can guide tone`,
+      tone: "bg-[#eef4ff] text-[#246bff]",
+      icon: Bot,
+    },
+  ];
+
+  const escalationTabs: EscalationTab[] = [
+    { label: "All", count: formatCreatorInteger(escalations.length), tone: "text-[#3044ff] bg-[#eef0ff]", icon: Sparkles },
+    { label: "Refunds", count: formatCreatorInteger(escalations.filter((item) => item.badge === "Refund Request").length), tone: "text-[#df405b] bg-[#fff0f3]", icon: Shield },
+    { label: "Complaints", count: formatCreatorInteger(escalations.filter((item) => item.badge === "Issue").length), tone: "text-[#ff850d] bg-[#fff3e6]", icon: Sparkles },
+    { label: "Human", count: formatCreatorInteger(escalations.filter((item) => item.badge === "Human Requested").length), tone: "text-[#7a35ff] bg-[#f0edff]", icon: Users },
+    { label: "Brand Deals", count: formatCreatorInteger(partnershipCount), tone: "text-[#0a9b3f] bg-[#eafaf0]", icon: BriefcaseBusiness },
+    { label: "VIP Leads", count: formatCreatorInteger(0), tone: "text-[#3044ff] bg-[#eef4ff]", icon: Star },
+  ];
+
+  const firstEscalation = escalations[0];
+  const escalationDetailRows: EscalationDetailRow[] = firstEscalation
+    ? [
+        { label: "Escalation type", value: firstEscalation.badge, icon: TriangleAlert, valueTone: firstEscalation.badgeTone },
+        { label: "Conversation", value: firstEscalation.handle, icon: MessageSquare },
+        { label: "Messages", value: firstEscalation.meta[1] || "0 messages", icon: MessageSquare },
+        { label: "Escalated", value: firstEscalation.time, icon: Clock },
+        { label: "Risk level", value: firstEscalation.meta[0]?.replace("Risk: ", "") || "Medium", icon: TriangleAlert, valueTone: "bg-[#fff0f3] text-[#df405b]" },
+      ]
+    : [];
+
+  return {
+    conversations: sortedConversations,
+    totalConversationCount: totalCount,
+    totalMessageCount: allMessages.length,
+    inboundMessageCount: inboundMessages.length,
+    outboundMessageCount: outboundMessages.length,
+    dateRangeLabel: getAdminDateRangeLabel(),
+    estimatedRevenue,
+    opportunityCount: opportunityRecords.length,
+    escalationCount: escalationRecords.length,
+    dashboardOpportunities,
+    dashboardPipeline,
+    recentActivity,
+    opportunityTabs: [
+      { label: "Buyers", count: formatCreatorInteger(buyerCount), icon: Users },
+      { label: "Partnerships", count: formatCreatorInteger(partnershipCount), icon: Handshake },
+      { label: "Superfans", count: formatCreatorInteger(superfanCount), icon: Crown },
+      { label: "Community Leaders", count: formatCreatorInteger(communityCount), icon: User },
+      { label: "All Opportunities", count: formatCreatorInteger(opportunityRecords.length), icon: Users },
+    ],
+    opportunityMetrics: [
+      { label: "Estimated Revenue", value: formatCreatorMoney(estimatedRevenue), change: "from detected intent", icon: CircleDollarSign },
+      { label: "Opportunities", value: formatCreatorInteger(opportunityRecords.length), change: "real signals", icon: BriefcaseBusiness },
+      { label: "Avg. Deal Value", value: opportunityRecords.length > 0 ? formatCreatorMoney(estimatedRevenue / opportunityRecords.length) : "$0", change: "estimated", icon: TrendingUp },
+      { label: "Conversion Rate", value: formatCreatorPercent(opportunityRecords.length, Math.max(1, totalCount)), change: "of conversations", icon: ChartPie },
+    ],
+    opportunityCards,
+    audienceMetrics,
+    audienceSources,
+    topAudience,
+    audienceSegments,
+    knowledgeTabs,
+    knowledgeSources: [],
+    knowledgeInsights,
+    knowledgeUpdates: [],
+    knowledgeTrainingPercent: 0,
+    escalations,
+    escalationTabs,
+    escalationDetailRows,
+  };
 }
 
 function formatAnalyticsInteger(value: number) {
@@ -7989,8 +11260,22 @@ function AnalyticsPage() {
   );
 }
 
-function DashboardOverview({ profile }: { profile: AccountProfile }) {
+function DashboardOverview({
+  profile,
+  summary,
+  isLoading,
+  error,
+}: {
+  profile: AccountProfile;
+  summary: CreatorLiveSummary;
+  isLoading: boolean;
+  error: string;
+}) {
   const greetingName = profile.name.trim() || "there";
+  const visibleOpportunities = summary.dashboardOpportunities.slice(0, 4);
+  const visiblePipeline = summary.dashboardPipeline;
+  const visibleActivity = summary.recentActivity;
+  const avatarCards = summary.opportunityCards.slice(0, 3);
 
   return (
     <div className="relative h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-7 lg:py-5 xl:px-10">
@@ -8011,7 +11296,7 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
               type="button"
               className="flex h-11 min-w-0 items-center justify-between rounded-[10px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.035)] sm:h-[52px] sm:w-[252px] sm:px-5 sm:text-[14px]"
             >
-              May 12 - May 18, 2025
+              {summary.dateRangeLabel}
               <CalendarDays size={18} strokeWidth={2.3} />
             </button>
             <button
@@ -8028,7 +11313,7 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
         <section className="relative mt-6 max-w-[640px]">
           <div className="flex items-center gap-4 sm:gap-5">
             <h1 className="text-[48px] font-extrabold leading-[0.9] tracking-[-0.04em] text-black sm:text-[68px] xl:text-[78px]">
-              $18,400
+              {isLoading ? "..." : formatCreatorMoney(summary.estimatedRevenue)}
             </h1>
             <div className="flex h-12 w-12 items-center justify-center rounded-full border border-[#e3e6f0] bg-white shadow-[0_18px_52px_rgba(77,60,255,0.08)] sm:h-[58px] sm:w-[58px]">
               <Sparkles size={25} className="text-[#4b3cff] sm:size-[29px]" strokeWidth={2.2} />
@@ -8037,22 +11322,31 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
           <p className="mt-3 text-[15px] font-semibold leading-[1.3] text-[#596175] sm:text-[18px] sm:leading-none">
             Potential revenue discovered this week
           </p>
+          {error ? (
+            <div className="mt-4 rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] px-3 py-2 text-[12px] font-bold text-[#df405b]">
+              {error}
+            </div>
+          ) : null}
 
           <div className="mt-7 flex items-center gap-3.5">
             <div className="flex -space-x-3">
-              {[12, 32, 48].map((image, index) => (
+              {(avatarCards.length > 0 ? avatarCards : [{ name: "Opportunity reviewer", avatars: [12] }]).map((card, index) => {
+                const image = card.avatars?.[0] || 12;
+
+                return (
                 <span
-                  key={image}
+                  key={`${card.name}-${image}`}
                   aria-label={index === 0 ? "Opportunity reviewer" : undefined}
                   aria-hidden={index === 0 ? undefined : true}
                   role={index === 0 ? "img" : undefined}
                   className="h-8 w-8 rounded-full border-2 border-white bg-cover bg-center shadow-sm"
                   style={{ backgroundImage: `url(https://i.pravatar.cc/48?img=${image})` }}
                 />
-              ))}
+                );
+              })}
             </div>
             <p className="text-[13px] font-semibold text-[#4b5268]">
-              <span className="font-extrabold text-[#4b3cff]">12</span> opportunities waiting for your review
+              <span className="font-extrabold text-[#4b3cff]">{formatCreatorInteger(summary.opportunityCount)}</span> opportunities waiting for your review
             </p>
           </div>
 
@@ -8077,7 +11371,9 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <h2 className="text-[16px] font-extrabold text-black">Top opportunities</h2>
-              <span className="rounded-full bg-[#eff2f7] px-2.5 py-0.5 text-[12px] font-extrabold text-[#596175]">4</span>
+              <span className="rounded-full bg-[#eff2f7] px-2.5 py-0.5 text-[12px] font-extrabold text-[#596175]">
+                {formatCreatorInteger(visibleOpportunities.length)}
+              </span>
             </div>
             <button type="button" className="flex items-center gap-2 text-[13px] font-extrabold text-[#4b3cff]">
               View all
@@ -8086,9 +11382,15 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-            {opportunities.map((opportunity) => (
-              <OpportunityCard key={opportunity.title} opportunity={opportunity} />
-            ))}
+            {visibleOpportunities.length > 0 ? (
+              visibleOpportunities.map((opportunity) => (
+                <OpportunityCard key={`${opportunity.eyebrow}-${opportunity.title}`} opportunity={opportunity} />
+              ))
+            ) : (
+              <div className="rounded-[10px] border border-dashed border-[#d9deea] p-6 text-[13px] font-bold text-[#596175] xl:col-span-4">
+                {isLoading ? "Loading real Instagram opportunities..." : "No opportunity signals found in your Instagram conversations yet."}
+              </div>
+            )}
           </div>
         </section>
 
@@ -8107,7 +11409,7 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
 
             <div className="relative grid grid-cols-1 gap-4 md:grid-cols-5">
               <div className="pointer-events-none absolute bottom-0 right-2 top-0 hidden w-16 skew-x-[-12deg] border-r border-[#e9ecf3] md:block" />
-              {pipeline.map((step, index) => {
+              {visiblePipeline.map((step, index) => {
                 const Icon = step.icon;
                 return (
                   <div key={step.label} className="relative text-center">
@@ -8116,7 +11418,7 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
                         <Icon size={23} strokeWidth={2.3} />
                       </span>
                     </div>
-                    {index < pipeline.length - 1 ? (
+                    {index < visiblePipeline.length - 1 ? (
                       <ArrowRight
                         size={15}
                         strokeWidth={2.4}
@@ -8144,13 +11446,13 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
             </div>
 
             <div>
-              {recentActivity.map((activity, index) => {
+              {visibleActivity.length > 0 ? visibleActivity.map((activity, index) => {
                 const Icon = activity.icon;
                 return (
                   <div
                     key={activity.title}
                     className={`flex items-center gap-3 py-[9px] ${
-                      index < recentActivity.length - 1 ? "border-b border-[#edf0f6]" : ""
+                      index < visibleActivity.length - 1 ? "border-b border-[#edf0f6]" : ""
                     }`}
                   >
                     <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${activity.tone}`}>
@@ -8166,7 +11468,11 @@ function DashboardOverview({ profile }: { profile: AccountProfile }) {
                     </div>
                   </div>
                 );
-              })}
+              }) : (
+                <div className="rounded-[10px] border border-dashed border-[#d9deea] p-5 text-[12px] font-bold text-[#596175]">
+                  {isLoading ? "Loading recent Instagram activity..." : "No recent activity loaded yet."}
+                </div>
+              )}
             </div>
           </section>
         </div>
@@ -8194,8 +11500,17 @@ function RestrictedPage() {
 function DashboardContent() {
   const [activeTab, setActiveTab] = useState<DashboardTab>("dashboard");
   const [accountProfile, setAccountProfile] = useState<AccountProfile>(defaultAccountProfile);
-  const [conversationCount, setConversationCount] = useState<number | null>(null);
+  const [creatorConversationResponse, setCreatorConversationResponse] = useState<InstagramConversationsResponse>({
+    conversations: [],
+    conversation_count: 0,
+  });
+  const [isLoadingCreatorData, setIsLoadingCreatorData] = useState(true);
+  const [creatorDataError, setCreatorDataError] = useState("");
   const hasLoadedAccountProfileRef = useRef(false);
+  const creatorSummary = buildCreatorLiveSummary(
+    creatorConversationResponse.conversations || [],
+    creatorConversationResponse.conversation_count,
+  );
 
   useEffect(() => {
     const syncFromUrl = () => {
@@ -8263,9 +11578,9 @@ function DashboardContent() {
   useEffect(() => {
     let isMounted = true;
 
-    async function loadConversationCount() {
+    async function loadCreatorConversations() {
       try {
-        const response = await fetch("/api/instagram/conversations?countOnly=1", {
+        const response = await fetch("/api/instagram/conversations", {
           headers: { Accept: "application/json" },
           cache: "no-store",
         });
@@ -8275,28 +11590,27 @@ function DashboardContent() {
           return;
         }
 
-        const nextCount = typeof data.conversation_count === "number" ? data.conversation_count : data.conversations?.length;
-
-        if (typeof nextCount === "number") {
-          setConversationCount(nextCount);
-          return;
-        }
-
         if (!response.ok || (data.error && data.error !== "No Instagram account connected")) {
-          throw new Error(data.error || "Could not load conversation count");
+          throw new Error(data.error || "Could not load Instagram conversations");
         }
 
-        setConversationCount(0);
-      } catch {
+        setCreatorConversationResponse(data);
+        setCreatorDataError(data.error || "");
+      } catch (error) {
         if (isMounted) {
-          setConversationCount(null);
+          setCreatorConversationResponse({ conversations: [], conversation_count: 0 });
+          setCreatorDataError(error instanceof Error ? error.message : "Could not load Instagram conversations");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingCreatorData(false);
         }
       }
     }
 
-    const handleWindowFocus = () => void loadConversationCount();
-    const timeout = window.setTimeout(() => void loadConversationCount(), 0);
-    const interval = window.setInterval(() => void loadConversationCount(), 15000);
+    const handleWindowFocus = () => void loadCreatorConversations();
+    const timeout = window.setTimeout(() => void loadCreatorConversations(), 0);
+    const interval = window.setInterval(() => void loadCreatorConversations(), 30000);
 
     window.addEventListener("focus", handleWindowFocus);
 
@@ -8346,7 +11660,7 @@ function DashboardContent() {
   }
 
   if (isSuperAdminProfile(accountProfile)) {
-    return <SuperAdminDashboard profile={accountProfile} />;
+    return <SuperAdminDashboard profile={accountProfile} onProfileChange={updateAccountProfile} />;
   }
 
   return (
@@ -8356,24 +11670,29 @@ function DashboardContent() {
         onChangeTab={handleTabChange}
         profile={accountProfile}
         navigationCounts={{
-          inbox: conversationCount,
-          opportunities: opportunities.length,
-          escalations: escalationItems.length,
+          inbox: creatorSummary.totalConversationCount,
+          opportunities: creatorSummary.opportunityCount,
+          escalations: creatorSummary.escalationCount,
         }}
       />
 
       {!canOpenDashboardTab(accountProfile, activeTab) ? (
         <RestrictedPage />
       ) : activeTab === "dashboard" ? (
-        <DashboardOverview profile={accountProfile} />
+        <DashboardOverview
+          profile={accountProfile}
+          summary={creatorSummary}
+          isLoading={isLoadingCreatorData}
+          error={creatorDataError}
+        />
       ) : activeTab === "opportunities" ? (
-        <OpportunitiesPage />
+        <OpportunitiesPage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
       ) : activeTab === "audience" ? (
-        <AudiencePage />
+        <AudiencePage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
       ) : activeTab === "knowledge" ? (
-        <KnowledgeBasePage />
+        <KnowledgeBasePage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
       ) : activeTab === "escalations" ? (
-        <EscalationsPage />
+        <EscalationsPage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
       ) : activeTab === "analytics" ? (
         <AnalyticsPage />
       ) : activeTab === "settings" ? (

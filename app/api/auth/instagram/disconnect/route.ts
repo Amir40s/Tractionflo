@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -43,6 +44,18 @@ export async function POST(request: NextRequest) {
     if (error) {
       throw error;
     }
+
+    await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+      type: 'instagram',
+      title: 'Instagram disconnected',
+      body: 'An Instagram account was disconnected from TractionFlo.',
+      url: '/settings',
+      metadata: {
+        source: 'instagram-disconnect',
+      },
+    }).catch((notificationError) => {
+      console.error('Realtime Instagram disconnect notification error:', notificationError);
+    });
 
     if (wantsJson(request)) {
       return withDisconnectedCookie(NextResponse.json({ disconnected: true }));

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
 import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
+import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -46,6 +47,18 @@ ${getAiBehaviorPrompt(integration.behavior)}`,
             'Write one short Instagram DM reply confirming that TractionFlo AI is connected and ready to help with leads.',
         },
       ],
+    });
+
+    await triggerRealtimeNotification(getUserChannel(user.id), {
+      type: 'ai',
+      title: 'OpenAI test completed',
+      body: reply.slice(0, 120),
+      url: '/settings',
+      metadata: {
+        model: integration.model,
+      },
+    }).catch((notificationError) => {
+      console.error('Realtime AI test notification error:', notificationError);
     });
 
     return NextResponse.json({ ok: true, reply });

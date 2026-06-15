@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getUserPermissionProfile } from '@/lib/agent-permissions';
+import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -138,6 +139,18 @@ export async function POST(request: Request) {
     }
 
     const updatedUser = data.user || user;
+
+    await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
+      type: 'profile',
+      title: 'Profile updated',
+      body: `${name || getProfileFromUser(updatedUser).name} profile settings were saved.`,
+      url: '/settings',
+      metadata: {
+        emailChanged: Boolean(email && email !== user.email),
+      },
+    }).catch((notificationError) => {
+      console.error('Realtime profile notification error:', notificationError);
+    });
 
     return NextResponse.json({
       profile: getProfileFromUser(updatedUser),

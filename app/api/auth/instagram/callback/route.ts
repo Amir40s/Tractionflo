@@ -3,6 +3,7 @@ import {
   exchangeInstagramTokenForLongLivedToken,
   saveInstagramAccountToken,
 } from '@/lib/instagram-token';
+import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
 function getAppBaseUrl(request: Request) {
@@ -158,6 +159,18 @@ export async function GET(request: Request) {
     await saveInstagramAccountToken(supabase, {
       ig_user_id: userId,
       access_token: accessToken,
+    });
+
+    await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+      type: 'instagram',
+      title: 'Instagram connected',
+      body: 'A creator connected an Instagram account successfully.',
+      url: '/settings',
+      metadata: {
+        igUserId: userId,
+      },
+    }).catch((notificationError) => {
+      console.error('Realtime Instagram connect notification error:', notificationError);
     });
 
     const response = NextResponse.redirect(

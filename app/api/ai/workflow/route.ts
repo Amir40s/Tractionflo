@@ -9,6 +9,7 @@ import {
   type AiWorkflowRunResult,
 } from '@/lib/ai-integration';
 import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
+import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -217,7 +218,22 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       ],
     });
 
-    return NextResponse.json(normalizeWorkflowResult(rawResult, enabledWorkflows));
+    const workflowResult = normalizeWorkflowResult(rawResult, enabledWorkflows);
+
+    await triggerRealtimeNotification(getUserChannel(user.id), {
+      type: 'ai',
+      title: 'AI workflow completed',
+      body: `Lead score ${workflowResult.lead.score}/100: ${workflowResult.lead.intent}`,
+      url: '/conversations',
+      metadata: {
+        score: workflowResult.lead.score,
+        urgency: workflowResult.lead.urgency,
+      },
+    }).catch((notificationError) => {
+      console.error('Realtime AI workflow notification error:', notificationError);
+    });
+
+    return NextResponse.json(workflowResult);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not run AI workflow';
     console.error('OpenAI workflow error:', error);

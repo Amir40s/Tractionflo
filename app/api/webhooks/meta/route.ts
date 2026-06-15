@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -64,6 +65,22 @@ export async function POST(request: Request) {
         if (dbError) {
            console.error('Supabase Insert Error:', dbError);
         }
+
+        await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+          type: 'message',
+          title: messagesToInsert.length === 1 ? 'New Instagram message' : 'New Instagram messages',
+          body:
+            messagesToInsert.length === 1
+              ? messagesToInsert[0].text.slice(0, 120) || 'A new Instagram DM arrived.'
+              : `${messagesToInsert.length} new Instagram DMs arrived.`,
+          url: '/conversations',
+          metadata: {
+            count: messagesToInsert.length,
+            source: 'meta-webhook',
+          },
+        }).catch((notificationError) => {
+          console.error('Realtime webhook notification error:', notificationError);
+        });
       }
     }
 

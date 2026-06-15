@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
 import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
+import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -96,6 +97,18 @@ ${conversationLines || 'No prior messages.'}
 Write the next best reply.`,
         },
       ],
+    });
+
+    await triggerRealtimeNotification(getUserChannel(user.id), {
+      type: 'ai',
+      title: 'AI reply drafted',
+      body: reply.slice(0, 120),
+      url: '/conversations',
+      metadata: {
+        autoSend: integration.autoSend,
+      },
+    }).catch((notificationError) => {
+      console.error('Realtime AI reply notification error:', notificationError);
     });
 
     return NextResponse.json({ reply, autoSend: integration.autoSend });

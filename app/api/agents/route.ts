@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { User } from "@supabase/supabase-js";
 import { getUserPermissionProfile, normalizeAllowedPages, type PagePermissionId } from "@/lib/agent-permissions";
+import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from "@/lib/pusher";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 
@@ -136,7 +137,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { response } = await requireAdmin();
+    const { user: adminUser, response } = await requireAdmin();
 
     if (response) {
       return response;
@@ -173,6 +174,22 @@ export async function POST(request: Request) {
       if (!data.user) {
         return NextResponse.json({ error: "Agent was not created." }, { status: 500 });
       }
+
+      await triggerRealtimeNotification(
+        [adminUser ? getUserChannel(adminUser.id) : "", getSuperAdminChannel(), getUserChannel(data.user.id)],
+        {
+          type: "agent",
+          title: "Agent created",
+          body: `${getAgentName(data.user)} can now log in and use assigned permissions.`,
+          url: "/settings",
+          metadata: {
+            agentId: data.user.id,
+            action: "create",
+          },
+        }
+      ).catch((notificationError) => {
+        console.error("Realtime agent create notification error:", notificationError);
+      });
 
       return NextResponse.json({ agent: toAgent(data.user) });
     }
@@ -212,6 +229,22 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Agent was not suspended." }, { status: 500 });
       }
 
+      await triggerRealtimeNotification(
+        [adminUser ? getUserChannel(adminUser.id) : "", getSuperAdminChannel(), getUserChannel(data.user.id)],
+        {
+          type: "agent",
+          title: "Agent suspended",
+          body: `${getAgentName(data.user)} no longer has dashboard access.`,
+          url: "/settings",
+          metadata: {
+            agentId: data.user.id,
+            action: "suspend",
+          },
+        }
+      ).catch((notificationError) => {
+        console.error("Realtime agent suspend notification error:", notificationError);
+      });
+
       return NextResponse.json({ agent: toAgent(data.user) });
     }
 
@@ -243,6 +276,22 @@ export async function POST(request: Request) {
     if (!data.user) {
       return NextResponse.json({ error: "Agent was not updated." }, { status: 500 });
     }
+
+    await triggerRealtimeNotification(
+      [adminUser ? getUserChannel(adminUser.id) : "", getSuperAdminChannel(), getUserChannel(data.user.id)],
+      {
+        type: "agent",
+        title: "Agent updated",
+        body: `${getAgentName(data.user)} permissions were updated.`,
+        url: "/settings",
+        metadata: {
+          agentId: data.user.id,
+          action: "update",
+        },
+      }
+    ).catch((notificationError) => {
+      console.error("Realtime agent update notification error:", notificationError);
+    });
 
     return NextResponse.json({ agent: toAgent(data.user) });
   } catch (error) {

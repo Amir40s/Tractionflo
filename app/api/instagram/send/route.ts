@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { canAccessConversation, canAccessPage, getUserPermissionProfile } from '@/lib/agent-permissions';
 import { getFreshInstagramAccount } from '@/lib/instagram-token';
+import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 
@@ -223,6 +224,19 @@ export async function POST(request: NextRequest) {
         });
       }
     }
+
+    await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
+      type: 'message',
+      title: 'Instagram reply sent',
+      body: text ? text.slice(0, 120) : `${files.length} attachment${files.length === 1 ? '' : 's'} sent.`,
+      url: '/conversations',
+      metadata: {
+        sentCount: sent.length,
+        conversationId,
+      },
+    }).catch((notificationError) => {
+      console.error('Realtime Instagram send notification error:', notificationError);
+    });
 
     return NextResponse.json({ ok: true, sent });
   } catch (err) {

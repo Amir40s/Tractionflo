@@ -8,6 +8,7 @@ import {
   normalizeOpenAiModel,
   sanitizeAiText,
 } from '@/lib/ai-integration';
+import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -119,6 +120,18 @@ export async function POST(request: Request) {
     if (error) {
       throw error;
     }
+
+    await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
+      type: 'ai',
+      title: 'AI integration updated',
+      body: 'OpenAI settings, workflows, or behavior were saved.',
+      url: '/settings',
+      metadata: {
+        autoSend: nextMetadata.ai_integration_auto_send === true,
+      },
+    }).catch((notificationError) => {
+      console.error('Realtime AI integration notification error:', notificationError);
+    });
 
     return NextResponse.json({
       integration: normalizeAiIntegrationMetadata(data.user?.user_metadata || nextMetadata),
