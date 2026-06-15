@@ -23,6 +23,39 @@ function shouldShowOnboarding(metadata: Record<string, unknown> = {}) {
   return !isSuperAdmin && !isAgent && metadata.onboarding_completed !== true
 }
 
+function normalizeOrigin(value?: string | null) {
+  if (!value) {
+    return null
+  }
+
+  try {
+    return new URL(value).origin
+  } catch {
+    return null
+  }
+}
+
+async function getAppOrigin() {
+  const requestHeaders = await headers()
+  const requestOrigin = normalizeOrigin(requestHeaders.get('origin'))
+
+  if (requestOrigin) {
+    return requestOrigin
+  }
+
+  const forwardedHost = requestHeaders.get('x-forwarded-host')?.split(',')[0]?.trim()
+  const host = forwardedHost || requestHeaders.get('host')
+  const forwardedProto = requestHeaders.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  const protocol = forwardedProto || (host?.startsWith('localhost') || host?.startsWith('127.0.0.1') ? 'http' : 'https')
+  const requestHostOrigin = host ? normalizeOrigin(`${protocol}://${host}`) : null
+
+  return (
+    requestHostOrigin ||
+    normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL) ||
+    normalizeOrigin(process.env.ORIGIN)
+  )
+}
+
 export async function login(formData: FormData) {
   const supabase = await createClient().catch((error) => redirectToAuthConfigError('/login', error))
 
@@ -88,12 +121,12 @@ export async function signup(formData: FormData) {
   redirect('/login?message=Check your email to continue sign in process')
 }
 
-export async function loginWithGoogle() {
+async function signInWithGoogle(errorPath: '/login' | '/signup') {
   const supabase = await createClient().catch((error) => redirectToAuthConfigError('/login', error))
-  const origin = (await headers()).get('origin')
+  const origin = await getAppOrigin()
 
   if (!origin) {
-    redirect('/login?error=' + encodeURIComponent('Could not determine app URL for Google sign in'))
+    redirect(`${errorPath}?error=` + encodeURIComponent('Could not determine app URL for Google sign in'))
   }
 
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -108,14 +141,22 @@ export async function loginWithGoogle() {
   })
 
   if (error) {
-    redirect('/login?error=' + encodeURIComponent(error.message))
+    redirect(`${errorPath}?error=` + encodeURIComponent(error.message))
   }
 
   if (!data.url) {
-    redirect('/login?error=' + encodeURIComponent('Could not start Google sign in'))
+    redirect(`${errorPath}?error=` + encodeURIComponent('Could not start Google sign in'))
   }
 
   redirect(data.url)
+}
+
+export async function loginWithGoogle() {
+  await signInWithGoogle('/login')
+}
+
+export async function signupWithGoogle() {
+  await signInWithGoogle('/signup')
 }
 
 export async function signout() {
