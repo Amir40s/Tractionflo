@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { DragEvent, ReactNode } from "react";
 import {
   ArrowRight,
   BarChart3,
@@ -89,6 +89,7 @@ import {
   settingsStateStorageKey,
   type NotificationSetting,
 } from "@/lib/notification-preferences";
+import type { KnowledgeAssignment, KnowledgeSourceSummary } from "@/lib/knowledge-base";
 
 type DashboardTab = "dashboard" | "inbox" | "opportunities" | "audience" | "knowledge" | "escalations" | "analytics" | "settings";
 
@@ -180,6 +181,7 @@ type NavigationCounts = Partial<Record<DashboardTab, number | null>>;
 type SettingsSection =
   | "account"
   | "instagram"
+  | "integrations"
   | "ai-integration"
   | "agents"
   | "permissions"
@@ -566,6 +568,7 @@ type KnowledgeTab = {
 };
 
 type KnowledgeSource = {
+  id: string;
   title: string;
   subtitle: string;
   type: string;
@@ -575,6 +578,11 @@ type KnowledgeSource = {
   tone: string;
   typeTone: string;
   icon: LucideIcon;
+  assignment: KnowledgeAssignment;
+  active: boolean;
+  wordCount: number;
+  chunkCount: number;
+  categories: string[];
 };
 
 type KnowledgeInsight = {
@@ -591,6 +599,19 @@ type KnowledgeUpdate = {
   tone: string;
   icon: LucideIcon;
 };
+
+type KnowledgeSourcesResponse = {
+  sources?: KnowledgeSourceSummary[];
+  error?: string;
+};
+
+const knowledgeAssignmentOptions: { value: KnowledgeAssignment; label: string }[] = [
+  { value: "auto", label: "Auto detect" },
+  { value: "default", label: "Default chatbot" },
+  { value: "cricket", label: "Cricket booking" },
+  { value: "padel", label: "Padel booking" },
+  { value: "general", label: "General support" },
+];
 
 type EscalationTab = {
   label: string;
@@ -705,6 +726,22 @@ type ApiSettings = {
   events: ApiEventSetting[];
 };
 
+type BookingSheetRoute = {
+  id: string;
+  name: string;
+  bookingType: string;
+  sheetUrl: string;
+  worksheetName: string;
+  enabled: boolean;
+  confirmedOnly: boolean;
+  lastSync: string;
+};
+
+type BookingIntegrationSettings = {
+  syncEnabled: boolean;
+  routes: BookingSheetRoute[];
+};
+
 type SecuritySettings = {
   twoFactor: boolean;
   loginAlerts: boolean;
@@ -727,6 +764,7 @@ type AppSettingsState = {
   notifications: NotificationSetting[];
   team: TeamMemberSetting[];
   billing: BillingSettings;
+  bookingIntegrations: BookingIntegrationSettings;
   api: ApiSettings;
   security: SecuritySettings;
   brand: BrandSettings;
@@ -772,6 +810,7 @@ function getVisibleSettingsMenuItems(profile: AccountProfile) {
 const settingsMenuItems: SettingsMenuItem[] = [
   { id: "account", label: "Account", detail: "Profile, plan and billing", icon: User },
   { id: "instagram", label: "Instagram", detail: "Connect & manage", icon: MessageSquare },
+  { id: "integrations", label: "Integrations", detail: "Booking sheets & exports", icon: Database },
   { id: "ai-integration", label: "AI Integration", detail: "OpenAI key & automations", icon: BrainCircuit },
   { id: "agents", label: "Agents", detail: "Human escalation team", icon: Users },
   { id: "permissions", label: "Permissions", detail: "Pages and assignments", icon: Shield },
@@ -807,6 +846,41 @@ const defaultSettingsState: AppSettingsState = {
     nextBillingDate: "June 24, 2025",
     seats: 3,
     invoiceEmail: "billing@creates.com",
+  },
+  bookingIntegrations: {
+    syncEnabled: true,
+    routes: [
+      {
+        id: "cricket-ground",
+        name: "Cricket ground bookings",
+        bookingType: "Cricket ground booking",
+        sheetUrl: "",
+        worksheetName: "Cricket Confirmed",
+        enabled: true,
+        confirmedOnly: true,
+        lastSync: "Not synced yet",
+      },
+      {
+        id: "padel-ground",
+        name: "Padel ground bookings",
+        bookingType: "Padel ground booking",
+        sheetUrl: "",
+        worksheetName: "Padel Confirmed",
+        enabled: true,
+        confirmedOnly: true,
+        lastSync: "Not synced yet",
+      },
+      {
+        id: "all-confirmed",
+        name: "All confirmed bookings",
+        bookingType: "All confirmed bookings",
+        sheetUrl: "",
+        worksheetName: "Confirmed Bookings",
+        enabled: false,
+        confirmedOnly: true,
+        lastSync: "Not synced yet",
+      },
+    ],
   },
   api: {
     webhookUrl: "/api/webhooks/meta",
@@ -858,6 +932,32 @@ function mergeArrayById<T extends { id: string }>(defaults: T[], stored?: Partia
   }));
 }
 
+function mergeBookingSheetRoutes(stored?: Partial<BookingSheetRoute>[]) {
+  if (!Array.isArray(stored)) {
+    return defaultSettingsState.bookingIntegrations.routes;
+  }
+
+  const defaultIds = new Set(defaultSettingsState.bookingIntegrations.routes.map((route) => route.id));
+  const mergedDefaults = defaultSettingsState.bookingIntegrations.routes.map((route) => ({
+    ...route,
+    ...(stored.find((storedRoute) => storedRoute?.id === route.id) || {}),
+  }));
+  const customRoutes = stored
+    .filter((route): route is Partial<BookingSheetRoute> & { id: string } => Boolean(route?.id && !defaultIds.has(route.id)))
+    .map((route) => ({
+      id: route.id,
+      name: route.name || "Custom booking sheet",
+      bookingType: route.bookingType || "Custom booking type",
+      sheetUrl: route.sheetUrl || "",
+      worksheetName: route.worksheetName || "Confirmed Bookings",
+      enabled: route.enabled !== false,
+      confirmedOnly: route.confirmedOnly !== false,
+      lastSync: route.lastSync || "Not synced yet",
+    }));
+
+  return [...mergedDefaults, ...customRoutes];
+}
+
 function mergeSettingsState(storedValue: Partial<AppSettingsState> | null): AppSettingsState {
   if (!storedValue) {
     return defaultSettingsState;
@@ -886,6 +986,11 @@ function mergeSettingsState(storedValue: Partial<AppSettingsState> | null): AppS
     billing: {
       ...defaultSettingsState.billing,
       ...storedValue.billing,
+    },
+    bookingIntegrations: {
+      ...defaultSettingsState.bookingIntegrations,
+      ...storedValue.bookingIntegrations,
+      routes: mergeBookingSheetRoutes(storedValue.bookingIntegrations?.routes),
     },
     api: {
       ...defaultSettingsState.api,
@@ -2189,6 +2294,16 @@ function formatAdminMoneyPrecise(value?: number, decimals = 2) {
   }
 
   return `$${amount.toFixed(decimals)}`;
+}
+
+function formatAdminTrackedSpend(value?: number) {
+  const amount = value || 0;
+
+  if (amount > 0 && amount < 0.01) {
+    return formatAdminMoneyPrecise(amount, 4);
+  }
+
+  return amount > 0 ? formatAdminMoneyPrecise(amount) : "$0";
 }
 
 function formatAdminTokenVolume(value?: number) {
@@ -4067,7 +4182,7 @@ function buildAiConfig({
       config: {
         metrics: [
           { label: "Messages processed", value: isLoading && !metrics ? "..." : formatAdminNumber(totalMessages), detail: "Stored webhook messages", change: `${formatAdminNumber(metrics?.messagesToday)} today`, tone: "bg-[#f0edff] text-[#4b3cff]", icon: Bot },
-          { label: "AI conversations", value: isLoading && !metrics ? "..." : formatAdminNumber(aiReadyMessages), detail: "Ready without handoff keywords", change: `${formatAdminPercent(aiReadyMessages, totalMessages)} of stored`, tone: "bg-[#f0edff] text-[#4b3cff]", icon: Sparkles },
+          { label: "AI-ready chats", value: isLoading && !metrics ? "..." : formatAdminNumber(aiReadyMessages), detail: "Without handoff keywords", change: `${formatAdminPercent(aiReadyMessages, totalMessages)} of stored`, tone: "bg-[#f0edff] text-[#4b3cff]", icon: Sparkles },
           { label: "Opportunities found", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.opportunitySignals), detail: "Buying signal keywords", change: "Live message scan", tone: "bg-[#fff6e8] text-[#d98613]", icon: Target },
           { label: "Escalations", value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.handoffSignals), detail: "Human handoff signals", change: `${formatAdminNumber(metrics?.urgentSignals)} urgent`, tone: "bg-[#fff0f3] text-[#df405b]", icon: TriangleAlert },
         ],
@@ -4104,7 +4219,7 @@ function buildAiConfig({
     return {
       config: {
         metrics: [
-          { label: "AI spend", value: isLoading && !metrics ? "..." : formatAdminCurrency(trackedSpend), detail: spendDetail, change: metrics?.spendLogsStored ? "Actual metadata" : "Add spend logging", tone: "bg-[#f0edff] text-[#4b3cff]", icon: DollarSign },
+          { label: "AI spend", value: isLoading && !metrics ? "..." : formatAdminTrackedSpend(trackedSpend), detail: spendDetail, change: metrics?.spendLogsStored ? "Actual metadata" : "Add spend logging", tone: "bg-[#f0edff] text-[#4b3cff]", icon: DollarSign },
           { label: "Cost per reply", value: isLoading && !metrics ? "..." : costPerReply > 0 ? formatAdminMoneyPrecise(costPerReply, 3) : "Not tracked", detail: "Requires reply and spend logs", change: trackedReplies > 0 ? `${formatAdminNumber(trackedReplies)} replies` : "No reply log", tone: "bg-[#eafaf0] text-[#13a84f]", icon: TrendingUp },
           { label: "Token volume", value: isLoading && !metrics ? "..." : formatAdminTokenVolume(effectiveTokens), detail: tokenDetail, change: trackedTokens > 0 ? "Actual metadata" : "Estimated", tone: "bg-[#eaf4ff] text-[#246bff]", icon: BrainCircuit },
           { label: "Gross margin", value: isLoading && !metrics ? "..." : metrics?.grossMargin ? `${metrics.grossMargin.toFixed(1)}%` : "No revenue", detail: "After tracked AI costs", change: trackedSpend > 0 ? "Actual spend" : "No cost log", tone: "bg-[#eafaf0] text-[#13a84f]", icon: CircleDollarSign },
@@ -5810,22 +5925,43 @@ function SettingsToggle({
   checked,
   onChange,
   ariaLabel,
+  showStateLabel = false,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   ariaLabel: string;
+  showStateLabel?: boolean;
 }) {
+  const stateLabel = checked ? "Active" : "Inactive";
+
   return (
     <button
       type="button"
       aria-pressed={checked}
       aria-label={ariaLabel}
       onClick={() => onChange(!checked)}
-      className={`relative h-[22px] w-10 rounded-full transition ${
-        checked ? "bg-[#3044ff] shadow-[0_10px_18px_rgba(48,68,255,0.22)]" : "bg-[#dfe4f1]"
+      className={`relative shrink-0 rounded-full transition focus:outline-none focus:ring-2 focus:ring-[#3044ff]/15 ${
+        showStateLabel ? "h-7 w-[106px]" : "h-[22px] w-10"
+      } ${checked ? "bg-[#3044ff] shadow-[0_10px_18px_rgba(48,68,255,0.22)]" : "bg-[#dfe4f1]"} ${
+        showStateLabel && !checked ? "hover:bg-[#d5dbea]" : ""
       }`}
     >
-      <span className={`absolute top-0.5 h-[18px] w-[18px] rounded-full bg-white transition ${checked ? "right-0.5" : "left-0.5"}`} />
+      {showStateLabel ? (
+        <span
+          className={`pointer-events-none absolute top-1/2 -translate-y-1/2 text-[10px] font-extrabold leading-none ${
+            checked ? "left-3 text-white" : "right-2.5 text-[#536079]"
+          }`}
+        >
+          {stateLabel}
+        </span>
+      ) : null}
+      <span
+        className={`absolute rounded-full bg-white transition ${
+          showStateLabel
+            ? `top-1/2 h-5 w-5 -translate-y-1/2 ${checked ? "right-1" : "left-1"}`
+            : `top-0.5 h-[18px] w-[18px] ${checked ? "right-0.5" : "left-0.5"}`
+        }`}
+      />
     </button>
   );
 }
@@ -7739,7 +7875,12 @@ function SettingsNotificationsCard({
               <div className="min-w-0">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
                   <span className="min-w-0 text-[12px] font-extrabold leading-tight text-black">{item.label}</span>
-                  <SettingsToggle ariaLabel={`Toggle ${item.label}`} checked={item.enabled} onChange={(checked) => handleToggle(item.id, checked)} />
+                  <SettingsToggle
+                    ariaLabel={`${item.label} notifications ${item.enabled ? "active" : "inactive"}`}
+                    checked={item.enabled}
+                    onChange={(checked) => handleToggle(item.id, checked)}
+                    showStateLabel
+                  />
                 </div>
                 <SettingsSelect
                   ariaLabel={`${item.label} delivery`}
@@ -8942,6 +9083,394 @@ function SettingsBillingSection({
   );
 }
 
+const bookingSheetTypeOptions = [
+  "Cricket ground booking",
+  "Padel ground booking",
+  "All confirmed bookings",
+  "Custom booking type",
+];
+
+function hasUsableSheetLink(value: string) {
+  return Boolean(getSheetDestinationUrl(value));
+}
+
+function getSheetDestinationUrl(value: string) {
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  if (/^(docs\.google\.com|drive\.google\.com|script\.google\.com|script\.googleusercontent\.com|1drv\.ms|onedrive\.live\.com|office\.com)/i.test(trimmedValue)) {
+    return `https://${trimmedValue}`;
+  }
+
+  const googleSheetIdMatch = trimmedValue.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  const googleSheetId = googleSheetIdMatch?.[1] || (/^[a-zA-Z0-9-_]{20,}$/.test(trimmedValue) ? trimmedValue : "");
+
+  if (googleSheetId) {
+    return `https://docs.google.com/spreadsheets/d/${googleSheetId}/edit`;
+  }
+
+  return "";
+}
+
+function SettingsBookingIntegrationsSection({
+  integrations,
+  onChange,
+}: {
+  integrations: BookingIntegrationSettings;
+  onChange: (integrations: BookingIntegrationSettings) => void;
+}) {
+  const [message, setMessage] = useState("");
+  const [testingRouteId, setTestingRouteId] = useState("");
+  const connectedRoutes = integrations.routes.filter((route) => route.enabled && hasUsableSheetLink(route.sheetUrl)).length;
+  const activeRoutes = integrations.routes.filter((route) => route.enabled).length;
+
+  function updateRoute(id: string, partial: Partial<BookingSheetRoute>) {
+    onChange({
+      ...integrations,
+      routes: integrations.routes.map((route) => (route.id === id ? { ...route, ...partial } : route)),
+    });
+  }
+
+  function addRoute() {
+    const id = `booking-sheet-${Date.now()}`;
+
+    onChange({
+      ...integrations,
+      routes: [
+        ...integrations.routes,
+        {
+          id,
+          name: "Custom booking sheet",
+          bookingType: "Custom booking type",
+          sheetUrl: "",
+          worksheetName: "Confirmed Bookings",
+          enabled: true,
+          confirmedOnly: true,
+          lastSync: "Not synced yet",
+        },
+      ],
+    });
+    setMessage("New booking sheet route added.");
+  }
+
+  function removeRoute(id: string) {
+    onChange({
+      ...integrations,
+      routes: integrations.routes.filter((route) => route.id !== id),
+    });
+    setMessage("Booking sheet route removed.");
+  }
+
+  function copyRouteLink(route: BookingSheetRoute) {
+    const destinationUrl = getSheetDestinationUrl(route.sheetUrl);
+
+    if (!destinationUrl) {
+      setMessage("Add a Google Sheet ID, Google Sheet link, Apps Script URL, or Excel web link before copying.");
+      return;
+    }
+
+    void navigator.clipboard?.writeText(destinationUrl);
+    setMessage(`${route.name} link copied.`);
+  }
+
+  function openRoute(route: BookingSheetRoute) {
+    const destinationUrl = getSheetDestinationUrl(route.sheetUrl);
+
+    if (!destinationUrl) {
+      setMessage("Add a valid Google Sheet ID, Google Sheet link, Apps Script URL, or Excel web link first.");
+      return;
+    }
+
+    window.open(destinationUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function testRoute(route: BookingSheetRoute) {
+    if (!getSheetDestinationUrl(route.sheetUrl)) {
+      setMessage("Add a valid Google Sheet ID, Google Sheet link, Apps Script URL, or Excel web link before testing this route.");
+      return;
+    }
+
+    setTestingRouteId(route.id);
+    setMessage(`Testing ${route.name}...`);
+
+    try {
+      const response = await fetch("/api/integrations/booking-sheets/test", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ route }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { message?: string; error?: string; lastSync?: string };
+
+      if (!response.ok) {
+        setMessage(payload.error || "Could not test this booking route.");
+        return;
+      }
+
+      updateRoute(route.id, { lastSync: payload.lastSync || "Route tested just now" });
+      setMessage(payload.message || `${route.name} passed the route test.`);
+    } catch {
+      setMessage("Could not reach the route test API. Check that the dev server is running.");
+    } finally {
+      setTestingRouteId("");
+    }
+  }
+
+  function getRouteStatus(route: BookingSheetRoute) {
+    if (!route.enabled) {
+      return { label: "Paused", className: "bg-[#edf0f6] text-[#687089]" };
+    }
+
+    if (!hasUsableSheetLink(route.sheetUrl)) {
+      return { label: "Needs link", className: "bg-[#fff3e6] text-[#c77800]" };
+    }
+
+    return { label: "Ready", className: "bg-[#e7f8ed] text-[#0a9b3f]" };
+  }
+
+  return (
+    <div className="grid gap-5">
+      <SettingsSectionHeader
+        section="integrations"
+        action={
+          <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
+            {connectedRoutes} connected
+          </span>
+        }
+      />
+
+      <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h3 className="text-[15px] font-extrabold text-black">Confirmed booking sheets</h3>
+            <p className="mt-1 max-w-[760px] text-[12px] font-medium leading-relaxed text-[#46506a]">
+              Add Google Sheet or Excel web links for booking exports. Confirmed cricket and padel bookings can be routed into separate tabs or separate sheets.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="rounded-[8px] bg-[#f6f7fb] px-3 py-1.5 text-[11px] font-extrabold text-[#46506a]">
+              {activeRoutes} active routes
+            </span>
+            <SettingsToggle
+              ariaLabel="Toggle confirmed booking sheet sync"
+              checked={integrations.syncEnabled}
+              onChange={(syncEnabled) => onChange({ ...integrations, syncEnabled })}
+              showStateLabel
+            />
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          {integrations.routes.length === 0 ? (
+            <div className="rounded-[10px] border border-dashed border-[#d7deeb] bg-[#fbfbff] p-5 text-center">
+              <FileText className="mx-auto text-[#3044ff]" size={24} strokeWidth={2.35} />
+              <p className="mt-2 text-[12px] font-extrabold text-black">No booking sheet routes yet</p>
+              <p className="mt-1 text-[11px] font-medium text-[#46506a]">Add a route for cricket, padel, or all confirmed bookings.</p>
+            </div>
+          ) : (
+            integrations.routes.map((route) => {
+              const status = getRouteStatus(route);
+              const canRemove = !["cricket-ground", "padel-ground", "all-confirmed"].includes(route.id);
+              const isTesting = testingRouteId === route.id;
+
+              return (
+                <div key={route.id} className="rounded-[10px] border border-[#edf0f6] p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#f0edff] text-[#3044ff]">
+                        <FileText size={18} strokeWidth={2.35} />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] font-extrabold text-black">{route.name}</p>
+                        <p className="mt-1 text-[11px] font-medium text-[#46506a]">{route.bookingType} to {route.worksheetName || "sheet tab"}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`rounded-[8px] px-2.5 py-1 text-[10px] font-extrabold ${status.className}`}>{status.label}</span>
+                      <SettingsToggle
+                        ariaLabel={`Toggle ${route.name}`}
+                        checked={route.enabled}
+                        onChange={(enabled) => updateRoute(route.id, { enabled })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_210px]">
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-[#46506a]">Route name</span>
+                      <input
+                        value={route.name}
+                        onChange={(event) => updateRoute(route.id, { name: event.target.value })}
+                        className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-[#46506a]">Booking filter</span>
+                      <SettingsSelect
+                        ariaLabel={`${route.name} booking filter`}
+                        value={route.bookingType}
+                        options={bookingSheetTypeOptions}
+                        onChange={(bookingType) => updateRoute(route.id, { bookingType })}
+                        className="mt-2 w-full"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-[#46506a]">Excel or Google Sheet link</span>
+                      <input
+                        value={route.sheetUrl}
+                        onChange={(event) => updateRoute(route.id, { sheetUrl: event.target.value })}
+                        placeholder="Paste Google Sheet ID, Google Sheet link, Apps Script URL, or Excel web link"
+                        className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-[#46506a]">Sheet tab name</span>
+                      <input
+                        value={route.worksheetName}
+                        onChange={(event) => updateRoute(route.id, { worksheetName: event.target.value })}
+                        className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-4 flex flex-col gap-3 border-t border-[#edf0f6] pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-3">
+                      <SettingsToggle
+                        ariaLabel={`${route.name} confirmed only`}
+                        checked={route.confirmedOnly}
+                        onChange={(confirmedOnly) => updateRoute(route.id, { confirmedOnly })}
+                      />
+                      <div>
+                        <p className="text-[12px] font-extrabold text-black">Confirmed bookings only</p>
+                        <p className="text-[11px] font-medium text-[#687089]">{route.lastSync}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => copyRouteLink(route)}
+                        className="flex h-9 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black"
+                      >
+                        <Copy size={14} strokeWidth={2.35} />
+                        Copy link
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openRoute(route)}
+                        className="flex h-9 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black"
+                      >
+                        <ExternalLink size={14} strokeWidth={2.35} />
+                        Open sheet
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void testRoute(route)}
+                        disabled={isTesting}
+                        className="flex h-9 items-center gap-2 rounded-[8px] bg-[#0d1118] px-3 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-65"
+                      >
+                        <RefreshCw size={14} strokeWidth={2.35} className={isTesting ? "animate-spin" : ""} />
+                        {isTesting ? "Testing..." : "Test route"}
+                      </button>
+                      {canRemove && (
+                        <button
+                          type="button"
+                          onClick={() => removeRoute(route.id)}
+                          className="flex h-9 items-center gap-2 rounded-[8px] border border-[#ffd6dd] bg-[#fff8fa] px-3 text-[11px] font-extrabold text-[#df405b]"
+                        >
+                          <X size={14} strokeWidth={2.35} />
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 border-t border-[#edf0f6] pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[11px] font-semibold text-[#46506a]">
+            Columns expected: customer, phone, booking type, date, time, ground or court, payment status, confirmed at, source conversation.
+          </p>
+          <button
+            type="button"
+            onClick={addRoute}
+            className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.22)]"
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            Add sheet route
+          </button>
+        </div>
+
+        {message && <p className="mt-4 rounded-[8px] bg-[#f6f7fb] px-3 py-2 text-[11px] font-semibold text-[#46506a]">{message}</p>}
+      </section>
+
+      <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-[15px] font-extrabold text-black">Routing preview</h3>
+            <p className="mt-1 text-[11px] font-medium text-[#46506a]">
+              When a booking is confirmed, it should match one of these filters before being written to the configured sheet.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMessage("Booking integrations saved on this device.")}
+            className="flex h-10 items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black"
+          >
+            <Check size={15} strokeWidth={2.5} />
+            Save integrations
+          </button>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[720px] text-left text-[12px]">
+            <thead className="text-[10px] font-extrabold uppercase text-[#687089]">
+              <tr className="border-b border-[#edf0f6]">
+                <th className="py-3 pr-4">Booking filter</th>
+                <th className="py-3 pr-4">Destination</th>
+                <th className="py-3 pr-4">Rule</th>
+                <th className="py-3 pr-4">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#edf0f6]">
+              {integrations.routes.map((route) => {
+                const status = getRouteStatus(route);
+
+                return (
+                  <tr key={route.id}>
+                    <td className="py-3 pr-4 font-extrabold text-black">{route.bookingType}</td>
+                    <td className="py-3 pr-4 font-semibold text-[#46506a]">
+                      {route.sheetUrl ? route.worksheetName || "Selected sheet" : "No sheet link added"}
+                    </td>
+                    <td className="py-3 pr-4 font-semibold text-[#46506a]">
+                      {route.confirmedOnly ? "Save confirmed bookings only" : "Save every matched booking"}
+                    </td>
+                    <td className="py-3 pr-4">
+                      <span className={`rounded-[8px] px-2.5 py-1 text-[10px] font-extrabold ${status.className}`}>{status.label}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SettingsApiSection({
   api,
   onChange,
@@ -9380,6 +9909,15 @@ function SettingsPage({
       );
     }
 
+    if (activeSection === "integrations") {
+      return (
+        <SettingsBookingIntegrationsSection
+          integrations={settingsState.bookingIntegrations}
+          onChange={(bookingIntegrations) => updateSettingsState("bookingIntegrations", bookingIntegrations)}
+        />
+      );
+    }
+
     if (activeSection === "agents") {
       return <SettingsAgentsSection mode="agents" />;
     }
@@ -9502,6 +10040,132 @@ function SettingsPage({
   );
 }
 
+function formatKnowledgeInteger(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatKnowledgeBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 KB";
+  }
+
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function formatKnowledgeUpdated(value: string) {
+  const timestamp = Date.parse(value);
+
+  if (!Number.isFinite(timestamp)) {
+    return "Just now";
+  }
+
+  return formatInstagramRelativeTime(value);
+}
+
+function getKnowledgeSourceIcon(source: KnowledgeSourceSummary) {
+  if (source.categories.includes("Pricing")) {
+    return DollarSign;
+  }
+
+  if (source.categories.includes("Policies")) {
+    return Shield;
+  }
+
+  if (source.categories.includes("Courses")) {
+    return GraduationCap;
+  }
+
+  if (source.categories.includes("Products")) {
+    return Box;
+  }
+
+  return FileText;
+}
+
+function mapKnowledgeSourceSummary(source: KnowledgeSourceSummary): KnowledgeSource {
+  const isPdf = source.kind === "pdf";
+  const activeStatus = source.active ? "Ready" : "Inactive";
+
+  return {
+    id: source.id,
+    title: source.title,
+    subtitle: `${formatKnowledgeInteger(source.wordCount)} words • ${formatKnowledgeInteger(source.chunkCount)} chunks • ${formatKnowledgeBytes(source.fileSize)}`,
+    type: isPdf ? "PDF" : "TXT",
+    status: activeStatus,
+    statusTone: source.active ? "bg-[#e7f8ed] text-[#0a9b3f]" : "bg-[#eff1f6] text-[#596175]",
+    updated: formatKnowledgeUpdated(source.updatedAt),
+    tone: isPdf ? "bg-[#fff0f3] text-[#df405b]" : "bg-[#eef4ff] text-[#246bff]",
+    typeTone: isPdf ? "bg-[#fff0f3] text-[#df405b]" : "bg-[#eef4ff] text-[#246bff]",
+    icon: getKnowledgeSourceIcon(source),
+    assignment: source.assignment,
+    active: source.active,
+    wordCount: source.wordCount,
+    chunkCount: source.chunkCount,
+    categories: source.categories,
+  };
+}
+
+function buildKnowledgeTabsFromSources(sources: KnowledgeSourceSummary[]): KnowledgeTab[] {
+  const activeSources = sources.filter((source) => source.active);
+
+  return [
+    { label: "All Sources", count: formatKnowledgeInteger(sources.length), icon: Bot },
+    { label: "FAQs", count: formatKnowledgeInteger(activeSources.filter((source) => source.directAnswerCount > 0 || source.categories.includes("FAQs")).length), icon: CircleHelp },
+    { label: "Pricing", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Pricing")).length), icon: DollarSign },
+    { label: "Products", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Products")).length), icon: Box },
+    { label: "Services", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Services")).length), icon: Sparkles },
+    { label: "Courses", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Courses")).length), icon: GraduationCap },
+    { label: "Policies", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Policies")).length), icon: Shield },
+    { label: "Website", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Website")).length), icon: Globe2 },
+    { label: "PDFs", count: formatKnowledgeInteger(activeSources.filter((source) => source.kind === "pdf").length), icon: FileText },
+  ];
+}
+
+function buildKnowledgeInsightsFromSources(sources: KnowledgeSourceSummary[], fallback: KnowledgeInsight[]) {
+  if (sources.length === 0) {
+    return fallback;
+  }
+
+  const activeSources = sources.filter((source) => source.active);
+  const totalChunks = activeSources.reduce((sum, source) => sum + source.chunkCount, 0);
+  const directAnswers = activeSources.reduce((sum, source) => sum + source.directAnswerCount, 0);
+
+  return [
+    {
+      title: "Saved retrieval",
+      detail: `${formatKnowledgeInteger(totalChunks)} searchable chunks available`,
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: Database,
+    },
+    {
+      title: "Direct answers",
+      detail: `${formatKnowledgeInteger(directAnswers)} FAQ answers can skip OpenAI`,
+      tone: "bg-[#eafaf0] text-[#13a84f]",
+      icon: Check,
+    },
+    {
+      title: "Auto assignment",
+      detail: `${formatKnowledgeInteger(sources.filter((source) => source.assignment === "auto").length)} sources set to auto detect`,
+      tone: "bg-[#eef4ff] text-[#246bff]",
+      icon: Sparkles,
+    },
+  ];
+}
+
+function buildKnowledgeUpdatesFromSources(sources: KnowledgeSourceSummary[]): KnowledgeUpdate[] {
+  return sources.slice(0, 4).map((source) => ({
+    title: `${source.title} indexed`,
+    detail: `${formatKnowledgeInteger(source.chunkCount)} chunks saved for ${source.assignment === "auto" ? "auto detection" : "assigned replies"}`,
+    time: formatKnowledgeUpdated(source.updatedAt),
+    tone: source.kind === "pdf" ? "bg-[#fff0f3] text-[#df405b]" : "bg-[#eef4ff] text-[#246bff]",
+    icon: source.kind === "pdf" ? FileText : Database,
+  }));
+}
+
 function KnowledgeTabs({ tabs }: { tabs: KnowledgeTab[] }) {
   return (
     <div className="-mx-4 mt-8 overflow-x-auto px-4 no-scrollbar sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
@@ -9532,77 +10196,156 @@ function KnowledgeTabs({ tabs }: { tabs: KnowledgeTab[] }) {
   );
 }
 
-function KnowledgeSourceRows({ sources }: { sources: KnowledgeSource[] }) {
+function KnowledgeSourceRows({
+  sources,
+  onUploadClick,
+  onDropFiles,
+  onAssignmentChange,
+  onActiveChange,
+  onAutoAssignAll,
+  isUploading,
+  uploadMessage,
+}: {
+  sources: KnowledgeSource[];
+  onUploadClick: () => void;
+  onDropFiles: (files: FileList | null) => void;
+  onAssignmentChange: (sourceId: string, assignment: KnowledgeAssignment) => void;
+  onActiveChange: (sourceId: string, active: boolean) => void;
+  onAutoAssignAll: () => void;
+  isUploading: boolean;
+  uploadMessage: string;
+}) {
+  function handleDrop(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    onDropFiles(event.dataTransfer.files);
+  }
+
   return (
     <section>
-      <div className="hidden grid-cols-[minmax(260px,1fr)_120px_150px_150px_28px] px-3 pb-3 text-[11px] font-semibold text-[#46506a] md:grid">
-        <span>Source</span>
-        <span>Type</span>
-        <span>Status</span>
-        <span>Last updated</span>
-        <span />
+      <div className="mb-3 flex flex-col gap-2 rounded-[10px] border border-[#e7eaf2] bg-white p-3 shadow-[0_18px_45px_rgba(20,28,53,0.025)] sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-[13px] font-extrabold text-black">Saved knowledge routing</h2>
+          <p className="mt-1 text-[11px] font-medium text-[#596175]">
+            One source is used by default. Multiple sources can be assigned manually or left on auto detect.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onAutoAssignAll}
+          disabled={sources.length < 2 || isUploading}
+          className="flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black transition hover:bg-[#f8f9fc] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Sparkles size={14} className="text-[#3044ff]" strokeWidth={2.35} />
+          Auto assign
+        </button>
       </div>
 
-      <div>
+      <div className="overflow-hidden rounded-[12px] border border-[#e7eaf2] bg-white shadow-[0_18px_45px_rgba(20,28,53,0.025)]">
+        <div className="hidden grid-cols-[minmax(220px,1fr)_72px_132px_104px_108px_96px] border-b border-[#edf0f6] bg-[#fbfcff] px-4 py-3 text-[11px] font-semibold text-[#46506a] md:grid">
+          <span>Source</span>
+          <span>Type</span>
+          <span>Assignment</span>
+          <span>Status</span>
+          <span>Active</span>
+          <span>Last updated</span>
+        </div>
+
         {sources.length === 0 ? (
-          <div className="rounded-[12px] border border-dashed border-[#d7deeb] bg-white px-5 py-10 text-center shadow-[0_18px_45px_rgba(20,28,53,0.025)]">
+          <div className="border border-dashed border-[#d7deeb] px-5 py-10 text-center">
             <BookOpen className="mx-auto text-[#3044ff]" size={30} strokeWidth={2.35} />
             <h2 className="mt-3 text-[15px] font-extrabold text-black">No saved knowledge sources yet</h2>
             <p className="mx-auto mt-2 max-w-[480px] text-[12px] font-medium leading-relaxed text-[#596175]">
               This page now shows only real saved sources. Add your website, FAQs, pricing, policies, or PDFs to train the AI.
             </p>
           </div>
-        ) : sources.map((source) => {
-          const Icon = source.icon;
+        ) : (
+          <div className="divide-y divide-[#edf0f6]">
+            {sources.map((source) => {
+              const Icon = source.icon;
 
-          return (
-            <article
-              key={source.title}
-              className="grid gap-3 border-b border-[#edf0f6] px-2 py-4 md:grid-cols-[minmax(260px,1fr)_120px_150px_150px_28px] md:items-center md:px-3"
-            >
-              <div className="flex min-w-0 items-center gap-4">
-                <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] ${source.tone}`}>
-                  <Icon size={21} strokeWidth={2.25} />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-[13px] font-extrabold text-black">{source.title}</span>
-                  <span className="mt-1 block truncate text-[12px] font-medium text-[#46506a]">{source.subtitle}</span>
-                </span>
-              </div>
+              return (
+                <article
+                  key={source.id}
+                  className="grid gap-3 px-4 py-4 transition hover:bg-[#fbfcff] md:grid-cols-[minmax(220px,1fr)_72px_132px_104px_108px_96px] md:items-center"
+                >
+                  <div className="flex min-w-0 items-center gap-4">
+                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] ${source.tone}`}>
+                      <Icon size={21} strokeWidth={2.25} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] font-extrabold text-black">{source.title}</span>
+                      <span className="mt-1 block truncate text-[12px] font-medium text-[#46506a]">{source.subtitle}</span>
+                    </span>
+                  </div>
 
-              <div>
-                <span className={`inline-flex h-6 items-center rounded-[7px] px-2.5 text-[11px] font-bold ${source.typeTone}`}>
-                  {source.type}
-                </span>
-              </div>
+                  <div className="flex items-center justify-between gap-3 md:block">
+                    <span className="text-[10px] font-extrabold uppercase text-[#7b8498] md:hidden">Type</span>
+                    <span className={`inline-flex h-6 items-center rounded-[7px] px-2.5 text-[11px] font-bold ${source.typeTone}`}>
+                      {source.type}
+                    </span>
+                  </div>
 
-              <div>
-                <span className={`inline-flex h-6 items-center gap-2 rounded-[7px] px-2.5 text-[11px] font-bold ${source.statusTone}`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                  {source.status}
-                </span>
-              </div>
+                  <div className="flex items-center justify-between gap-3 md:block">
+                    <span className="text-[10px] font-extrabold uppercase text-[#7b8498] md:hidden">Assignment</span>
+                    <select
+                      aria-label={`${source.title} assignment`}
+                      value={source.assignment}
+                      onChange={(event) => onAssignmentChange(source.id, event.target.value as KnowledgeAssignment)}
+                      className="h-8 min-w-[150px] rounded-[8px] border border-[#dde3ee] bg-white px-2 text-[10px] font-extrabold text-black outline-none transition focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 md:w-full md:min-w-0"
+                    >
+                      {knowledgeAssignmentOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <p className="whitespace-pre-line text-[12px] font-medium leading-[1.35] text-[#46506a]">{source.updated}</p>
+                  <div className="flex items-center justify-between gap-3 md:block">
+                    <span className="text-[10px] font-extrabold uppercase text-[#7b8498] md:hidden">Status</span>
+                    <span className={`inline-flex h-6 items-center gap-2 rounded-[7px] px-2.5 text-[11px] font-bold ${source.statusTone}`}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                      {source.status}
+                    </span>
+                  </div>
 
-              <button type="button" aria-label={`More actions for ${source.title}`} className="justify-self-end text-black md:justify-self-auto">
-                <MoreHorizontal size={17} strokeWidth={2.5} />
-              </button>
-            </article>
-          );
-        })}
+                  <div className="flex items-center justify-between gap-3 md:block">
+                    <span className="text-[10px] font-extrabold uppercase text-[#7b8498] md:hidden">Active</span>
+                    <SettingsToggle
+                      ariaLabel={`${source.title} knowledge source ${source.active ? "active" : "inactive"}`}
+                      checked={source.active}
+                      onChange={(checked) => onActiveChange(source.id, checked)}
+                      showStateLabel
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 md:block">
+                    <span className="text-[10px] font-extrabold uppercase text-[#7b8498] md:hidden">Last updated</span>
+                    <p className="whitespace-pre-line text-right text-[12px] font-medium leading-[1.35] text-[#46506a] md:text-left">
+                      {source.updated}
+                    </p>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <button
         type="button"
-        className="mt-6 flex h-[78px] w-full items-center justify-center gap-3 rounded-[10px] border border-dashed border-[#d7deeb] bg-white text-center shadow-[0_18px_45px_rgba(20,28,53,0.025)]"
+        onClick={onUploadClick}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={handleDrop}
+        disabled={isUploading}
+        className="mt-6 flex h-[78px] w-full items-center justify-center gap-3 rounded-[10px] border border-dashed border-[#d7deeb] bg-white text-center shadow-[0_18px_45px_rgba(20,28,53,0.025)] transition hover:border-[#3044ff] hover:bg-[#fbfcff] disabled:cursor-not-allowed disabled:opacity-70"
       >
-        <UploadCloud size={18} className="text-[#31394f]" strokeWidth={2.2} />
+        {isUploading ? <RefreshCw size={18} className="animate-spin text-[#3044ff]" strokeWidth={2.2} /> : <UploadCloud size={18} className="text-[#31394f]" strokeWidth={2.2} />}
         <span>
           <span className="block text-[14px] font-semibold text-black">
-            Drag and drop files here&nbsp; or&nbsp; <span className="font-extrabold text-[#3044ff]">browse</span>
+            {isUploading ? "Indexing knowledge..." : <>Drag and drop files here&nbsp; or&nbsp; <span className="font-extrabold text-[#3044ff]">browse</span></>}
           </span>
-          <span className="mt-1 block text-[11px] font-medium text-[#46506a]">PDF, DOCX, TXT up to 50MB</span>
+          <span className="mt-1 block text-[11px] font-medium text-[#46506a]">{uploadMessage || "PDF or TXT up to 50MB"}</span>
         </span>
       </button>
     </section>
@@ -9722,6 +10465,165 @@ function KnowledgeUpdatesCard({ updates }: { updates: KnowledgeUpdate[] }) {
 }
 
 function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLiveSummary; isLoading: boolean; error: string }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSourceSummary[]>([]);
+  const [isKnowledgeLoading, setIsKnowledgeLoading] = useState(true);
+  const [isUploadingKnowledge, setIsUploadingKnowledge] = useState(false);
+  const [knowledgeError, setKnowledgeError] = useState("");
+  const [uploadMessage, setUploadMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadKnowledgeSources() {
+      try {
+        const response = await fetch("/api/knowledge/sources", { cache: "no-store" });
+        const payload = (await response.json()) as KnowledgeSourcesResponse;
+
+        if (!response.ok || payload.error) {
+          throw new Error(payload.error || "Could not load knowledge sources");
+        }
+
+        if (isMounted) {
+          setKnowledgeSources(payload.sources || []);
+          setKnowledgeError("");
+        }
+      } catch (loadError) {
+        if (isMounted) {
+          setKnowledgeError(loadError instanceof Error ? loadError.message : "Could not load knowledge sources");
+        }
+      } finally {
+        if (isMounted) {
+          setIsKnowledgeLoading(false);
+        }
+      }
+    }
+
+    void loadKnowledgeSources();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  async function uploadKnowledgeFiles(files: FileList | null) {
+    const file = files?.[0];
+
+    if (!file || isUploadingKnowledge) {
+      return;
+    }
+
+    setIsUploadingKnowledge(true);
+    setKnowledgeError("");
+    setUploadMessage(`Uploading ${file.name}...`);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("assignment", knowledgeSources.length === 0 ? "default" : "auto");
+
+      const response = await fetch("/api/knowledge/sources", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = (await response.json()) as KnowledgeSourcesResponse;
+
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Could not upload knowledge source");
+      }
+
+      setKnowledgeSources(payload.sources || []);
+      setUploadMessage(`${file.name} indexed and ready.`);
+    } catch (uploadError) {
+      const message = uploadError instanceof Error ? uploadError.message : "Could not upload knowledge source";
+      setKnowledgeError(message);
+      setUploadMessage(message);
+    } finally {
+      setIsUploadingKnowledge(false);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function updateKnowledgeSource(sourceId: string, partial: { assignment?: KnowledgeAssignment; active?: boolean }) {
+    setKnowledgeError("");
+
+    try {
+      const response = await fetch(`/api/knowledge/sources/${sourceId}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(partial),
+      });
+      const payload = (await response.json()) as KnowledgeSourcesResponse;
+
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Could not update knowledge source");
+      }
+
+      setKnowledgeSources(payload.sources || []);
+      setUploadMessage("Knowledge routing updated.");
+    } catch (updateError) {
+      setKnowledgeError(updateError instanceof Error ? updateError.message : "Could not update knowledge source");
+    }
+  }
+
+  async function autoAssignAllKnowledgeSources() {
+    if (knowledgeSources.length < 2) {
+      return;
+    }
+
+    setIsUploadingKnowledge(true);
+    setUploadMessage("Setting sources to auto detect...");
+
+    try {
+      let nextSources = knowledgeSources;
+
+      for (const source of knowledgeSources) {
+        const response = await fetch(`/api/knowledge/sources/${source.id}`, {
+          method: "PATCH",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ assignment: "auto" satisfies KnowledgeAssignment }),
+        });
+        const payload = (await response.json()) as KnowledgeSourcesResponse;
+
+        if (!response.ok || payload.error) {
+          throw new Error(payload.error || "Could not auto assign knowledge sources");
+        }
+
+        nextSources = payload.sources || nextSources;
+      }
+
+      setKnowledgeSources(nextSources);
+      setUploadMessage("Auto detection is enabled for all sources.");
+    } catch (autoAssignError) {
+      const message = autoAssignError instanceof Error ? autoAssignError.message : "Could not auto assign knowledge sources";
+      setKnowledgeError(message);
+      setUploadMessage(message);
+    } finally {
+      setIsUploadingKnowledge(false);
+    }
+  }
+
+  const sourceRows = knowledgeSources.map(mapKnowledgeSourceSummary);
+  const knowledgeTabs = isKnowledgeLoading && knowledgeSources.length === 0 ? summary.knowledgeTabs : buildKnowledgeTabsFromSources(knowledgeSources);
+  const knowledgeInsights = buildKnowledgeInsightsFromSources(knowledgeSources, summary.knowledgeInsights);
+  const knowledgeUpdates = buildKnowledgeUpdatesFromSources(knowledgeSources);
+  const activeKnowledgeCount = knowledgeSources.filter((source) => source.active).length;
+  const trainingPercent = knowledgeSources.length > 0 ? Math.round((activeKnowledgeCount / knowledgeSources.length) * 100) : 0;
+  const visibleStatusMessage = isLoading
+    ? "Loading real workspace data..."
+    : isKnowledgeLoading
+      ? "Loading saved knowledge sources..."
+      : error || knowledgeError;
+
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
       <div className="mx-auto max-w-[1286px]">
@@ -9745,10 +10647,12 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
             </div>
             <button
               type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploadingKnowledge}
               className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.2)] sm:w-[124px]"
             >
-              <Plus size={16} strokeWidth={2.4} />
-              <span className="hidden sm:inline">Add source</span>
+              {isUploadingKnowledge ? <RefreshCw size={16} className="animate-spin" strokeWidth={2.4} /> : <Plus size={16} strokeWidth={2.4} />}
+              <span className="hidden sm:inline">{isUploadingKnowledge ? "Adding" : "Add source"}</span>
             </button>
             <button
               type="button"
@@ -9761,21 +10665,38 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
           </div>
         </header>
 
-        <KnowledgeTabs tabs={summary.knowledgeTabs} />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.txt,application/pdf,text/plain,text/markdown"
+          className="hidden"
+          onChange={(event) => void uploadKnowledgeFiles(event.target.files)}
+        />
 
-        {(isLoading || error) && (
+        <KnowledgeTabs tabs={knowledgeTabs} />
+
+        {visibleStatusMessage && (
           <div className="mt-4 rounded-[10px] border border-[#edf0f6] bg-white px-4 py-3 text-[12px] font-semibold text-[#46506a] shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
-            {isLoading ? "Loading real workspace data..." : error}
+            {visibleStatusMessage}
           </div>
         )}
 
         <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_344px]">
-          <KnowledgeSourceRows sources={summary.knowledgeSources} />
+          <KnowledgeSourceRows
+            sources={sourceRows}
+            onUploadClick={() => fileInputRef.current?.click()}
+            onDropFiles={(files) => void uploadKnowledgeFiles(files)}
+            onAssignmentChange={(sourceId, assignment) => void updateKnowledgeSource(sourceId, { assignment })}
+            onActiveChange={(sourceId, active) => void updateKnowledgeSource(sourceId, { active })}
+            onAutoAssignAll={() => void autoAssignAllKnowledgeSources()}
+            isUploading={isUploadingKnowledge}
+            uploadMessage={uploadMessage}
+          />
 
           <aside className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
-            <TrainingStatusCard percent={summary.knowledgeTrainingPercent} sourceCount={summary.knowledgeSources.length} />
-            <KnowledgeInsightsCard insights={summary.knowledgeInsights} />
-            <KnowledgeUpdatesCard updates={summary.knowledgeUpdates} />
+            <TrainingStatusCard percent={trainingPercent} sourceCount={knowledgeSources.length} />
+            <KnowledgeInsightsCard insights={knowledgeInsights} />
+            <KnowledgeUpdatesCard updates={knowledgeUpdates} />
           </aside>
         </div>
       </div>

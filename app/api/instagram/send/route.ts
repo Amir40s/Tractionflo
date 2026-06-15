@@ -33,6 +33,44 @@ type InstagramSendResult = {
   };
 };
 
+type InstagramGraphError = {
+  message?: string;
+  type?: string;
+  code?: number;
+  error_subcode?: number;
+  fbtrace_id?: string;
+};
+
+class InstagramSendError extends Error {
+  status: number;
+  code: string;
+  graphError?: InstagramGraphError;
+
+  constructor(
+    message: string,
+    options: { status?: number; code?: string; graphError?: InstagramGraphError } = {}
+  ) {
+    super(message);
+    this.name = 'InstagramSendError';
+    this.status = options.status || 502;
+    this.code = options.code || 'instagram_send_failed';
+    this.graphError = options.graphError;
+  }
+}
+
+function isMessagingWindowError(error?: InstagramGraphError) {
+  const message = (error?.message || '').toLowerCase();
+
+  return (
+    message.includes('allowed window') ||
+    message.includes('allowed time') ||
+    message.includes('permitted time') ||
+    (message.includes('outside') && message.includes('window')) ||
+    (message.includes('24') && message.includes('hour')) ||
+    (message.includes('اجازت') && message.includes('مدت'))
+  );
+}
+
 function isUploadFile(value: FormDataEntryValue): value is File {
   return typeof value !== 'string' && value.size > 0 && typeof value.arrayBuffer === 'function';
 }
@@ -69,10 +107,26 @@ async function sendInstagramMessage(
     }),
   });
 
-  const data = await response.json();
+  const data = (await response.json().catch(() => ({}))) as InstagramSendResult & {
+    error?: InstagramGraphError;
+  };
 
   if (!response.ok || data.error) {
-    throw new Error(data.error?.message || 'Instagram could not send this message.');
+    if (isMessagingWindowError(data.error)) {
+      throw new InstagramSendError(
+        'Instagram blocked this reply because Meta only allows API replies inside the messaging window after the customer sends a recent DM. Ask the customer to message again, then resend.',
+        {
+          status: 409,
+          code: 'instagram_messaging_window_closed',
+          graphError: data.error,
+        }
+      );
+    }
+
+    throw new InstagramSendError(data.error?.message || 'Instagram could not send this message.', {
+      status: response.ok ? 502 : response.status,
+      graphError: data.error,
+    });
   }
 
   return data;
@@ -240,6 +294,19 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, sent });
   } catch (err) {
+    if (err instanceof InstagramSendError) {
+      console.error('Instagram send error:', err.graphError || err);
+      return NextResponse.json(
+        {
+          error: err.message,
+          code: err.code,
+          graphCode: err.graphError?.code,
+          graphSubcode: err.graphError?.error_subcode,
+        },
+        { status: err.status }
+      );
+    }
+
     const message = err instanceof Error ? err.message : 'Could not send Instagram message';
     console.error('Instagram send error:', err);
     return NextResponse.json({ error: message }, { status: 502 });

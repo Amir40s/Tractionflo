@@ -34,6 +34,7 @@ import type { LucideIcon } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiLeadInsight, AiWorkflowRunResult } from "@/lib/ai-integration";
+import { settingsStateStorageKey } from "@/lib/notification-preferences";
 
 const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
   ssr: false,
@@ -119,6 +120,35 @@ type AiReplyResponse = {
 
 type AiWorkflowResponse = Partial<AiWorkflowRunResult> & {
   error?: string;
+  knowledge?: {
+    mode?: "none" | "direct" | "context";
+    sourceTitle?: string;
+    matches?: number;
+  };
+};
+
+type InboxBookingSheetRoute = {
+  id?: string;
+  name?: string;
+  bookingType?: string;
+  sheetUrl?: string;
+  worksheetName?: string;
+  enabled?: boolean;
+  confirmedOnly?: boolean;
+};
+
+type InboxBookingIntegrations = {
+  syncEnabled?: boolean;
+  routes?: InboxBookingSheetRoute[];
+};
+
+type BookingExportResponse = {
+  ok?: boolean;
+  exported?: boolean;
+  skipped?: boolean;
+  message?: string;
+  reason?: string;
+  error?: string;
 };
 
 // ─── Static data ─────────────────────────────────────────────────────────────
@@ -132,6 +162,41 @@ const quickActions: QuickAction[] = [
 
 type ComposerMode = "reply" | "note";
 type ConversationTakeoverMode = "ai" | "human";
+
+function getTakeoverLabel(mode: ConversationTakeoverMode) {
+  return mode === "human" ? "Human takeover" : "AI takeover";
+}
+
+function getTakeoverPillClass(mode: ConversationTakeoverMode) {
+  return mode === "human"
+    ? "border-[#dbe5ff] bg-[#f3f6ff] text-[#3044ff]"
+    : "border-[#dff5e7] bg-[#eefcf3] text-[#0a9b3f]";
+}
+
+function readBookingIntegrationsFromStorage(): InboxBookingIntegrations | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(settingsStateStorageKey);
+
+    if (!storedValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(storedValue) as { bookingIntegrations?: InboxBookingIntegrations };
+    return parsed.bookingIntegrations || null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldAttemptBookingExport(replyText: string) {
+  return /\b(booking request is noted|booking confirmed|final booking confirmation|confirm availability|booking has been confirmed|confirmed your booking)\b/i.test(
+    replyText
+  );
+}
 
 type ComposerAttachment = {
   id: string;
@@ -205,6 +270,17 @@ function getMessagePreview(msg: IGMessage | undefined): string {
   if (firstAttachment) return firstAttachment.name || "Attachment";
 
   return "Message";
+}
+
+function getShortMessagePreview(msg: IGMessage | undefined): string {
+  const preview = getMessagePreview(msg);
+  const words = preview.split(/\s+/).filter(Boolean);
+
+  if (words.length <= 3) {
+    return preview;
+  }
+
+  return `${words.slice(0, 3).join(" ")}...`;
 }
 
 function getParticipantName(conv: IGConversation | null) {
@@ -303,6 +379,33 @@ function getConversationAiMessages(conv: IGConversation) {
       })),
       time: message.time,
     }));
+}
+
+function normalizeComparableReply(text: string) {
+  return text
+    .replace(/[’']/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function hasRecentlySentBusinessReply(messages: IGMessage[], reply: string) {
+  const normalizedReply = normalizeComparableReply(reply);
+
+  if (!normalizedReply) {
+    return false;
+  }
+
+  const latestUserMessageIndex = messages.findIndex((message) => message.from === "user");
+  const messagesAfterLatestUser =
+    latestUserMessageIndex >= 0
+      ? messages.slice(0, latestUserMessageIndex)
+      : messages;
+
+  return messagesAfterLatestUser
+    .filter((message) => message.from === "me" && message.status !== "failed")
+    .slice(0, 4)
+    .some((message) => normalizeComparableReply(message.text) === normalizedReply);
 }
 
 function getLeadScoreTone(score: number) {
@@ -528,7 +631,7 @@ function ConvList({
                     <span className="truncate text-[13px] font-bold text-black">{name}</span>
                   </span>
                   <span className="mt-1 block line-clamp-1 text-[12px] font-medium leading-[1.35] text-[#4f566c]">
-                    {getMessagePreview(lastMsg)}
+                    {getShortMessagePreview(lastMsg)}
                   </span>
                 </span>
                 <span className="flex h-full shrink-0 flex-col items-end justify-between gap-5">
@@ -678,7 +781,7 @@ function ChatComposer({
 
   const isReply = mode === "reply";
   const isHumanTakeover = takeoverMode === "human";
-  const canUseAiTools = takeoverMode === "ai";
+  const canUseAiTools = Boolean(conv);
   const canAttach = Boolean(conv && isReply && !status.sending);
   const canSubmit = Boolean(
     conv &&
@@ -800,10 +903,15 @@ function ChatComposer({
         ))}
         <span className="mx-1 h-4 w-px bg-[#e1e5ee]" />
         {status.notice && <span className="ml-auto text-[10px] font-extrabold text-[#0a9b3f]">{status.notice}</span>}
-        {status.error && <span className="ml-auto max-w-[260px] truncate text-[10px] font-extrabold text-[#df405b]">{status.error}</span>}
       </div>
 
       <div className="px-4 py-2">
+        {status.error && (
+          <div className="mb-2 rounded-[8px] border border-[#ffd4dc] bg-[#fff7f9] px-3 py-2 text-[11px] font-bold leading-[1.45] text-[#df405b]">
+            {status.error}
+          </div>
+        )}
+
         <textarea
           value={text}
           onChange={(event) => setText(event.target.value)}
@@ -818,7 +926,7 @@ function ChatComposer({
           placeholder={
             isReply
               ? isHumanTakeover
-                ? "Human takeover is active. Type your manual reply..."
+                ? "Human takeover active. Type manually or let AI draft for approval..."
                 : "Type your message or let AI reply for you..."
               : "Write a private note for your team..."
           }
@@ -932,7 +1040,7 @@ function ChatComposer({
               className="flex h-8 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-[#f3f4ff] px-3.5 text-[12px] font-semibold text-[#3044ff] transition hover:bg-[#eceeff] disabled:cursor-not-allowed disabled:opacity-55"
             >
               {aiReplying ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-              {isHumanTakeover ? "AI Paused" : aiReplying ? "Thinking" : "AI Reply"}
+              {isHumanTakeover ? "AI Draft" : aiReplying ? "Thinking" : "AI Reply"}
             </button>
             <div className="relative flex">
               <button
@@ -1080,6 +1188,8 @@ function ChatThread({
   const isStarred = Boolean(conv && starredConversationIds.includes(conv.id));
   const assignedAgents = conv ? agents.filter((agent) => agent.assignedConversationIds.includes(conv.id)) : [];
   const isHumanTakeover = takeoverMode === "human";
+  const takeoverLabel = getTakeoverLabel(takeoverMode);
+  const TakeoverStatusIcon = isHumanTakeover ? Users : Sparkles;
 
   const toggleConversationId = (id: string, setter: Dispatch<SetStateAction<string[]>>) => {
     setter((ids) => (ids.includes(id) ? ids.filter((existingId) => existingId !== id) : [...ids, id]));
@@ -1097,9 +1207,17 @@ function ChatThread({
               <Avatar src={avatarSrc} name={name} size="h-10 w-10" />
               <div>
                 <h2 className="text-[14px] font-bold leading-tight text-black">{name}</h2>
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <IGBadge />
                   <p className="text-[11px] font-medium text-[#596175]">Instagram</p>
+                  <span
+                    className={`inline-flex h-5 items-center gap-1 rounded-full border px-2 text-[10px] font-extrabold ${getTakeoverPillClass(
+                      takeoverMode
+                    )}`}
+                  >
+                    <TakeoverStatusIcon size={11} strokeWidth={2.5} />
+                    {takeoverLabel}
+                  </span>
                 </div>
               </div>
               {profileUrl && (
@@ -1366,6 +1484,7 @@ function SummaryPanel({
   onToggleTakeoverMode,
   onDraftSuggestedReply,
   onSendSuggestedReply,
+  onGenerateAiReply,
 }: {
   conv: IGConversation | null;
   igUserId: string;
@@ -1376,6 +1495,7 @@ function SummaryPanel({
   onToggleTakeoverMode: () => void;
   onDraftSuggestedReply: (text: string) => void;
   onSendSuggestedReply: (text: string) => Promise<void>;
+  onGenerateAiReply: () => Promise<string>;
 }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1385,15 +1505,24 @@ function SummaryPanel({
   const [aiLoading, setAiLoading] = useState(false);
   const [, setClockTick] = useState(0);
   const lastAiKeyRef = useRef("");
+  const lastAutoSendKeyRef = useRef("");
   const isHumanTakeover = takeoverMode === "human";
+  const takeoverLabel = getTakeoverLabel(takeoverMode);
+  const TakeoverStatusIcon = isHumanTakeover ? Users : Sparkles;
   const msgs = conv ? [...conv.messages].filter((m) => m.from !== "note").reverse() : [];
   const lastUserMsg = conv?.messages.find(m => m.from === "user" && m.sender_id !== igUserId);
   const lastUserMsgPreview = getMessagePreview(lastUserMsg);
-  const suggestedReply = aiWorkflow?.reply || getSuggestedReply(conv);
+  const knowledgeSummary = aiWorkflow?.knowledge;
+  const hasKnowledgeReply = knowledgeSummary?.mode === "direct" || knowledgeSummary?.mode === "context";
+  const suggestedReply =
+    aiWorkflow?.reply ||
+    (aiLoading ? "Reading saved knowledge and conversation context..." : getSuggestedReply(conv));
   const leadInsight = aiWorkflow?.lead;
   const starterDraft = aiWorkflow?.starter || suggestedReply;
   const ctaDraft = aiWorkflow?.cta || leadInsight?.cta || suggestedReply;
   const aiRefreshKey = conv ? `${conv.id}-${conv.updated_time}-${conv.messages.length}` : "empty";
+  const userMessageCount = msgs.filter((message) => message.from === "user").length;
+  const businessMessageCount = msgs.filter((message) => message.from === "me").length;
   const trimmedSearch = searchQuery.trim().toLowerCase();
   const searchMatches = trimmedSearch
     ? msgs.filter((message) => getSearchableMessageText(message).includes(trimmedSearch))
@@ -1403,6 +1532,13 @@ function SummaryPanel({
     .slice(-4)
     .reverse();
   const lastMessage = msgs[msgs.length - 1];
+  const latestMessageIsFromUser = Boolean(lastMessage && lastUserMsg && lastMessage.id === lastUserMsg.id && lastMessage.from === "user");
+  const isNewInboundLead = Boolean(userMessageCount > 0 && businessMessageCount === 0 && latestMessageIsFromUser);
+  const starterAutoSendEnabled = Boolean(
+    isNewInboundLead &&
+    aiWorkflow?.enabledWorkflows?.startConversation &&
+    aiWorkflow.starter?.trim()
+  );
   const liveNotice = lastUserMsg
     ? `${getMessagePreview(lastUserMsg)} • ${relativeTime(lastUserMsg.time)}`
     : "No recent user messages";
@@ -1410,13 +1546,6 @@ function SummaryPanel({
   const runAiWorkflow = useCallback(
     async (options?: { silent?: boolean }) => {
       if (!conv) {
-        return;
-      }
-
-      if (isHumanTakeover) {
-        lastAiKeyRef.current = "";
-        setAiLoading(false);
-        setAiStatus("Human takeover is active. AI is paused for this conversation.");
         return;
       }
 
@@ -1446,7 +1575,11 @@ function SummaryPanel({
         }
 
         setAiWorkflow(data);
-        setAiStatus("AI is synced with this conversation.");
+        setAiStatus(
+          isHumanTakeover
+            ? "Human takeover active. AI drafted this reply for approval."
+            : "AI takeover active. Replies send automatically after drafting."
+        );
       } catch (error) {
         setAiWorkflow(null);
         setAiStatus(error instanceof Error ? error.message : "Could not run AI workflow");
@@ -1490,27 +1623,110 @@ function SummaryPanel({
       return () => window.clearTimeout(timeout);
     }
 
-    if (isHumanTakeover) {
-      const timeout = window.setTimeout(() => {
-        lastAiKeyRef.current = "";
-        setAiLoading(false);
-        setAiStatus("Human takeover is active. AI is paused for this conversation.");
-      }, 0);
-
-      return () => window.clearTimeout(timeout);
-    }
-
     if (lastAiKeyRef.current === aiRefreshKey) {
       return undefined;
     }
 
     lastAiKeyRef.current = aiRefreshKey;
+    setAiWorkflow(null);
+    setAiLoading(true);
     const timeout = window.setTimeout(() => {
       void runAiWorkflow({ silent: true });
     }, 700);
 
     return () => window.clearTimeout(timeout);
-  }, [aiRefreshKey, conv, isHumanTakeover, runAiWorkflow]);
+  }, [aiRefreshKey, conv, runAiWorkflow]);
+
+  useEffect(() => {
+    if (
+      !conv ||
+      isHumanTakeover ||
+      aiLoading ||
+      composerStatus.sending ||
+      !lastUserMsg?.id ||
+      !latestMessageIsFromUser
+    ) {
+      return undefined;
+    }
+
+    const autoSendMode = starterAutoSendEnabled ? "starter" : "reply";
+    const autoSendKey = `tractionflo:auto-ai-v2-${autoSendMode}:${conv.id}:${lastUserMsg.id}`;
+
+    if (window.sessionStorage.getItem(autoSendKey) || lastAutoSendKeyRef.current === autoSendKey) {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(() => {
+      let skippedDuplicateReply = false;
+      lastAutoSendKeyRef.current = autoSendKey;
+      setAiStatus(
+        starterAutoSendEnabled
+          ? "AI Starts Conversation active. Preparing the first reply automatically..."
+          : "AI takeover active. Preparing a reply to send automatically..."
+      );
+
+      const draftPromise = starterAutoSendEnabled
+        ? Promise.resolve(aiWorkflow?.starter?.trim() || "")
+        : Promise.resolve(aiWorkflow?.reply?.trim() || onGenerateAiReply());
+
+      void draftPromise
+        .then((reply) => {
+          const autoReply = reply.trim();
+
+          if (!autoReply) {
+            throw new Error(
+              starterAutoSendEnabled
+                ? "AI did not return a starter message for this lead."
+                : "AI did not return a reply for this message."
+            );
+          }
+
+          if (hasRecentlySentBusinessReply(conv.messages, autoReply)) {
+            skippedDuplicateReply = true;
+            window.sessionStorage.setItem(autoSendKey, new Date().toISOString());
+            setAiStatus("AI already answered this latest message, so it was not sent again.");
+            return undefined;
+          }
+
+          setAiStatus(
+            starterAutoSendEnabled
+              ? "AI Starts Conversation active. Sending the first reply automatically..."
+              : "AI takeover active. Sending this reply automatically..."
+          );
+          return onSendSuggestedReply(autoReply);
+        })
+        .then(() => {
+          window.sessionStorage.setItem(autoSendKey, new Date().toISOString());
+          if (skippedDuplicateReply) {
+            return;
+          }
+
+          setAiStatus(
+            starterAutoSendEnabled
+              ? "AI started the conversation automatically."
+              : "AI takeover sent the reply automatically."
+          );
+        })
+        .catch((error) => {
+          lastAutoSendKeyRef.current = "";
+          setAiStatus(error instanceof Error ? error.message : "AI drafted a reply, but could not auto-send it.");
+        });
+    }, 450);
+
+    return () => window.clearTimeout(timeout);
+  }, [
+    aiLoading,
+    aiWorkflow?.reply,
+    aiWorkflow?.starter,
+    composerStatus.sending,
+    conv,
+    isHumanTakeover,
+    lastUserMsg?.id,
+    latestMessageIsFromUser,
+    onGenerateAiReply,
+    onSendSuggestedReply,
+    starterAutoSendEnabled,
+  ]);
 
   return (
     <aside className="hidden h-full min-w-0 flex-col overflow-hidden border-l border-[#e7eaf2] bg-white xl:flex">
@@ -1604,18 +1820,28 @@ function SummaryPanel({
                 </div>
                 <div className="flex min-h-[42px] items-center justify-between gap-3 py-1.5">
                   <span className="text-[12px] font-normal text-black">Control</span>
-                  <button
-                    type="button"
-                    onClick={onToggleTakeoverMode}
-                    className={`flex h-8 items-center gap-2 rounded-[8px] px-2.5 text-[11px] font-extrabold transition ${
-                      isHumanTakeover
-                        ? "border border-[#dde3ee] bg-white text-black hover:bg-[#f6f7fb]"
-                        : "bg-[#3044ff] text-white shadow-[0_12px_24px_rgba(48,68,255,0.18)] hover:bg-[#2638f0]"
-                    }`}
-                  >
-                    {isHumanTakeover ? <Sparkles size={13} strokeWidth={2.4} /> : <Users size={13} strokeWidth={2.4} />}
-                    {isHumanTakeover ? "Take over AI" : "Take over human"}
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <span
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-[8px] border px-2.5 text-[11px] font-extrabold ${getTakeoverPillClass(
+                        takeoverMode
+                      )}`}
+                    >
+                      <TakeoverStatusIcon size={13} strokeWidth={2.4} />
+                      {takeoverLabel}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onToggleTakeoverMode}
+                      className={`flex h-8 items-center gap-2 rounded-[8px] px-2.5 text-[11px] font-extrabold transition ${
+                        isHumanTakeover
+                          ? "border border-[#dde3ee] bg-white text-black hover:bg-[#f6f7fb]"
+                          : "bg-[#3044ff] text-white shadow-[0_12px_24px_rgba(48,68,255,0.18)] hover:bg-[#2638f0]"
+                      }`}
+                    >
+                      {isHumanTakeover ? <Sparkles size={13} strokeWidth={2.4} /> : <Users size={13} strokeWidth={2.4} />}
+                      {isHumanTakeover ? "Take over AI" : "Take over human"}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1628,7 +1854,7 @@ function SummaryPanel({
                   <button
                     type="button"
                     onClick={() => void runAiWorkflow()}
-                    disabled={aiLoading || isHumanTakeover}
+                    disabled={aiLoading}
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border border-[#dde3ee] bg-white text-[#46506a] disabled:cursor-not-allowed disabled:opacity-55"
                     aria-label="Refresh AI qualification"
                   >
@@ -1677,7 +1903,7 @@ function SummaryPanel({
                   <button
                     type="button"
                     onClick={() => onDraftSuggestedReply(starterDraft)}
-                    disabled={!starterDraft || aiLoading || isHumanTakeover}
+                    disabled={!starterDraft || aiLoading || !isHumanTakeover}
                     className="h-8 rounded-[8px] border border-[#dde3ee] bg-white px-2 text-[11px] font-extrabold text-black disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     Draft opener
@@ -1685,7 +1911,7 @@ function SummaryPanel({
                   <button
                     type="button"
                     onClick={() => onDraftSuggestedReply(ctaDraft)}
-                    disabled={!ctaDraft || aiLoading || isHumanTakeover}
+                    disabled={!ctaDraft || aiLoading || !isHumanTakeover}
                     className="h-8 rounded-[8px] bg-[#3044ff] px-2 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     Draft CTA
@@ -1732,14 +1958,21 @@ function SummaryPanel({
 
               <div className="mt-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <h3 className="text-[13px] font-bold text-black">{aiWorkflow?.reply ? "AI suggested reply" : "Suggested reply"}</h3>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <h3 className="text-[13px] font-bold text-black">{aiWorkflow?.reply ? "AI suggested reply" : "Suggested reply"}</h3>
+                    {hasKnowledgeReply ? (
+                      <span className="max-w-[132px] truncate rounded-[7px] bg-[#eafaf0] px-2 py-1 text-[10px] font-extrabold text-[#0a9b3f]">
+                        {knowledgeSummary?.sourceTitle || "Saved knowledge"}
+                      </span>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     onClick={() => onDraftSuggestedReply(suggestedReply)}
-                    disabled={aiLoading || isHumanTakeover}
+                    disabled={aiLoading || !isHumanTakeover}
                     className="text-[11px] font-bold text-[#3044ff] disabled:cursor-not-allowed disabled:opacity-55"
                   >
-                    {isHumanTakeover ? "AI paused" : aiLoading ? "Thinking" : "Customize"}
+                    {isHumanTakeover ? (aiLoading ? "Thinking" : "Customize") : "Auto-send on"}
                   </button>
                 </div>
                 <div className="rounded-[8px] border border-[#dde3ee] bg-white p-2.5 text-[12px] leading-[1.35] text-[#252c41]">
@@ -1750,11 +1983,11 @@ function SummaryPanel({
                   onClick={() => {
                     void onSendSuggestedReply(suggestedReply).catch(() => undefined);
                   }}
-                  disabled={composerStatus.sending || isHumanTakeover}
+                  disabled={composerStatus.sending || !suggestedReply || !isHumanTakeover}
                   className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded-[7px] bg-[#0d1118] text-[12px] font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-55"
                 >
                   {composerStatus.sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-                  {isHumanTakeover ? "AI reply paused" : "Send this reply"}
+                  {isHumanTakeover ? "Send this reply" : "AI auto-sends replies"}
                 </button>
               </div>
             </div>
@@ -2043,7 +2276,48 @@ export default function Inbox() {
           )
         );
 
-        setComposerStatus({ sending: false, error: null, notice: "Sent" });
+        let postSendNotice = "Sent";
+        let postSendError: string | null = null;
+
+        if (payload.text && shouldAttemptBookingExport(payload.text)) {
+          try {
+            const integrations = readBookingIntegrationsFromStorage();
+
+            if (integrations?.syncEnabled && integrations.routes?.some((route) => route.enabled !== false && route.sheetUrl?.trim())) {
+              const exportResponse = await fetch("/api/integrations/booking-sheets/export", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  integrations,
+                  conversation: {
+                    id: targetConv.id,
+                    participantName: targetConv.participant.username || targetConv.participant.id,
+                    username: targetConv.participant.username,
+                  },
+                  messages: getConversationAiMessages(targetConv),
+                  replyText: payload.text,
+                }),
+              });
+              const exportData: BookingExportResponse = await exportResponse.json().catch(() => ({}));
+
+              if (!exportResponse.ok || exportData.error) {
+                postSendError = `Sent, but booking sheet was not updated: ${exportData.error || "Export failed."}`;
+              } else if (exportData.exported) {
+                postSendNotice = "Sent · booking saved to sheet";
+              } else if (exportData.reason) {
+                postSendNotice = `Sent · ${exportData.reason}`;
+              }
+            }
+          } catch (error) {
+            postSendError = `Sent, but booking sheet was not updated: ${
+              error instanceof Error ? error.message : "Export failed."
+            }`;
+          }
+        }
+
+        setComposerStatus({ sending: false, error: postSendError, notice: postSendError ? null : postSendNotice });
 
         if (payload.refreshAfter) {
           await fetchConvs();
@@ -2222,6 +2496,7 @@ export default function Inbox() {
         onToggleTakeoverMode={toggleTakeoverMode}
         onDraftSuggestedReply={draftSuggestedReply}
         onSendSuggestedReply={sendSuggestedReply}
+        onGenerateAiReply={generateAiReply}
       />
     </div>
   );

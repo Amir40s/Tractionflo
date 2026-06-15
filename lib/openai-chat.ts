@@ -9,9 +9,20 @@ type OpenAiChatResponse = {
       content?: string;
     };
   }[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
   error?: {
     message?: string;
   };
+};
+
+export type OpenAiUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 };
 
 export async function requestOpenAiChatCompletion({
@@ -19,11 +30,13 @@ export async function requestOpenAiChatCompletion({
   model,
   messages,
   maxTokens = 180,
+  onUsage,
 }: {
   apiKey: string;
   model: string;
   messages: OpenAiChatMessage[];
   maxTokens?: number;
+  onUsage?: (usage: OpenAiUsage) => Promise<void> | void;
 }) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -48,6 +61,20 @@ export async function requestOpenAiChatCompletion({
 
   if (!content) {
     throw new Error("OpenAI returned an empty response.");
+  }
+
+  if (data.usage && onUsage) {
+    const usage = {
+      promptTokens: Math.max(0, Math.round(data.usage.prompt_tokens || 0)),
+      completionTokens: Math.max(0, Math.round(data.usage.completion_tokens || 0)),
+      totalTokens: Math.max(0, Math.round(data.usage.total_tokens || 0)),
+    };
+
+    try {
+      await onUsage(usage);
+    } catch (error) {
+      console.error("OpenAI usage logging error:", error);
+    }
   }
 
   return content;

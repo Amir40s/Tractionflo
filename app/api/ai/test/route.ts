@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
 import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
+import { recordOpenAiUsage } from '@/lib/openai-usage';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
+import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -30,10 +32,19 @@ export async function POST() {
     }
 
     const integration = normalizeAiIntegrationMetadata(metadata);
+    const serviceSupabase = createSupabaseServiceClient();
     const reply = await requestOpenAiChatCompletion({
       apiKey,
       model: integration.model,
       maxTokens: 80,
+      onUsage: (usage) =>
+        recordOpenAiUsage({
+          supabase: serviceSupabase,
+          user,
+          model: integration.model,
+          usage,
+          source: 'ai-test',
+        }),
       messages: [
         {
           role: 'system',
