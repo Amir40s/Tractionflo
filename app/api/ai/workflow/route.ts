@@ -17,6 +17,8 @@ import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 
+
+
 export const dynamic = 'force-dynamic';
 
 type WorkflowMessage = {
@@ -180,10 +182,10 @@ function normalizeWorkflowResult(value: string, enabledWorkflows: AiWorkflowRunR
     lead: enabledWorkflows.qualifyLeads
       ? lead
       : {
-          ...defaultAiLeadInsight,
-          summary: 'AI Qualifies Leads is turned off.',
-          recommendedAction: 'Turn on lead qualification in AI Integration.',
-        },
+        ...defaultAiLeadInsight,
+        summary: 'AI Qualifies Leads is turned off.',
+        recommendedAction: 'Turn on lead qualification in AI Integration.',
+      },
     enabledWorkflows,
   } satisfies AiWorkflowRunResult;
 }
@@ -227,6 +229,24 @@ export async function POST(request: Request) {
     // Load lead qualifications cache
     const leadQualifications = (metadata.lead_qualifications || {}) as Record<string, any>;
     const cachedLead = leadQualifications[participantId];
+
+    const messages = payload.messages || [];
+    const lastMessage = messages[messages.length - 1];
+
+    if (lastMessage?.from === 'me') {
+      logger.info("Skipping OpenAI Assistant run because the last message in the conversation is from the business.");
+      return NextResponse.json({
+        starter: '',
+        reply: '',
+        cta: '',
+        lead: cachedLead || {
+          ...defaultAiLeadInsight,
+          summary: 'Waiting for the user to respond.',
+          recommendedAction: 'Wait for user response.',
+        },
+        enabledWorkflows,
+      } satisfies AiWorkflowRunResult);
+    }
 
     // Determine if we should qualify this lead during this run
     let shouldQualifyLeads = false;
@@ -277,12 +297,28 @@ export async function POST(request: Request) {
       .slice(-16)
       .map(formatConversationLine)
       .join('\n');
+    const leadSchema = runWorkflows.qualifyLeads
+      ? `"lead": {
+    "score": 0-100,
+    "stage": "New | Warm | Qualified | Ready for CTA | Needs human",
+    "urgency": "Low | Medium | High",
+    "intent": "short intent label",
+    "summary": "one sentence",
+    "signals": ["up to five buying or support signals"],
+    "missing": ["up to five missing qualification facts"],
+    "recommendedAction": "one next action for the business",
+    "cta": "best CTA for this lead"
+  }`
+      : `"lead": null`;
+
     const rawResult = await runAssistantThread({
       apiKey,
       assistantId: assistantIdFromMetadata,
       maxTokens: 700,
       responseFormat: "json_object",
       additionalInstructions: `${integration.systemPrompt}
+
+IMPORTANT: The attached files and vector store contain the primary truth for this business (such as menus, pricing, services, and policies). You MUST search these files using the file_search tool for any specific business inquiries (e.g. "menu", "pricing", "cost", "hours", "booking", or specific products/services). Do NOT rely on default prompts or assume the business context is TractionFlo if the knowledge base documents specify a different business (e.g. Taste Haven Restaurant).
 
 ${getAiBehaviorPrompt(integration.behavior)}
 
@@ -296,17 +332,7 @@ JSON shape:
   "starter": "first response to send when AI Starts Conversation is on and this is a new inbound lead; empty when not needed",
   "reply": "best next answer to the latest user message; use exact attached file_search knowledge when provided instead of vague ranges",
   "cta": "short CTA message that moves a ready lead forward",
-  "lead": {
-    "score": 0-100,
-    "stage": "New | Warm | Qualified | Ready for CTA | Needs human",
-    "urgency": "Low | Medium | High",
-    "intent": "short intent label",
-    "summary": "one sentence",
-    "signals": ["up to five buying or support signals"],
-    "missing": ["up to five missing qualification facts"],
-    "recommendedAction": "one next action for the business",
-    "cta": "best CTA for this lead"
-  }
+  ${leadSchema}
 }`,
       messages: [
         {
@@ -327,16 +353,18 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       ],
     });
 
+
+
     const normalizedWorkflowResult = normalizeWorkflowResult(rawResult, runWorkflows);
     const workflowResult =
       newInboundLead &&
-      runWorkflows.startConversation &&
-      !normalizedWorkflowResult.starter &&
-      normalizedWorkflowResult.reply
+        runWorkflows.startConversation &&
+        !normalizedWorkflowResult.starter &&
+        normalizedWorkflowResult.reply
         ? {
-            ...normalizedWorkflowResult,
-            starter: normalizedWorkflowResult.reply,
-          }
+          ...normalizedWorkflowResult,
+          starter: normalizedWorkflowResult.reply,
+        }
         : normalizedWorkflowResult;
 
     // Apply mock or cached lead details if we did not run qualification

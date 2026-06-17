@@ -1641,6 +1641,7 @@ function SummaryPanel({
     const reply = aiWorkflow?.reply?.trim();
 
     if (
+      true || // Backend webhook handles auto-sending; disable frontend auto-sending to prevent race conditions and duplicate messages
       !conv ||
       isHumanTakeover ||
       aiLoading ||
@@ -1653,7 +1654,7 @@ function SummaryPanel({
       return;
     }
 
-    const autoSendKey = `${conv.id}:${latestInboundMessage.id}:${reply}`;
+    const autoSendKey = `${conv?.id || ""}:${latestInboundMessage?.id || ""}:${reply}`;
 
     if (lastAutoSendKeyRef.current === autoSendKey) {
       return;
@@ -1662,7 +1663,7 @@ function SummaryPanel({
     lastAutoSendKeyRef.current = autoSendKey;
     setAiStatus("AI takeover active. Sending reply automatically...");
 
-    void onAutoSendAiReply(reply, conv.id)
+    void onAutoSendAiReply(reply || "", conv?.id || "")
       .then(() => {
         if (takeoverModeRef.current !== "human") {
           setAiStatus("AI takeover active. Reply sent automatically.");

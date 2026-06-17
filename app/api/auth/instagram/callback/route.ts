@@ -209,13 +209,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const longLivedToken = await exchangeInstagramTokenForLongLivedToken({
-      accessToken: tokenData.access_token,
-      appSecret,
-    });
-
-    const accessToken = longLivedToken.accessToken;
-    const userId = tokenData.user_id.toString();
+    const oauthUserId = tokenData.user_id.toString();
     const authSupabase = await createClient();
     const {
       data: { user },
@@ -234,9 +228,51 @@ export async function GET(request: Request) {
 
     const supabase = createSupabaseServiceClient();
 
+    // Fetch the real Instagram Business Account ID (Page ID) to match webhook events
+    let igPageId = oauthUserId;
+    try {
+      const meUrl = new URL('https://graph.instagram.com/v21.0/me');
+      meUrl.searchParams.set('fields', 'user_id,id');
+      meUrl.searchParams.set('access_token', tokenData.access_token);
+      const meRes = await fetch(meUrl.toString());
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        if (meData.user_id) {
+          igPageId = meData.user_id.toString();
+        } else if (meData.id) {
+          igPageId = meData.id.toString();
+        }
+      }
+    } catch (meError) {
+      console.error('Failed to fetch real Instagram Page ID in OAuth callback:', meError);
+    }
+
+    // Fast-path: check if this Instagram account is already connected to another TractionFlo user
+    const { data: existingConnection, error: connectionCheckError } = await supabase
+      .from('instagram_accounts')
+      .select('user_id')
+      .eq('ig_user_id', igPageId)
+      .not('user_id', 'is', null)
+      .maybeSingle();
+
+    if (connectionCheckError) {
+      console.error('Error checking existing Instagram connection:', connectionCheckError);
+    }
+
+    if (existingConnection && existingConnection.user_id !== ownerUserId) {
+      throw new Error('This Instagram account is already connected to another TractionFlo user.');
+    }
+
+    const longLivedToken = await exchangeInstagramTokenForLongLivedToken({
+      accessToken: tokenData.access_token,
+      appSecret,
+    });
+
+    const accessToken = longLivedToken.accessToken;
+
     await saveInstagramAccountToken(supabase, {
       user_id: ownerUserId,
-      ig_user_id: userId,
+      ig_user_id: igPageId,
       access_token: accessToken,
     });
 
@@ -247,7 +283,7 @@ export async function GET(request: Request) {
       url: '/settings',
       metadata: {
         userId: ownerUserId,
-        igUserId: userId,
+        igUserId: igPageId,
       },
     }).catch((notificationError) => {
       console.error('Realtime Instagram connect notification error:', notificationError);
