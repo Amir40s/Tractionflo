@@ -208,7 +208,7 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createSupabaseServiceClient();
-    const account = await getFreshInstagramAccount(supabase);
+    const account = await getFreshInstagramAccount(supabase, user.id);
     const accessToken = account?.access_token;
 
     if (!accessToken) {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
+import { detectConversationEscalation } from '@/lib/conversation-escalation';
 import {
   defaultAiLeadInsight,
   getEnabledWorkflowMap,
@@ -217,6 +218,61 @@ export async function POST(request: Request) {
     const metadata = user.user_metadata || {};
     const integration = normalizeAiIntegrationMetadata(metadata);
     const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
+    const escalation = detectConversationEscalation(payload.messages);
+
+    if (escalation) {
+      const workflowResult = {
+        starter: '',
+        reply: escalation.reply,
+        cta: '',
+        lead: enabledWorkflows.qualifyLeads
+          ? {
+              ...defaultAiLeadInsight,
+              score: 12,
+              stage: 'Needs human',
+              urgency: escalation.urgency,
+              intent: escalation.intent.replaceAll('_', ' '),
+              summary: escalation.summary,
+              signals: escalation.signals,
+              missing: [],
+              recommendedAction: escalation.recommendedAction,
+              cta: 'Take over human',
+            }
+          : {
+              ...defaultAiLeadInsight,
+              stage: 'Needs human',
+              urgency: escalation.urgency,
+              summary: escalation.summary,
+              recommendedAction: escalation.recommendedAction,
+            },
+        enabledWorkflows,
+      } satisfies AiWorkflowRunResult;
+
+      await triggerRealtimeNotification(getUserChannel(user.id), {
+        type: 'agent',
+        title: 'Human handoff needed',
+        body: escalation.summary,
+        url: '/conversations',
+        metadata: {
+          assistantId,
+          category: escalation.intent,
+          urgency: escalation.urgency,
+        },
+      }).catch((notificationError) => {
+        logger.error('Realtime handoff notification error:', { error: notificationError });
+      });
+
+      return NextResponse.json({
+        assistantId,
+        assistant_id: assistantId,
+        autoSend: false,
+        handoff: true,
+        escalation,
+        ...workflowResult,
+        knowledge: summarizeKnowledgeForResponse({ mode: 'none', matches: [] }, assistantId),
+      });
+    }
+
     const newInboundLead = isNewInboundLead(payload.messages);
     const latestUserQuestion = getLatestUserQuestion(payload.messages);
     const useConversationAwareReply = shouldUseConversationAwareReply(payload.messages);
@@ -281,6 +337,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         assistantId,
         assistant_id: assistantId,
+        autoSend: integration.autoSend,
         ...workflowResult,
         knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
       });
@@ -329,6 +386,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         assistantId,
         assistant_id: assistantId,
+        autoSend: integration.autoSend,
         ...workflowResult,
         knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
       });
@@ -454,6 +512,7 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
     return NextResponse.json({
       assistantId,
       assistant_id: assistantId,
+      autoSend: integration.autoSend,
       ...workflowResult,
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
     });

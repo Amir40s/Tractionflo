@@ -6,8 +6,9 @@ import {
   getStoredOpenAiKey,
   normalizeAiIntegrationMetadata,
 } from '@/lib/ai-integration';
+import { detectConversationEscalation } from '@/lib/conversation-escalation';
 import { buildBookingFollowUpReply, buildBookingMemoryPrompt, shouldUseConversationAwareReply } from '@/lib/conversation-context';
-import { getFreshInstagramAccount } from '@/lib/instagram-token';
+import { getFreshInstagramAccountByIgUserId } from '@/lib/instagram-token';
 import {
   instagramWelcomeAutomationMetadataKey,
   normalizeInstagramWelcomeAutomation,
@@ -16,7 +17,7 @@ import {
 import { searchKnowledgeSources } from '@/lib/knowledge-base';
 import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
 import { recordOpenAiUsage } from '@/lib/openai-usage';
-import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
+import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,7 @@ type InstagramWebhookMessageEvent = {
 type AutomationMessageEvent = {
   mid: string;
   senderId: string;
+  recipientId: string;
   text: string;
   timestamp?: number;
   previousSenderMessageCount: number;
@@ -87,33 +89,6 @@ async function getSenderMessageCount(supabase: SupabaseServiceClient, senderId: 
   }
 
   return count || 0;
-}
-
-async function findAutomationUser(supabase: SupabaseServiceClient) {
-  const { data, error } = await supabase.auth.admin.listUsers({
-    page: 1,
-    perPage: 100,
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  const candidates = (data.users || [])
-    .map((user) => {
-      const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-      const integration = normalizeAiIntegrationMetadata(metadata);
-      const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
-
-      return {
-        user,
-        integration,
-        welcome,
-      };
-    })
-    .filter((candidate) => candidate.integration.autoSend);
-
-  return candidates.find((candidate) => candidate.welcome.enabled) || candidates[0] || null;
 }
 
 async function fetchParticipantProfile(accessToken: string, participantId: string) {
@@ -195,6 +170,28 @@ async function generateWebhookAiReply({
   }
 
   const messages = [{ from: 'user' as const, text: latestText, time: new Date().toISOString() }];
+  const escalation = detectConversationEscalation(messages);
+
+  if (escalation) {
+    await triggerRealtimeNotification([getUserChannel(user.id), getGlobalChannel(), getSuperAdminChannel()], {
+      type: 'agent',
+      title: 'Human handoff needed',
+      body: escalation.summary,
+      url: '/conversations',
+      metadata: {
+        source: 'instagram-webhook-automation',
+        userId: user.id,
+        senderId: participant.id || '',
+        category: escalation.intent,
+        urgency: escalation.urgency,
+      },
+    }).catch((notificationError) => {
+      console.error('Realtime webhook handoff notification error:', notificationError);
+    });
+
+    return '';
+  }
+
   const bookingFollowUpReply = buildBookingFollowUpReply(messages);
   const bookingMemoryPrompt = buildBookingMemoryPrompt(messages);
   const useConversationAwareReply = shouldUseConversationAwareReply(messages);
@@ -279,31 +276,50 @@ async function processInstagramAutomations(
     return;
   }
 
-  const automationUser = await findAutomationUser(supabase);
-
-  if (!automationUser) {
-    return;
-  }
-
-  const account = await getFreshInstagramAccount(supabase);
-
-  if (!account?.access_token) {
-    return;
-  }
-
   for (const event of events) {
     try {
+      if (!event.recipientId) {
+        continue;
+      }
+
+      const account = await getFreshInstagramAccountByIgUserId(supabase, event.recipientId);
+
+      if (!account?.access_token || !account.user_id) {
+        continue;
+      }
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.admin.getUserById(account.user_id);
+
+      if (userError || !user) {
+        if (userError) {
+          console.error('Instagram webhook owner lookup error:', userError);
+        }
+
+        continue;
+      }
+
+      const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+      const integration = normalizeAiIntegrationMetadata(metadata);
+
+      if (!integration.autoSend) {
+        continue;
+      }
+
+      const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
       const participant = await fetchParticipantProfile(account.access_token, event.senderId);
       const isFirstInboundDm = event.previousSenderMessageCount === 0;
-      const reply = isFirstInboundDm && automationUser.welcome.enabled
+      const reply = isFirstInboundDm && welcome.enabled
         ? renderInstagramWelcomeMessage({
-            template: automationUser.welcome.message,
+            template: welcome.message,
             username: participant.username,
             name: participant.name,
           })
         : await generateWebhookAiReply({
             supabase,
-            user: automationUser.user,
+            user,
             latestText: event.text,
             participant,
           });
@@ -314,13 +330,15 @@ async function processInstagramAutomations(
 
       const sent = await sendInstagramTextMessage(account.access_token, event.senderId, reply.trim());
 
-      await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+      await triggerRealtimeNotification([getUserChannel(user.id), getGlobalChannel(), getSuperAdminChannel()], {
         type: 'ai',
         title: isFirstInboundDm ? 'Welcome DM sent' : 'Instagram AI reply sent',
         body: reply.slice(0, 120),
         url: '/conversations',
         metadata: {
           source: 'instagram-webhook-automation',
+          userId: user.id,
+          igUserId: event.recipientId,
           senderId: event.senderId,
           messageId: sent.message_id || '',
           welcome: isFirstInboundDm,
@@ -383,8 +401,9 @@ export async function POST(request: Request) {
           const text = msg.message?.text?.trim();
           const mid = msg.message?.mid || '';
           const senderId = msg.sender?.id || '';
+          const recipientId = msg.recipient?.id || entry.id || '';
 
-          if (msg.message?.is_echo || !text || !senderId) {
+          if (msg.message?.is_echo || !text || !senderId || !recipientId) {
             continue;
           }
 
@@ -402,6 +421,7 @@ export async function POST(request: Request) {
             automationEvents.push({
               mid,
               senderId,
+              recipientId,
               text,
               timestamp: msg.timestamp,
               previousSenderMessageCount,

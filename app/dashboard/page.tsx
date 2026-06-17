@@ -66,6 +66,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import Inbox from "../components/Inbox";
 import InstagramContentPage from "../components/InstagramContentPage";
+import NotificationBell from "../components/NotificationBell";
 import { signout } from "../login/actions";
 import {
   defaultAiBehaviorSettings,
@@ -425,6 +426,7 @@ type NavItem = {
 };
 
 type Opportunity = {
+  id?: string;
   title: string;
   eyebrow: string;
   body: string[];
@@ -443,6 +445,7 @@ type PipelineStep = {
 };
 
 type OpportunityPageCard = {
+  id: string;
   name: string;
   subtitle: string;
   detail: string;
@@ -842,6 +845,7 @@ function getManualKnowledgeDraftSections(draft: ManualKnowledgeDraft): ManualKno
 }
 
 type EscalationTab = {
+  id: string;
   label: string;
   count: string;
   tone: string;
@@ -849,15 +853,20 @@ type EscalationTab = {
 };
 
 type EscalationItem = {
+  id: string;
   name: string;
   handle: string;
+  profileUrl: string;
   avatar: string;
   channel: "instagram";
   time: string;
+  category: string;
+  riskLevel: "High" | "Medium" | "Low";
   badge: string;
   badgeTone: string;
   title: string;
   detail: string;
+  recommendedAction: string;
   meta: string[];
   metaTone: string;
   borderTone: string;
@@ -2885,15 +2894,11 @@ function SuperAdminOverviewPage({
                 ))}
               </select>
             </label>
-            <button
-              type="button"
-              onClick={() => onNavigate("support-issues")}
-              className="relative flex h-11 w-11 items-center justify-center rounded-[10px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.035)] sm:h-[52px] sm:w-[52px]"
-              aria-label="Superadmin notifications"
-            >
-              <Bell size={20} strokeWidth={2.3} />
-              {summary.notificationCount > 0 ? <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full bg-[#4b3cff]" /> : null}
-            </button>
+            <NotificationBell
+              ariaLabel="Superadmin notifications"
+              iconSize={20}
+              buttonClassName="relative flex h-11 w-11 items-center justify-center rounded-[10px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.035)] transition hover:bg-[#f6f7fb] sm:h-[52px] sm:w-[52px]"
+            />
           </div>
         </header>
 
@@ -5721,6 +5726,13 @@ function RevenueChart() {
 function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
   const Icon = opportunity.icon;
   const tone = toneClasses[opportunity.tone];
+  const openConversation = () => {
+    if (!opportunity.id) {
+      return;
+    }
+
+    window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.id)}`;
+  };
 
   return (
     <article className="flex min-h-[194px] flex-col rounded-[10px] border border-[#e6e9f1] bg-white p-4 shadow-[0_18px_40px_rgba(20,28,53,0.025)]">
@@ -5752,6 +5764,7 @@ function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
         )}
         <button
           type="button"
+          onClick={openConversation}
           className="mt-3 flex h-9 w-full items-center justify-between rounded-[7px] border border-[#dde2ed] bg-white px-3 text-[12px] font-extrabold text-black shadow-[0_12px_28px_rgba(20,28,53,0.03)]"
         >
           {opportunity.action}
@@ -5855,17 +5868,25 @@ function OpportunityPageCardView({ opportunity }: { opportunity: OpportunityPage
             ) : null}
           </div>
 
-          <OpportunityReviewButton tone={tone.action}>{opportunity.action}</OpportunityReviewButton>
+          <OpportunityReviewButton
+            tone={tone.action}
+            onClick={() => {
+              window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.id)}`;
+            }}
+          >
+            {opportunity.action}
+          </OpportunityReviewButton>
         </div>
       </div>
     </article>
   );
 }
 
-function OpportunityReviewButton({ children, tone }: { children: string; tone: string }) {
+function OpportunityReviewButton({ children, tone, onClick }: { children: string; tone: string; onClick: () => void }) {
   return (
     <button
       type="button"
+      onClick={onClick}
       className={`flex h-9 w-[118px] items-center justify-between rounded-[8px] border border-[#dde2ed] bg-white px-4 text-[12px] font-extrabold shadow-[0_12px_28px_rgba(20,28,53,0.03)] ${tone}`}
     >
       {children}
@@ -5976,7 +5997,7 @@ function OpportunitiesPage({ summary, isLoading, error }: { summary: CreatorLive
             <Target className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
             <h2 className="mt-3 text-[15px] font-extrabold text-black">No qualified leads yet</h2>
             <p className="mx-auto mt-2 max-w-[440px] text-[12px] font-medium leading-relaxed text-[#596175]">
-              TractionFlo is reading real Instagram conversations. Pricing, buying, booking, partnership, or repeated engagement signals will appear here as leads.
+              TractionFlo is reading real Instagram conversations. Pricing, buying, booking, partnership, or ready-to-purchase signals will appear here as leads.
             </p>
           </section>
         )}
@@ -6000,18 +6021,27 @@ function InstagramDot() {
   );
 }
 
-function EscalationTabs({ tabs }: { tabs: EscalationTab[] }) {
+function EscalationTabs({
+  tabs,
+  activeTabId,
+  onTabChange,
+}: {
+  tabs: EscalationTab[];
+  activeTabId: string;
+  onTabChange: (tabId: string) => void;
+}) {
   return (
     <div className="-mx-4 mt-8 overflow-x-auto px-4 no-scrollbar sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
       <div className="grid w-max grid-flow-col auto-cols-max lg:grid-cols-[88px_142px_162px_178px_180px_160px]">
-        {tabs.map((tab, index) => {
+        {tabs.map((tab) => {
           const Icon = tab.icon;
-          const isActive = index === 0;
+          const isActive = tab.id === activeTabId;
 
           return (
             <button
               key={tab.label}
               type="button"
+              onClick={() => onTabChange(tab.id)}
               className={`relative flex h-11 items-center justify-center gap-2 border-r border-[#e2e6f0] px-3 text-[12px] font-extrabold last:border-r-0 ${
                 isActive ? "text-[#3044ff]" : "text-black"
               }`}
@@ -6032,7 +6062,13 @@ function EscalationTabs({ tabs }: { tabs: EscalationTab[] }) {
   );
 }
 
-function EscalationCard({ escalation }: { escalation: EscalationItem }) {
+function EscalationCard({
+  escalation,
+  onViewDetails,
+}: {
+  escalation: EscalationItem;
+  onViewDetails: () => void;
+}) {
   const Icon = escalation.icon;
 
   return (
@@ -6075,6 +6111,7 @@ function EscalationCard({ escalation }: { escalation: EscalationItem }) {
             </div>
             <button
               type="button"
+              onClick={onViewDetails}
               className="flex h-10 w-full items-center justify-center gap-4 rounded-[8px] border border-[#dde3ee] bg-white text-[12px] font-extrabold text-black shadow-[0_12px_28px_rgba(20,28,53,0.035)] sm:w-[128px]"
             >
               View details
@@ -6087,14 +6124,22 @@ function EscalationCard({ escalation }: { escalation: EscalationItem }) {
   );
 }
 
-function EscalationDetailPanel({ escalation, rows }: { escalation?: EscalationItem; rows: EscalationDetailRow[] }) {
+function EscalationDetailPanel({
+  escalation,
+  rows,
+  onClose,
+}: {
+  escalation?: EscalationItem;
+  rows: EscalationDetailRow[];
+  onClose: () => void;
+}) {
   if (!escalation) {
     return (
       <aside className="rounded-[13px] border border-dashed border-[#d7deeb] bg-white p-5 text-center shadow-[0_22px_60px_rgba(20,28,53,0.025)] xl:sticky xl:top-6">
         <TriangleAlert className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
         <h2 className="mt-3 text-[15px] font-extrabold text-black">No escalation selected</h2>
         <p className="mx-auto mt-2 max-w-[260px] text-[12px] font-medium leading-relaxed text-[#596175]">
-          Real refund, issue, support, or human handoff keywords will show details here.
+          Refunds, complaints, damaged orders, brand deals, VIP leads, custom requests, and human handoffs will show details here.
         </p>
       </aside>
     );
@@ -6104,7 +6149,7 @@ function EscalationDetailPanel({ escalation, rows }: { escalation?: EscalationIt
     <aside className="rounded-[13px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)] xl:sticky xl:top-6">
       <div className="flex items-center justify-between">
         <h2 className="text-[15px] font-extrabold text-black">Escalation Details</h2>
-        <button type="button" aria-label="Close details" className="text-black">
+        <button type="button" aria-label="Close details" onClick={onClose} className="text-black">
           <X size={18} strokeWidth={2.3} />
         </button>
       </div>
@@ -6122,6 +6167,12 @@ function EscalationDetailPanel({ escalation, rows }: { escalation?: EscalationIt
         </div>
         <button
           type="button"
+          onClick={() => {
+            if (escalation.profileUrl) {
+              window.open(escalation.profileUrl, "_blank", "noopener,noreferrer");
+            }
+          }}
+          disabled={!escalation.profileUrl}
           className="col-span-2 flex h-9 w-full items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black sm:col-span-1 sm:w-[118px]"
         >
           View profile
@@ -6156,7 +6207,7 @@ function EscalationDetailPanel({ escalation, rows }: { escalation?: EscalationIt
       <div className="mt-6">
         <h3 className="text-[13px] font-extrabold text-black">AI Recommended Response</h3>
         <div className="mt-3 rounded-[8px] bg-[#f0efff] p-4 text-[12px] font-medium leading-[1.7] text-[#253049]">
-          Thanks for reaching out. I&apos;m going to take a closer look at this conversation and help you directly.
+          {escalation.recommendedAction}
         </div>
         <p className="mt-3 flex items-center gap-2 text-[11px] font-medium text-[#46506a]">
           <Sparkles size={13} className="text-[#6d3cff]" strokeWidth={2.2} />
@@ -6166,23 +6217,64 @@ function EscalationDetailPanel({ escalation, rows }: { escalation?: EscalationIt
 
       <button
         type="button"
+        onClick={() => {
+          window.location.href = `/conversations?conversation=${encodeURIComponent(escalation.id)}`;
+        }}
         className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.24)]"
       >
         <Send size={15} strokeWidth={2.25} />
-        Take over conversation
+        Take over in Inbox
       </button>
       <button
         type="button"
+        onClick={() => {
+          window.location.href = `/conversations?conversation=${encodeURIComponent(escalation.id)}`;
+        }}
         className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white text-[12px] font-extrabold text-black"
       >
         <PencilLine size={15} strokeWidth={2.25} />
-        Add internal note
+        Add note in Inbox
       </button>
     </aside>
   );
 }
 
+function escalationMatchesTab(escalation: EscalationItem, tabId: string) {
+  if (tabId === "all") return true;
+  if (tabId === "refunds") return escalation.category === "refund";
+  if (tabId === "complaints") return ["complaint", "product_issue", "issue"].includes(escalation.category);
+  if (tabId === "human") return ["human", "complex"].includes(escalation.category);
+  if (tabId === "brand_deals") return escalation.category === "brand_deal";
+  if (tabId === "vip_leads") return ["vip_lead", "custom_bulk"].includes(escalation.category);
+  return true;
+}
+
+function buildEscalationDetailRows(escalation?: EscalationItem): EscalationDetailRow[] {
+  if (!escalation) {
+    return [];
+  }
+
+  return [
+    { label: "Escalation type", value: escalation.badge, icon: TriangleAlert, valueTone: escalation.badgeTone },
+    { label: "Conversation", value: escalation.handle, icon: MessageSquare },
+    { label: "Escalated", value: escalation.time, icon: Clock },
+    {
+      label: "Risk level",
+      value: escalation.riskLevel,
+      icon: TriangleAlert,
+      valueTone: escalation.riskLevel === "High" ? "bg-[#fff0f3] text-[#df405b]" : "bg-[#fff3e6] text-[#ff850d]",
+    },
+    { label: "Required action", value: "Creator takeover", icon: Users, valueTone: "bg-[#f0edff] text-[#6d3cff]" },
+  ];
+}
+
 function EscalationsPage({ summary, isLoading, error }: { summary: CreatorLiveSummary; isLoading: boolean; error: string }) {
+  const [activeEscalationTabId, setActiveEscalationTabId] = useState("all");
+  const [selectedEscalationId, setSelectedEscalationId] = useState("");
+  const filteredEscalations = summary.escalations.filter((escalation) => escalationMatchesTab(escalation, activeEscalationTabId));
+  const selectedEscalation = filteredEscalations.find((escalation) => escalation.id === selectedEscalationId);
+  const selectedEscalationRows = buildEscalationDetailRows(selectedEscalation);
+
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
       <div className="mx-auto max-w-[1286px]">
@@ -6194,35 +6286,28 @@ function EscalationsPage({ summary, isLoading, error }: { summary: CreatorLiveSu
           <div>
             <h1 className="text-[30px] font-extrabold leading-none text-black sm:text-[32px]">Escalations</h1>
             <p className="mt-3 text-[12px] font-medium leading-[1.4] text-[#46506a]">
-              Human attention needed. Respond or take over.
+              AI flags conversations that need creator attention, manual confirmation, or human takeover.
             </p>
           </div>
 
-          <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 sm:flex sm:w-auto sm:gap-5">
+          <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:flex sm:w-auto sm:gap-5">
             <div className="flex h-10 min-w-0 items-center gap-3 rounded-[9px] border border-[#e0e4ef] bg-white px-3 text-[#596175] shadow-[0_12px_36px_rgba(20,28,53,0.025)] sm:w-[228px]">
               <Search size={16} strokeWidth={2.2} />
               <span className="min-w-0 flex-1 truncate text-[12px] font-medium">Search escalations...</span>
               <span className="hidden rounded bg-[#eff1f6] px-1.5 py-0.5 text-[11px] font-extrabold text-[#8b92a6] sm:inline">⌘K</span>
             </div>
-            <button
-              type="button"
-              className="flex h-10 w-[78px] items-center justify-center gap-2 rounded-[9px] border border-[#e0e4ef] bg-white text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] sm:w-[94px]"
-            >
-              <SlidersHorizontal size={15} strokeWidth={2.4} />
-              Filter
-            </button>
-            <button
-              type="button"
-              className="relative flex h-10 w-10 items-center justify-center rounded-[9px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.025)]"
-              aria-label="Notifications"
-            >
-              <Bell size={18} strokeWidth={2.25} />
-              <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[#3044ff]" />
-            </button>
+            <NotificationBell />
           </div>
         </header>
 
-        <EscalationTabs tabs={summary.escalationTabs} />
+        <EscalationTabs
+          tabs={summary.escalationTabs}
+          activeTabId={activeEscalationTabId}
+          onTabChange={(tabId) => {
+            setActiveEscalationTabId(tabId);
+            setSelectedEscalationId("");
+          }}
+        />
 
         {(isLoading || error) && (
           <div className="mt-4 rounded-[10px] border border-[#edf0f6] bg-white px-4 py-3 text-[12px] font-semibold text-[#46506a] shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
@@ -6232,25 +6317,33 @@ function EscalationsPage({ summary, isLoading, error }: { summary: CreatorLiveSu
 
         <div className="mt-6 grid gap-7 xl:grid-cols-[minmax(0,1fr)_380px]">
           <section className="space-y-5">
-            {summary.escalations.length > 0 ? (
-              summary.escalations.map((escalation) => (
-                <EscalationCard key={`${escalation.handle}-${escalation.badge}-${escalation.time}`} escalation={escalation} />
+            {filteredEscalations.length > 0 ? (
+              filteredEscalations.map((escalation) => (
+                <EscalationCard
+                  key={`${escalation.id}-${escalation.badge}-${escalation.time}`}
+                  escalation={escalation}
+                  onViewDetails={() => setSelectedEscalationId(escalation.id)}
+                />
               ))
             ) : (
               <section className="rounded-[13px] border border-dashed border-[#d7deeb] bg-white p-8 text-center shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
                 <TriangleAlert className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
                 <h2 className="mt-3 text-[15px] font-extrabold text-black">No escalation signals yet</h2>
                 <p className="mx-auto mt-2 max-w-[430px] text-[12px] font-medium leading-relaxed text-[#596175]">
-                  Refunds, complaints, support issues, or human handoff requests from real Instagram messages will appear here.
+                  Refunds, complaints, damaged orders, wrong sizes, brand deals, VIP buying intent, custom orders, and human handoff requests from real Instagram messages will appear here.
                 </p>
               </section>
             )}
             <p className="pt-2 text-center text-[13px] font-medium text-[#46506a]">
-              Showing {summary.escalations.length > 0 ? `1 to ${summary.escalations.length}` : "0"} of {formatCreatorInteger(summary.escalationCount)} escalations
+              Showing {filteredEscalations.length > 0 ? `1 to ${filteredEscalations.length}` : "0"} of {formatCreatorInteger(summary.escalationCount)} escalations
             </p>
           </section>
 
-          <EscalationDetailPanel escalation={summary.escalations[0]} rows={summary.escalationDetailRows} />
+          <EscalationDetailPanel
+            escalation={selectedEscalation}
+            rows={selectedEscalationRows}
+            onClose={() => setSelectedEscalationId("")}
+          />
         </div>
       </div>
     </main>
@@ -10389,18 +10482,7 @@ function SettingsPage({
               <CircleHelp size={15} strokeWidth={2.35} />
               Help
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveSection("notifications");
-                setQuickPanel(null);
-              }}
-              className="relative flex h-10 w-10 items-center justify-center rounded-[9px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.025)]"
-              aria-label="Notifications"
-            >
-              <Bell size={18} strokeWidth={2.25} />
-              <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[#3044ff]" />
-            </button>
+            <NotificationBell />
           </div>
         </header>
 
@@ -12117,14 +12199,7 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
               {isUploadingKnowledge || isSavingManualKnowledge ? <RefreshCw size={16} className="animate-spin" strokeWidth={2.4} /> : <Plus size={16} strokeWidth={2.4} />}
               <span className="hidden sm:inline">{isUploadingKnowledge || isSavingManualKnowledge ? "Adding" : "Add source"}</span>
             </button>
-            <button
-              type="button"
-              className="relative flex h-10 w-10 items-center justify-center rounded-[9px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.025)]"
-              aria-label="Notifications"
-            >
-              <Bell size={18} strokeWidth={2.25} />
-              <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[#3044ff]" />
-            </button>
+            <NotificationBell />
           </div>
         </header>
 
@@ -12521,16 +12596,9 @@ function AudiencePage({ summary, isLoading, error }: { summary: CreatorLiveSumma
               <SlidersHorizontal size={15} strokeWidth={2.4} />
               Filter
             </button>
-            <button
-              type="button"
-              className="relative flex h-11 w-11 items-center justify-center rounded-[9px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.025)] sm:h-12 sm:w-12"
-              aria-label="Notifications"
-            >
-              <Bell size={18} strokeWidth={2.25} />
-              <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#3044ff] px-1 text-[10px] font-extrabold text-white">
-                {formatCreatorInteger(summary.escalationCount)}
-              </span>
-            </button>
+            <NotificationBell
+              buttonClassName="relative flex h-11 w-11 items-center justify-center rounded-[9px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.025)] transition hover:bg-[#f6f7fb] sm:h-12 sm:w-12"
+            />
           </div>
         </header>
 
@@ -12561,7 +12629,23 @@ function AudiencePage({ summary, isLoading, error }: { summary: CreatorLiveSumma
 const creatorBuyerKeywords = ["price", "pricing", "cost", "package", "payment", "pay", "buy", "purchase", "order", "book", "call", "interested", "program", "course", "coaching", "subscription"];
 const creatorPartnershipKeywords = ["partner", "partnership", "collab", "collaboration", "sponsor", "sponsored", "brand", "affiliate"];
 const creatorCommunityKeywords = ["community", "share", "recommend", "refer", "follower", "audience"];
-const creatorEscalationKeywords = ["refund", "cancel", "complaint", "issue", "problem", "support", "angry", "human", "agent", "not working", "failed", "chargeback"];
+const creatorRefundEscalationKeywords = ["refund", "return", "chargeback", "cancel", "cancellation", "money back", "give my money", "reverse payment"];
+const creatorComplaintEscalationKeywords = ["complaint", "angry", "upset", "disappointed", "bad service", "terrible", "poor quality", "not happy", "rude", "unacceptable"];
+const creatorProductIssueEscalationKeywords = ["damaged", "damage", "broken", "defect", "defective", "faulty", "wrong size", "wrong product", "wrong item", "wrong order", "missing", "too small", "too big", "doesn't fit", "doesnt fit", "not fit", "not fitting"];
+const creatorHumanEscalationKeywords = ["human", "agent", "support", "representative", "manager", "team member", "real person", "talk to someone", "speak to someone"];
+const creatorCustomBulkEscalationKeywords = ["custom", "customize", "customise", "personalized", "personalised", "bulk", "wholesale", "large order", "bridal event", "company order", "group order"];
+const creatorComplexEscalationKeywords = ["complex", "not in your knowledge", "not listed", "not sure", "medical", "injury", "injured", "pain", "orthopedic", "orthopaedic", "allergy", "sensitive issue"];
+const creatorVipLeadEscalationKeywords = ["ready to buy", "want to buy", "want to order", "place order", "confirm order", "send payment", "payment link", "checkout", "buy now", "book now", "reserve it", "reserve this"];
+const creatorEscalationKeywords = [
+  ...creatorRefundEscalationKeywords,
+  ...creatorComplaintEscalationKeywords,
+  ...creatorProductIssueEscalationKeywords,
+  ...creatorHumanEscalationKeywords,
+  ...creatorCustomBulkEscalationKeywords,
+  ...creatorComplexEscalationKeywords,
+  ...creatorVipLeadEscalationKeywords,
+  ...creatorPartnershipKeywords,
+];
 const creatorGoalKeywords = ["need", "want", "looking", "suggest", "recommend", "help", "fit", "size", "wide", "comfortable", "wedding", "birthday", "event", "service", "coaching", "course", "outfit"];
 const creatorBudgetKeywords = ["budget", "price", "pricing", "cost", "rate", "package", "payment", "pay", "expensive", "cheap", "$", "rs", "pkr"];
 const creatorTimelineKeywords = ["today", "tomorrow", "tonight", "urgent", "asap", "soon", "this week", "weekend", "date", "when", "event", "wedding", "birthday", "book", "appointment", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -12614,6 +12698,18 @@ function countCreatorKeywordHits(text: string, keywords: string[]) {
 
 function hasCreatorKeyword(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword));
+}
+
+function hasCreatorQuantityEscalationSignal(text: string) {
+  return /\b(?:[2-9]\d|1\d{2,})\s?(pairs?|pieces?|pcs|shoes?|orders?|items?)\b/i.test(text);
+}
+
+function hasCreatorVipLeadEscalationSignal(text: string, buyerHits: number, inboundCount: number) {
+  return (
+    hasCreatorKeyword(text, creatorVipLeadEscalationKeywords) ||
+    hasCreatorQuantityEscalationSignal(text) ||
+    (buyerHits >= 2 && inboundCount >= 2 && hasCreatorKeyword(text, ["confirm", "available", "availability", "today", "tomorrow", "urgent", "payment", "checkout"]))
+  );
 }
 
 function hasCreatorTimelineSignal(text: string) {
@@ -12777,9 +12873,9 @@ function classifyCreatorOpportunity(conversation: InstagramSettingsConversation)
   const buyerHits = countCreatorKeywordHits(text, creatorBuyerKeywords);
   const partnershipHits = countCreatorKeywordHits(text, creatorPartnershipKeywords);
   const communityHits = countCreatorKeywordHits(text, creatorCommunityKeywords);
-  const escalationHits = countCreatorKeywordHits(text, creatorEscalationKeywords);
+  const escalation = classifyCreatorEscalation(conversation);
 
-  if (escalationHits > 0 && buyerHits + partnershipHits + communityHits === 0) {
+  if (escalation && escalation.category !== "vip_lead" && escalation.category !== "brand_deal") {
     return null;
   }
 
@@ -12831,64 +12927,154 @@ function classifyCreatorOpportunity(conversation: InstagramSettingsConversation)
     };
   }
 
-  if (inboundCount >= 3) {
-    const badge = "ENGAGED";
-    const subtitle = "Engaged conversation";
-    const score = clampCreatorScore(54 + inboundCount * 5);
-
-    return {
-      badge,
-      subtitle,
-      tone: "blue" as const,
-      icon: Sparkles,
-      value: 750 + inboundCount * 100,
-      score,
-      ...getCreatorLeadQualification({ text, badge, subtitle, score, buyerHits, partnershipHits, communityHits, inboundCount }),
-    };
-  }
-
   return null;
 }
 
 function classifyCreatorEscalation(conversation: InstagramSettingsConversation) {
   const text = getCreatorConversationText(conversation);
+  const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
+  const buyerHits = countCreatorKeywordHits(text, creatorBuyerKeywords);
+  const partnershipHits = countCreatorKeywordHits(text, creatorPartnershipKeywords);
 
-  if (!hasCreatorKeyword(text, creatorEscalationKeywords)) {
+  if (
+    !hasCreatorKeyword(text, creatorEscalationKeywords) &&
+    !hasCreatorQuantityEscalationSignal(text) &&
+    !hasCreatorVipLeadEscalationSignal(text, buyerHits, inboundCount)
+  ) {
     return null;
   }
 
-  if (hasCreatorKeyword(text, ["refund", "chargeback", "cancel"])) {
+  if (hasCreatorKeyword(text, creatorRefundEscalationKeywords)) {
     return {
+      category: "refund",
       badge: "Refund Request",
       badgeTone: "bg-[#fff0f3] text-[#df405b]",
       borderTone: "border-[#ffc7d0]",
       glowTone: "bg-[#fffafa]",
       dotTone: "bg-[#df405b]",
       icon: TriangleAlert,
-      risk: "High",
+      risk: "High" as const,
+      riskLevel: "High" as const,
+      recommendedAction: "Pause AI, review the order/payment details, and let the creator handle the refund or cancellation decision directly.",
     };
   }
 
-  if (hasCreatorKeyword(text, ["human", "agent", "support"])) {
+  if (hasCreatorKeyword(text, creatorProductIssueEscalationKeywords)) {
     return {
+      category: "product_issue",
+      badge: "Product Issue",
+      badgeTone: "bg-[#fff0f3] text-[#df405b]",
+      borderTone: "border-[#ffc7d0]",
+      glowTone: "bg-[#fffafa]",
+      dotTone: "bg-[#df405b]",
+      icon: Box,
+      risk: "High" as const,
+      riskLevel: "High" as const,
+      recommendedAction: "Take over and ask for order number, clear photos, product code, delivery date, and whether the issue is damage, wrong item, or wrong size.",
+    };
+  }
+
+  if (hasCreatorKeyword(text, creatorComplaintEscalationKeywords)) {
+    return {
+      category: "complaint",
+      badge: "Complaint",
+      badgeTone: "bg-[#fff3e6] text-[#ff850d]",
+      borderTone: "border-[#ffe0ba]",
+      glowTone: "bg-[#fffdf9]",
+      dotTone: "bg-[#ff850d]",
+      icon: TriangleAlert,
+      risk: "High" as const,
+      riskLevel: "High" as const,
+      recommendedAction: "Take over with an apology, acknowledge the complaint, collect the order/context, and resolve it manually.",
+    };
+  }
+
+  if (hasCreatorKeyword(text, creatorHumanEscalationKeywords)) {
+    return {
+      category: "human",
       badge: "Human Requested",
       badgeTone: "bg-[#f0edff] text-[#6d3cff]",
       borderTone: "border-[#d7ccff]",
       glowTone: "bg-[#fcfbff]",
       dotTone: "bg-[#6d3cff]",
       icon: Users,
-      risk: "Medium",
+      risk: "Medium" as const,
+      riskLevel: "Medium" as const,
+      recommendedAction: "Let the creator take over because the customer explicitly asked for human help.",
+    };
+  }
+
+  if (partnershipHits > 0) {
+    return {
+      category: "brand_deal",
+      badge: "Brand Deal",
+      badgeTone: "bg-[#eafaf0] text-[#0a9b3f]",
+      borderTone: "border-[#bdeacb]",
+      glowTone: "bg-[#fbfffc]",
+      dotTone: "bg-[#13a84f]",
+      icon: BriefcaseBusiness,
+      risk: "Medium" as const,
+      riskLevel: "Medium" as const,
+      recommendedAction: "Take over and ask for campaign scope, brand details, budget, deliverables, timeline, and contact information.",
+    };
+  }
+
+  if (hasCreatorKeyword(text, creatorCustomBulkEscalationKeywords) || hasCreatorQuantityEscalationSignal(text)) {
+    return {
+      category: "custom_bulk",
+      badge: "Custom/Bulk Order",
+      badgeTone: "bg-[#eef4ff] text-[#3044ff]",
+      borderTone: "border-[#cad6ff]",
+      glowTone: "bg-[#fbfcff]",
+      dotTone: "bg-[#3044ff]",
+      icon: Crown,
+      risk: "High" as const,
+      riskLevel: "High" as const,
+      recommendedAction: "Take over to confirm quantity, customization details, deadline, stock, pricing, advance payment, and delivery feasibility.",
+    };
+  }
+
+  if (hasCreatorKeyword(text, creatorComplexEscalationKeywords)) {
+    return {
+      category: "complex",
+      badge: "Complex Question",
+      badgeTone: "bg-[#fff3e6] text-[#ff850d]",
+      borderTone: "border-[#ffe0ba]",
+      glowTone: "bg-[#fffdf9]",
+      dotTone: "bg-[#ff850d]",
+      icon: CircleHelp,
+      risk: "Medium" as const,
+      riskLevel: "Medium" as const,
+      recommendedAction: "Take over because the request is sensitive or not safely answerable from the saved knowledge base.",
+    };
+  }
+
+  if (hasCreatorVipLeadEscalationSignal(text, buyerHits, inboundCount)) {
+    return {
+      category: "vip_lead",
+      badge: "VIP Lead",
+      badgeTone: "bg-[#eef4ff] text-[#3044ff]",
+      borderTone: "border-[#cad6ff]",
+      glowTone: "bg-[#fbfcff]",
+      dotTone: "bg-[#3044ff]",
+      icon: Star,
+      risk: "High" as const,
+      riskLevel: "High" as const,
+      recommendedAction: "Take over or review immediately. The customer appears ready to buy, book, or receive a payment/checkout link.",
     };
   }
 
   return {
-    badge: "Issue",
+    category: "issue",
+    badge: "Needs Human Review",
     badgeTone: "bg-[#fff3e6] text-[#ff850d]",
     borderTone: "border-[#ffe0ba]",
     glowTone: "bg-[#fffdf9]",
     dotTone: "bg-[#ff850d]",
     icon: CircleHelp,
-    risk: "Medium",
+    risk: "Medium" as const,
+    riskLevel: "Medium" as const,
+    recommendedAction: "Take over or review before AI continues. This conversation contains a human-attention signal.",
   };
 }
 
@@ -12913,7 +13099,7 @@ function buildCreatorLiveSummary(
   const estimatedRevenue = opportunityRecords.reduce((total, record) => total + record.opportunity.value, 0);
   const buyerCount = opportunityRecords.filter((record) => record.opportunity.badge === "HIGH INTENT").length;
   const partnershipCount = opportunityRecords.filter((record) => record.opportunity.badge === "PARTNERSHIP").length;
-  const superfanCount = opportunityRecords.filter((record) => record.opportunity.badge === "ENGAGED").length;
+  const warmLeadCount = opportunityRecords.filter((record) => record.opportunity.stage === "Warm").length;
   const communityCount = opportunityRecords.filter((record) => record.opportunity.badge === "COMMUNITY").length;
 
   const opportunityCards: OpportunityPageCard[] = opportunityRecords.map(({ conversation, opportunity }) => {
@@ -12921,6 +13107,7 @@ function buildCreatorLiveSummary(
     const score = opportunity.score;
 
     return {
+      id: conversation.id,
       name: getCreatorParticipantName(conversation),
       subtitle: opportunity.subtitle,
       detail: preview === "No messages" ? "Real conversation loaded from Instagram. No user message text is available yet." : truncateCreatorText(preview),
@@ -12947,6 +13134,7 @@ function buildCreatorLiveSummary(
   });
 
   const dashboardOpportunities: Opportunity[] = opportunityCards.slice(0, 4).map((card) => ({
+    id: card.id,
     title: card.subtitle,
     eyebrow: card.badge,
     body: [card.name, card.detail],
@@ -12958,19 +13146,23 @@ function buildCreatorLiveSummary(
 
   const escalations: EscalationItem[] = escalationRecords.map(({ conversation, escalation }) => {
     const preview = getCreatorConversationPreview(conversation);
-    const messageCount = conversation.messages.length;
 
     return {
+      id: conversation.id,
       name: getCreatorParticipantName(conversation),
       handle: getCreatorParticipantHandle(conversation),
+      profileUrl: getInstagramProfileUrl(conversation.participant.username),
       avatar: getCreatorAvatarUrl(conversation),
       channel: "instagram",
       time: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
+      category: escalation.category,
+      riskLevel: escalation.riskLevel,
       badge: escalation.badge,
       badgeTone: escalation.badgeTone,
       title: `${escalation.badge} detected`,
       detail: preview === "No messages" ? "Escalation keywords were detected in this Instagram conversation." : truncateCreatorText(preview, 150),
-      meta: [`Risk: ${escalation.risk}`, `${formatCreatorInteger(messageCount)} messages`],
+      recommendedAction: escalation.recommendedAction,
+      meta: [`Risk: ${escalation.riskLevel}`, "Needs creator takeover"],
       metaTone: `first:${escalation.badgeTone} bg-[#eff1f6] text-[#31394f]`,
       borderTone: escalation.borderTone,
       glowTone: escalation.glowTone,
@@ -13105,7 +13297,7 @@ function buildCreatorLiveSummary(
     },
     {
       label: "Needs Attention",
-      detail: "Refund, issue, support, or human handoff keywords",
+      detail: "Refunds, complaints, damaged orders, brand deals, VIP leads, custom requests, or human handoffs",
       count: formatCreatorInteger(escalationRecords.length),
       change: `${formatCreatorPercent(escalationRecords.length, Math.max(1, totalCount))}`,
       tone: "bg-[#fff0f3] text-[#df405b]",
@@ -13146,12 +13338,12 @@ function buildCreatorLiveSummary(
   ];
 
   const escalationTabs: EscalationTab[] = [
-    { label: "All", count: formatCreatorInteger(escalations.length), tone: "text-[#3044ff] bg-[#eef0ff]", icon: Sparkles },
-    { label: "Refunds", count: formatCreatorInteger(escalations.filter((item) => item.badge === "Refund Request").length), tone: "text-[#df405b] bg-[#fff0f3]", icon: Shield },
-    { label: "Complaints", count: formatCreatorInteger(escalations.filter((item) => item.badge === "Issue").length), tone: "text-[#ff850d] bg-[#fff3e6]", icon: Sparkles },
-    { label: "Human", count: formatCreatorInteger(escalations.filter((item) => item.badge === "Human Requested").length), tone: "text-[#7a35ff] bg-[#f0edff]", icon: Users },
-    { label: "Brand Deals", count: formatCreatorInteger(partnershipCount), tone: "text-[#0a9b3f] bg-[#eafaf0]", icon: BriefcaseBusiness },
-    { label: "VIP Leads", count: formatCreatorInteger(0), tone: "text-[#3044ff] bg-[#eef4ff]", icon: Star },
+    { id: "all", label: "All", count: formatCreatorInteger(escalations.length), tone: "text-[#3044ff] bg-[#eef0ff]", icon: Sparkles },
+    { id: "refunds", label: "Refunds", count: formatCreatorInteger(escalations.filter((item) => item.category === "refund").length), tone: "text-[#df405b] bg-[#fff0f3]", icon: Shield },
+    { id: "complaints", label: "Complaints", count: formatCreatorInteger(escalations.filter((item) => ["complaint", "product_issue", "issue"].includes(item.category)).length), tone: "text-[#ff850d] bg-[#fff3e6]", icon: Sparkles },
+    { id: "human", label: "Human", count: formatCreatorInteger(escalations.filter((item) => ["human", "complex"].includes(item.category)).length), tone: "text-[#7a35ff] bg-[#f0edff]", icon: Users },
+    { id: "brand_deals", label: "Brand Deals", count: formatCreatorInteger(escalations.filter((item) => item.category === "brand_deal").length), tone: "text-[#0a9b3f] bg-[#eafaf0]", icon: BriefcaseBusiness },
+    { id: "vip_leads", label: "VIP Leads", count: formatCreatorInteger(escalations.filter((item) => ["vip_lead", "custom_bulk"].includes(item.category)).length), tone: "text-[#3044ff] bg-[#eef4ff]", icon: Star },
   ];
 
   const firstEscalation = escalations[0];
@@ -13159,9 +13351,9 @@ function buildCreatorLiveSummary(
     ? [
         { label: "Escalation type", value: firstEscalation.badge, icon: TriangleAlert, valueTone: firstEscalation.badgeTone },
         { label: "Conversation", value: firstEscalation.handle, icon: MessageSquare },
-        { label: "Messages", value: firstEscalation.meta[1] || "0 messages", icon: MessageSquare },
         { label: "Escalated", value: firstEscalation.time, icon: Clock },
-        { label: "Risk level", value: firstEscalation.meta[0]?.replace("Risk: ", "") || "Medium", icon: TriangleAlert, valueTone: "bg-[#fff0f3] text-[#df405b]" },
+        { label: "Risk level", value: firstEscalation.riskLevel, icon: TriangleAlert, valueTone: firstEscalation.riskLevel === "High" ? "bg-[#fff0f3] text-[#df405b]" : "bg-[#fff3e6] text-[#ff850d]" },
+        { label: "Required action", value: "Creator takeover", icon: Users, valueTone: "bg-[#f0edff] text-[#6d3cff]" },
       ]
     : [];
 
@@ -13183,7 +13375,7 @@ function buildCreatorLiveSummary(
     opportunityTabs: [
       { label: "Qualified Leads", count: formatCreatorInteger(opportunityRecords.length), icon: Users },
       { label: "High Intent", count: formatCreatorInteger(buyerCount), icon: ShoppingCart },
-      { label: "Warm Leads", count: formatCreatorInteger(superfanCount), icon: Flame },
+      { label: "Warm Leads", count: formatCreatorInteger(warmLeadCount), icon: Flame },
       { label: "Partner Leads", count: formatCreatorInteger(partnershipCount), icon: Handshake },
       { label: "Community Leads", count: formatCreatorInteger(communityCount), icon: User },
     ],
@@ -13282,7 +13474,11 @@ function buildAnalyticsSummary(conversations: InstagramSettingsConversation[], t
   }).length;
   const escalationSignals = userMessages.filter((message) => {
     const text = getAnalyticsMessageText(message);
-    return ["refund", "issue", "problem", "support", "angry", "cancel", "human"].some((keyword) => text.includes(keyword));
+    return (
+      hasCreatorKeyword(text, creatorEscalationKeywords) ||
+      hasCreatorQuantityEscalationSignal(text) ||
+      hasCreatorVipLeadEscalationSignal(text, countCreatorKeywordHits(text, creatorBuyerKeywords), 1)
+    );
   }).length;
   const responseTimes: number[] = [];
 
@@ -13391,14 +13587,14 @@ function buildAnalyticsSummary(conversations: InstagramSettingsConversation[], t
     {
       label: "AI-ready conversations",
       value: formatAnalyticsInteger(Math.max(0, userMessages.length - escalationSignals)),
-      detail: "Inbound messages without handoff keywords",
+      detail: "Inbound messages without client escalation signals",
       tone: "bg-[#f0edff] text-[#4b3cff]",
       icon: Sparkles,
     },
     {
       label: "Handoff signals",
       value: formatAnalyticsInteger(escalationSignals),
-      detail: "Refund, issue, support, or human keywords",
+      detail: "Refund, complaint, issue, brand deal, VIP, or human handoff",
       tone: "bg-[#fff0f3] text-[#df405b]",
       icon: TriangleAlert,
     },

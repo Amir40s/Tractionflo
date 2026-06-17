@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
+import { createHmac, timingSafeEqual } from 'crypto';
 import {
   exchangeInstagramTokenForLongLivedToken,
   saveInstagramAccountToken,
 } from '@/lib/instagram-token';
 import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/server';
 
 function getAppBaseUrl(request: Request) {
   return process.env.NEXT_PUBLIC_APP_URL?.trim() || new URL(request.url).origin;
@@ -13,6 +15,8 @@ function getAppBaseUrl(request: Request) {
 type InstagramOAuthState = {
   next: string;
   returnTo?: string;
+  userId?: string;
+  signature?: string;
 };
 
 type InstagramCodeTokenResponse = {
@@ -43,7 +47,53 @@ function isAllowedReturnOrigin(origin: string, callbackOrigin: string, appBaseUr
   return allowedOrigins.has(origin);
 }
 
-function getOAuthState(value: string | null, callbackOrigin: string, appBaseUrl: string): InstagramOAuthState {
+function getStateSignature({
+  nextPath,
+  returnTo,
+  userId,
+  secret,
+}: {
+  nextPath: string;
+  returnTo: string;
+  userId: string;
+  secret: string;
+}) {
+  return createHmac('sha256', secret)
+    .update(`${userId}:${nextPath}:${returnTo}`)
+    .digest('hex');
+}
+
+function isValidStateSignature({
+  nextPath,
+  returnTo,
+  userId,
+  signature,
+  secret,
+}: {
+  nextPath: string;
+  returnTo: string;
+  userId: string;
+  signature: string;
+  secret: string;
+}) {
+  const expected = getStateSignature({ nextPath, returnTo, userId, secret });
+
+  try {
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    const actualBuffer = Buffer.from(signature, 'hex');
+
+    return expectedBuffer.length === actualBuffer.length && timingSafeEqual(expectedBuffer, actualBuffer);
+  } catch {
+    return false;
+  }
+}
+
+function getOAuthState(
+  value: string | null,
+  callbackOrigin: string,
+  appBaseUrl: string,
+  stateSecret?: string
+): InstagramOAuthState {
   if (!value) {
     return { next: '/dashboard' };
   }
@@ -59,8 +109,20 @@ function getOAuthState(value: string | null, callbackOrigin: string, appBaseUrl:
       typeof parsed.returnTo === 'string' && isAllowedReturnOrigin(parsed.returnTo, callbackOrigin, appBaseUrl)
         ? parsed.returnTo
         : undefined;
+    const userId = typeof parsed.userId === 'string' ? parsed.userId : '';
+    const signature = typeof parsed.signature === 'string' ? parsed.signature : '';
+    const verifiedUserId =
+      userId && signature && stateSecret && isValidStateSignature({
+        nextPath: next,
+        returnTo: returnTo || '',
+        userId,
+        signature,
+        secret: stateSecret,
+      })
+        ? userId
+        : undefined;
 
-    return { next, returnTo };
+    return { next, returnTo, userId: verifiedUserId };
   } catch {
     return { next: '/dashboard' };
   }
@@ -90,7 +152,8 @@ export async function GET(request: Request) {
   const error = searchParams.get('error');
   const baseUrl = getAppBaseUrl(request);
   const callbackOrigin = new URL(request.url).origin;
-  const oauthState = getOAuthState(searchParams.get('state'), callbackOrigin, baseUrl);
+  const appSecret = process.env.META_APP_SECRET;
+  const oauthState = getOAuthState(searchParams.get('state'), callbackOrigin, baseUrl, appSecret);
   const redirectBaseUrl = oauthState.returnTo || baseUrl;
   const nextPath = getSafeNextPath(oauthState.next);
 
@@ -111,7 +174,6 @@ export async function GET(request: Request) {
   }
 
   const appId = process.env.META_APP_ID;
-  const appSecret = process.env.META_APP_SECRET;
   
   const redirectUri = `${baseUrl}/api/auth/instagram/callback`;
 
@@ -154,9 +216,26 @@ export async function GET(request: Request) {
 
     const accessToken = longLivedToken.accessToken;
     const userId = tokenData.user_id.toString();
+    const authSupabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await authSupabase.auth.getUser();
+
+    if (authError && !oauthState.userId) {
+      throw authError;
+    }
+
+    const ownerUserId = oauthState.userId || user?.id;
+
+    if (!ownerUserId) {
+      throw new Error('Log in before connecting Instagram.');
+    }
+
     const supabase = createSupabaseServiceClient();
 
     await saveInstagramAccountToken(supabase, {
+      user_id: ownerUserId,
       ig_user_id: userId,
       access_token: accessToken,
     });
@@ -167,6 +246,7 @@ export async function GET(request: Request) {
       body: 'A creator connected an Instagram account successfully.',
       url: '/settings',
       metadata: {
+        userId: ownerUserId,
         igUserId: userId,
       },
     }).catch((notificationError) => {

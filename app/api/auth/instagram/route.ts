@@ -1,4 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { createHmac } from 'crypto';
+import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -6,10 +8,28 @@ function getAppBaseUrl(request: NextRequest) {
   return process.env.NEXT_PUBLIC_APP_URL?.trim() || request.nextUrl.origin;
 }
 
-function createOAuthState(nextPath: string, returnTo: string) {
+function createStateSignature({
+  nextPath,
+  returnTo,
+  userId,
+  secret,
+}: {
+  nextPath: string;
+  returnTo: string;
+  userId: string;
+  secret: string;
+}) {
+  return createHmac('sha256', secret)
+    .update(`${userId}:${nextPath}:${returnTo}`)
+    .digest('hex');
+}
+
+function createOAuthState(nextPath: string, returnTo: string, userId: string, secret: string) {
   return JSON.stringify({
     next: nextPath,
     returnTo,
+    userId,
+    signature: createStateSignature({ nextPath, returnTo, userId, secret }),
   });
 }
 
@@ -39,15 +59,29 @@ function getNextPath(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const appId = process.env.META_APP_ID;
+  const appSecret = process.env.META_APP_SECRET;
+  const authSupabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await authSupabase.auth.getUser();
   
   const baseUrl = getAppBaseUrl(request);
   const redirectUri = `${baseUrl}/api/auth/instagram/callback`;
   const nextPath = getNextPath(request);
-  const state = createOAuthState(nextPath, request.nextUrl.origin);
   
-  if (!appId) {
-    return NextResponse.json({ error: 'META_APP_ID is not configured' }, { status: 500 });
+  if (!appId || !appSecret) {
+    return NextResponse.json({ error: 'META_APP_ID or META_APP_SECRET is not configured' }, { status: 500 });
   }
+
+  if (authError || !user) {
+    const loginUrl = new URL('/login', request.url);
+    loginUrl.searchParams.set('error', 'Log in before connecting Instagram.');
+    loginUrl.searchParams.set('next', nextPath);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  const state = createOAuthState(nextPath, request.nextUrl.origin, user.id, appSecret);
 
    const scopes = [
     'instagram_business_basic',

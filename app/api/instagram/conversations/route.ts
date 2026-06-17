@@ -135,7 +135,7 @@ export async function GET(request: Request) {
 
     // 1. Get the stored Instagram access token from Supabase
     const supabase = createSupabaseServiceClient();
-    const storedAccount = await getFreshInstagramAccount(supabase);
+    const storedAccount = await getFreshInstagramAccount(supabase, user.id);
 
     if (!storedAccount) {
       return NextResponse.json({

@@ -73,7 +73,7 @@ export async function GET(request: Request) {
     }
 
     const supabase = createSupabaseServiceClient();
-    const account = await getFreshInstagramAccount(supabase);
+    const account = await getFreshInstagramAccount(supabase, user.id);
 
     if (!account?.access_token) {
       return NextResponse.json({ error: "No Instagram account connected", comments: [] }, { status: 400 });
