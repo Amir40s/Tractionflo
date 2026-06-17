@@ -118,7 +118,7 @@ function getPermissionCopy(permission: BrowserNotificationPermission) {
   if (permission === "granted") {
     return {
       label: "OS notifications enabled",
-      detail: "New realtime updates can appear as system notifications.",
+      detail: "If no desktop banner appears, allow Chrome notifications in macOS Settings and check Focus mode.",
       tone: "bg-[#eafaf0] text-[#13a84f]",
     };
   }
@@ -315,8 +315,15 @@ export default function NotificationBell({
       }
 
       const osMethodLabel = osNotificationResult.method === "service-worker" ? "service worker" : "browser";
-      setTestStatus(didSendLocalNotification ? `OS test sent by ${osMethodLabel}` : "Pusher test sent");
-      window.setTimeout(() => setTestStatus(""), 2200);
+
+      if (didSendLocalNotification) {
+        setTestStatus(`OS test displayed by ${osMethodLabel}`);
+      } else if (osNotificationResult.accepted) {
+        setTestStatus("Chrome accepted OS test; check macOS notification settings");
+      } else {
+        setTestStatus("Pusher test sent; OS notification not available");
+      }
+      window.setTimeout(() => setTestStatus(""), 6000);
     } catch (error) {
       setTestStatus(error instanceof Error ? error.message : "Could not send test");
     }

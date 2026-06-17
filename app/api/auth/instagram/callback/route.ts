@@ -28,6 +28,15 @@ type InstagramCodeTokenResponse = {
   error_message?: string;
 };
 
+type InstagramMeResponse = {
+  id?: string;
+  username?: string;
+  name?: string;
+  error?: {
+    message?: string;
+  };
+};
+
 function isSafeNextPath(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//');
 }
@@ -146,6 +155,25 @@ function getSoftwareRedirect(baseUrl: string, nextPath: string, params: Record<s
   return redirectUrl;
 }
 
+async function getInstagramConnectedProfile(accessToken: string, fallbackUserId: string) {
+  const meUrl = new URL('https://graph.instagram.com/v21.0/me');
+  meUrl.searchParams.set('fields', 'id,username,name');
+  meUrl.searchParams.set('access_token', accessToken);
+
+  const response = await fetch(meUrl.toString(), { cache: 'no-store' });
+  const data = (await response.json().catch(() => ({}))) as InstagramMeResponse;
+
+  if (!response.ok || data.error) {
+    throw new Error(data.error?.message || 'Could not verify the connected Instagram account.');
+  }
+
+  return {
+    id: data.id || fallbackUserId,
+    username: data.username || '',
+    name: data.name || '',
+  };
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
@@ -215,7 +243,8 @@ export async function GET(request: Request) {
     });
 
     const accessToken = longLivedToken.accessToken;
-    const userId = tokenData.user_id.toString();
+    const tokenUserId = tokenData.user_id.toString();
+    const instagramProfile = await getInstagramConnectedProfile(accessToken, tokenUserId);
     const authSupabase = await createClient();
     const {
       data: { user },
@@ -236,7 +265,7 @@ export async function GET(request: Request) {
 
     await saveInstagramAccountToken(supabase, {
       user_id: ownerUserId,
-      ig_user_id: userId,
+      ig_user_id: instagramProfile.id,
       access_token: accessToken,
     });
 
@@ -247,7 +276,8 @@ export async function GET(request: Request) {
       url: '/settings',
       metadata: {
         userId: ownerUserId,
-        igUserId: userId,
+        igUserId: instagramProfile.id,
+        username: instagramProfile.username,
       },
     }).catch((notificationError) => {
       console.error('Realtime Instagram connect notification error:', notificationError);
@@ -271,10 +301,14 @@ export async function GET(request: Request) {
     return response;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown Instagram OAuth error';
+    const errorCode = /already connected to another TractionFlo user/i.test(message)
+      ? 'instagram_already_connected'
+      : 'instagram_oauth_error';
     console.error('Instagram OAuth Error:', err);
     return NextResponse.redirect(
       getSoftwareRedirect(redirectBaseUrl, nextPath, {
         ig_error: message,
+        ig_error_code: errorCode,
       })
     );
   }

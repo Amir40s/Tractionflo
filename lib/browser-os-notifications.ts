@@ -10,8 +10,15 @@ type ShowBrowserOsNotificationOptions = {
 
 type ShowBrowserOsNotificationResult = {
   delivered: boolean;
+  accepted?: boolean;
   method?: "service-worker" | "notification";
   reason?: string;
+};
+
+type BrowserNotificationOptions = NotificationOptions & {
+  renotify?: boolean;
+  silent?: boolean;
+  timestamp?: number;
 };
 
 const notificationServiceWorkerPath = "/tractionflo-notifications-sw.js";
@@ -52,6 +59,60 @@ async function getNotificationServiceWorker() {
   return navigator.serviceWorker.ready;
 }
 
+function openNotificationUrl(url?: string) {
+  if (!url) {
+    window.focus();
+    return;
+  }
+
+  window.focus();
+  window.location.assign(url);
+}
+
+async function showDirectBrowserNotification(
+  title: string,
+  notificationOptions: BrowserNotificationOptions,
+  url?: string,
+): Promise<ShowBrowserOsNotificationResult> {
+  try {
+    const browserNotification = new Notification(title, notificationOptions);
+
+    if (url) {
+      browserNotification.onclick = () => openNotificationUrl(url);
+    }
+
+    const result = await new Promise<ShowBrowserOsNotificationResult>((resolve) => {
+      let settled = false;
+      const settle = (value: ShowBrowserOsNotificationResult) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        resolve(value);
+      };
+
+      browserNotification.onshow = () => {
+        console.info("OS notification shown:", { method: "notification", title: notificationOptions.tag });
+        settle({ delivered: true, accepted: true, method: "notification" });
+      };
+
+      browserNotification.onerror = () => {
+        settle({ delivered: false, accepted: false, method: "notification", reason: "direct-notification-error" });
+      };
+
+      window.setTimeout(() => {
+        settle({ delivered: false, accepted: true, method: "notification", reason: "direct-notification-not-confirmed" });
+      }, 1400);
+    });
+
+    return result;
+  } catch (error) {
+    console.info("Direct OS notification failed:", error);
+    return { delivered: false, accepted: false, method: "notification", reason: "direct-notification-failed" };
+  }
+}
+
 export async function showBrowserOsNotification({
   title,
   body,
@@ -64,40 +125,51 @@ export async function showBrowserOsNotification({
     return { delivered: false, reason: "unsupported" };
   }
 
+  if (!window.isSecureContext) {
+    console.info("OS notification skipped:", { reason: "insecure-context", title });
+    return { delivered: false, reason: "insecure-context" };
+  }
+
   if (Notification.permission !== "granted") {
     console.info("OS notification skipped:", { reason: Notification.permission, title });
     return { delivered: false, reason: Notification.permission };
   }
 
-  const notificationOptions: NotificationOptions = {
+  const notificationOptions: BrowserNotificationOptions = {
     body,
     icon: "/favicon.ico",
     tag,
     data: { url },
     requireInteraction,
+    renotify: true,
+    silent: false,
+    timestamp: Date.now(),
   };
+
+  const directResult = await showDirectBrowserNotification(title, notificationOptions, url);
+
+  if (directResult.delivered) {
+    return directResult;
+  }
 
   try {
     const registration = await getNotificationServiceWorker();
 
     if (registration) {
       await registration.showNotification(title, notificationOptions);
-      console.info("OS notification sent:", { method: "service-worker", title, tag });
-      return { delivered: true, method: "service-worker" };
+      console.info("OS notification accepted by service worker:", { method: "service-worker", title, tag });
+      return {
+        delivered: false,
+        accepted: true,
+        method: "service-worker",
+        reason: directResult.reason || "service-worker-accepted-not-confirmed",
+      };
     }
   } catch (error) {
-    console.info("Service worker OS notification failed, using direct notification fallback:", error);
+    console.info("Service worker OS notification failed:", error);
   }
 
-  const browserNotification = new Notification(title, notificationOptions);
-
-  if (url) {
-    browserNotification.onclick = () => {
-      window.focus();
-      window.location.assign(url);
-    };
-  }
-
-  console.info("OS notification sent:", { method: "notification", title, tag });
-  return { delivered: true, method: "notification" };
+  return directResult.accepted
+    ? directResult
+    : { delivered: false, accepted: false, reason: directResult.reason || "not-displayed" };
 }

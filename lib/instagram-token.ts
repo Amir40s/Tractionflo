@@ -91,34 +91,41 @@ export async function saveInstagramAccountToken(
     created_at: new Date().toISOString(),
   };
 
-  const { data: existingForUser, error: existingForUserError } = await supabase
+  const { data: existingForUserRows, error: existingForUserError } = await supabase
     .from("instagram_accounts")
     .select("id, user_id")
     .eq("user_id", account.user_id)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<Pick<StoredInstagramAccount, "id" | "user_id">>();
+    .limit(10)
+    .returns<Pick<StoredInstagramAccount, "id" | "user_id">[]>();
 
   if (existingForUserError) {
     throw new Error(`Could not inspect existing Instagram token: ${existingForUserError.message}`);
   }
 
-  const { data: existingForInstagram, error: existingForInstagramError } = await supabase
+  const { data: existingForInstagramRows, error: existingForInstagramError } = await supabase
     .from("instagram_accounts")
     .select("id, user_id")
     .eq("ig_user_id", account.ig_user_id)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<Pick<StoredInstagramAccount, "id" | "user_id">>();
+    .limit(10)
+    .returns<Pick<StoredInstagramAccount, "id" | "user_id">[]>();
 
   if (existingForInstagramError) {
     throw new Error(`Could not inspect Instagram account ownership: ${existingForInstagramError.message}`);
   }
 
-  if (
-    existingForInstagram?.user_id &&
-    existingForInstagram.user_id !== account.user_id
-  ) {
+  const existingForUser = existingForUserRows?.[0] || null;
+  const existingForInstagram =
+    existingForInstagramRows?.find((row) => row.user_id === account.user_id) ||
+    existingForInstagramRows?.find((row) => row.user_id) ||
+    existingForInstagramRows?.[0] ||
+    null;
+  const ownedByAnotherUser = existingForInstagramRows?.find(
+    (row) => row.user_id && row.user_id !== account.user_id
+  );
+
+  if (ownedByAnotherUser) {
     throw new Error("This Instagram account is already connected to another TractionFlo user.");
   }
 
