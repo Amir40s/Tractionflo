@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import logger from '@/lib/logger';
 import type { User } from '@supabase/supabase-js';
 import {
   getAiBehaviorPrompt,
@@ -6,16 +7,14 @@ import {
   getStoredOpenAiKey,
   normalizeAiIntegrationMetadata,
 } from '@/lib/ai-integration';
-import { detectConversationEscalation } from '@/lib/conversation-escalation';
-import { buildBookingFollowUpReply, buildBookingMemoryPrompt, shouldUseConversationAwareReply } from '@/lib/conversation-context';
-import { getFreshInstagramAccountByIgUserId } from '@/lib/instagram-token';
+import { getFreshInstagramAccount } from '@/lib/instagram-token';
 import {
   instagramWelcomeAutomationMetadataKey,
   normalizeInstagramWelcomeAutomation,
   renderInstagramWelcomeMessage,
 } from '@/lib/instagram-welcome-automation';
 import { searchKnowledgeSources } from '@/lib/knowledge-base';
-import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
+import { runAssistantThread } from '@/lib/openai-assistants';
 import { recordOpenAiUsage } from '@/lib/openai-usage';
 import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -91,6 +90,48 @@ async function getSenderMessageCount(supabase: SupabaseServiceClient, senderId: 
   return count || 0;
 }
 
+async function findAutomationUser(supabase: SupabaseServiceClient) {
+  const { data, error } = await supabase.auth.admin.listUsers({
+    page: 1,
+    perPage: 100,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  const candidates = (data.users || [])
+    .map((user) => {
+      const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+      const integration = normalizeAiIntegrationMetadata(metadata);
+      const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
+
+      return {
+        user,
+        integration,
+        welcome,
+        hasAssistantId: Boolean(metadata.openai_assistant_id),
+      };
+    })
+    .filter((candidate) => candidate.integration.autoSend);
+
+  logger.info("findAutomationUser debug list:", {
+    totalUsersChecked: data.users?.length || 0,
+    userStatuses: (data.users || []).map(u => {
+      const meta = (u.user_metadata || {}) as Record<string, unknown>;
+      return {
+        email: u.email,
+        autoSend: normalizeAiIntegrationMetadata(meta).autoSend,
+        hasAssistantId: Boolean(meta.openai_assistant_id)
+      };
+    })
+  });
+
+  logger.info("findAutomationUser: Found candidates with autoSend enabled", { candidateCount: candidates.length });
+
+  return candidates.find((candidate) => candidate.hasAssistantId) || candidates[0] || null;
+}
+
 async function fetchParticipantProfile(accessToken: string, participantId: string) {
   try {
     const profileUrl = new URL(`https://graph.instagram.com/v21.0/${participantId}`);
@@ -161,90 +202,41 @@ async function generateWebhookAiReply({
   latestText: string;
   participant: InstagramParticipantProfile;
 }) {
+  logger.info("generateWebhookAiReply: Starting generation", { latestText, participantId: participant.id });
   const metadata = (user.user_metadata || {}) as Record<string, unknown>;
   const integration = normalizeAiIntegrationMetadata(metadata);
   const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
 
+  logger.info("generateWebhookAiReply: Workflow settings evaluated", { autoSend: integration.autoSend, answerQuestions: enabledWorkflows.answerQuestions });
+
   if (!integration.autoSend || !enabledWorkflows.answerQuestions) {
+    logger.info("generateWebhookAiReply: Bailing out because autoSend or answerQuestions workflow is disabled.");
     return '';
   }
 
   const messages = [{ from: 'user' as const, text: latestText, time: new Date().toISOString() }];
-  const escalation = detectConversationEscalation(messages);
-
-  if (escalation) {
-    await triggerRealtimeNotification([getUserChannel(user.id), getGlobalChannel(), getSuperAdminChannel()], {
-      type: 'agent',
-      title: 'Human handoff needed',
-      body: escalation.summary,
-      url: '/conversations',
-      metadata: {
-        source: 'instagram-webhook-automation',
-        userId: user.id,
-        senderId: participant.id || '',
-        category: escalation.intent,
-        urgency: escalation.urgency,
-      },
-    }).catch((notificationError) => {
-      console.error('Realtime webhook handoff notification error:', notificationError);
-    });
-
-    return '';
-  }
-
-  const bookingFollowUpReply = buildBookingFollowUpReply(messages);
-  const bookingMemoryPrompt = buildBookingMemoryPrompt(messages);
-  const useConversationAwareReply = shouldUseConversationAwareReply(messages);
-  const knowledge = await searchKnowledgeSources({
-    supabase,
-    userId: user.id,
-    question: latestText,
-  });
-
-  if (bookingFollowUpReply) {
-    return bookingFollowUpReply;
-  }
-
-  if (knowledge.mode === 'direct' && knowledge.directAnswer && !useConversationAwareReply) {
-    return knowledge.directAnswer;
-  }
 
   const apiKey = getStoredOpenAiKey(metadata);
 
   if (!apiKey) {
+    logger.info("generateWebhookAiReply: Bailing out because no OpenAI API key was found.");
     return '';
   }
 
-  const knowledgeContext =
-    knowledge.mode === 'context' && knowledge.context
-      ? `Saved business knowledge matched this question. Use it as the source of truth when answering.
-Use exact saved prices, policies, hours, and requirements when available.
+  const assistantId = metadata.openai_assistant_id as string | undefined;
 
-${knowledge.context}`
-      : knowledge.mode === 'direct' && knowledge.directAnswer
-        ? `Saved business knowledge matched this question. Use it as source material.
-
-Direct saved answer:
-${knowledge.directAnswer}`
-        : '';
+  if (!assistantId) {
+    logger.info("generateWebhookAiReply: Bailing out because no OpenAI Assistant ID was found in metadata.");
+    return '';
+  }
   const participantName = participant.username || participant.name || 'this Instagram lead';
 
-  return requestOpenAiChatCompletion({
+  logger.info("generateWebhookAiReply: Proceeding to request OpenAI Assistant Thread...", { participantName });
+  return runAssistantThread({
     apiKey,
-    model: integration.model,
+    assistantId,
     maxTokens: 180,
-    onUsage: (usage) =>
-      recordOpenAiUsage({
-        supabase,
-        user,
-        model: integration.model,
-        usage,
-        source: 'instagram-webhook-auto-reply',
-      }),
-    messages: [
-      {
-        role: 'system',
-        content: `${integration.systemPrompt}
+    additionalInstructions: `${integration.systemPrompt}
 
 ${getAiBehaviorPrompt(integration.behavior)}
 
@@ -252,17 +244,15 @@ Lead qualification rules: ${integration.leadQualificationRules}
 Preferred CTA: ${integration.ctaMessage}
 
 Return only the Instagram DM reply text. Keep it natural, brief, and useful. Do not mention being an AI unless asked.`,
-      },
+    messages: [
       {
         role: 'user',
         content: `Instagram participant: ${participantName}
-${knowledgeContext ? `\n${knowledgeContext}\n` : ''}
-${bookingMemoryPrompt}
 
 Recent conversation:
 ${messages.map(formatWebhookConversationLine).join('\n')}
 
-Write the next best reply.`,
+Write the next best reply. Ensure you use the attached file_search knowledge base to answer questions accurately.`,
       },
     ],
   });
@@ -272,7 +262,9 @@ async function processInstagramAutomations(
   supabase: SupabaseServiceClient,
   events: AutomationMessageEvent[]
 ) {
+  logger.info("processInstagramAutomations: Starting", { eventCount: events.length });
   if (events.length === 0) {
+    logger.info("processInstagramAutomations: No events to process. Returning.");
     return;
   }
 
@@ -284,53 +276,60 @@ async function processInstagramAutomations(
 
       const account = await getFreshInstagramAccountByIgUserId(supabase, event.recipientId);
 
-      if (!account?.access_token || !account.user_id) {
-        continue;
-      }
+  if (!automationUser) {
+    logger.info("processInstagramAutomations: No automation user found. This means Auto-Send AI Replies is DISABLED in your settings. Bailing out.");
+    return;
+  }
 
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.admin.getUserById(account.user_id);
+  logger.info("processInstagramAutomations: Found automation user", { userId: automationUser.user.id });
 
-      if (userError || !user) {
-        if (userError) {
-          console.error('Instagram webhook owner lookup error:', userError);
-        }
+  const account = await getFreshInstagramAccount(supabase);
 
-        continue;
-      }
+  if (!account?.access_token) {
+    logger.info("processInstagramAutomations: No fresh Instagram access token found. Returning.");
+    return;
+  }
 
-      const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-      const integration = normalizeAiIntegrationMetadata(metadata);
+  logger.info("processInstagramAutomations: Successfully retrieved fresh Instagram account token.");
 
-      if (!integration.autoSend) {
-        continue;
-      }
-
-      const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
+  for (const event of events) {
+    logger.info("processInstagramAutomations: Processing event", { senderId: event.senderId, mid: event.mid, text: event.text });
+    try {
       const participant = await fetchParticipantProfile(account.access_token, event.senderId);
+      logger.info("processInstagramAutomations: Fetched participant profile", { username: participant.username });
+      
       const isFirstInboundDm = event.previousSenderMessageCount === 0;
-      const reply = isFirstInboundDm && welcome.enabled
-        ? renderInstagramWelcomeMessage({
-            template: welcome.message,
-            username: participant.username,
-            name: participant.name,
-          })
-        : await generateWebhookAiReply({
-            supabase,
-            user,
-            latestText: event.text,
-            participant,
-          });
+      logger.info("processInstagramAutomations: Checked message history", { isFirstInboundDm, previousCount: event.previousSenderMessageCount, welcomeEnabled: automationUser.welcome.enabled });
+
+      let reply = '';
+      if (isFirstInboundDm && automationUser.welcome.enabled) {
+        logger.info("processInstagramAutomations: Generating Welcome Message.");
+        reply = renderInstagramWelcomeMessage({
+          template: automationUser.welcome.message,
+          username: participant.username,
+          name: participant.name,
+        });
+      } else {
+        logger.info("processInstagramAutomations: Triggering generateWebhookAiReply.");
+        reply = await generateWebhookAiReply({
+          supabase,
+          user: automationUser.user,
+          latestText: event.text,
+          participant,
+        });
+      }
 
       if (!reply.trim()) {
+        logger.info("processInstagramAutomations: Generated reply is empty. Skipping message send.");
         continue;
       }
 
+      logger.info("processInstagramAutomations: Sending Instagram text message reply...", { reply: reply.trim() });
       const sent = await sendInstagramTextMessage(account.access_token, event.senderId, reply.trim());
+      logger.info("processInstagramAutomations: Instagram text message sent successfully", { message_id: sent.message_id });
 
-      await triggerRealtimeNotification([getUserChannel(user.id), getGlobalChannel(), getSuperAdminChannel()], {
+      logger.info("processInstagramAutomations: Triggering realtime pusher notification for sent reply...");
+      await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
         type: 'ai',
         title: isFirstInboundDm ? 'Welcome DM sent' : 'Instagram AI reply sent',
         body: reply.slice(0, 120),
@@ -344,10 +343,11 @@ async function processInstagramAutomations(
           welcome: isFirstInboundDm,
         },
       }).catch((notificationError) => {
-        console.error('Realtime Instagram automation notification error:', notificationError);
+        logger.error('Realtime Instagram automation notification error:', { error: notificationError });
       });
+      logger.info("processInstagramAutomations: Event processed successfully.");
     } catch (automationError) {
-      console.error('Instagram webhook automation error:', automationError);
+      logger.error('Instagram webhook automation error:', { error: automationError, event });
     }
   }
 }
@@ -449,7 +449,7 @@ export async function POST(request: Request) {
             source: 'meta-webhook',
           },
         }).catch((notificationError) => {
-          console.error('Realtime webhook notification error:', notificationError);
+          logger.error('Realtime webhook notification error:', { error: notificationError });
         });
       }
 
@@ -459,7 +459,7 @@ export async function POST(request: Request) {
     // Acknowledge receipt to Meta quickly (must be within 20 seconds)
     return new NextResponse('EVENT_RECEIVED', { status: 200 });
   } catch (error) {
-    console.error('Webhook Error:', error);
+    logger.error('Webhook Error:', { error });
     return new NextResponse('Internal Server Error', { status: 500 });
   }
 }

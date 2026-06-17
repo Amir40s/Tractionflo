@@ -1519,7 +1519,7 @@ function SummaryPanel({
   }, [takeoverMode]);
 
   const runAiWorkflow = useCallback(
-    async (options?: { silent?: boolean; signal?: AbortSignal }) => {
+    async (options?: { silent?: boolean; forceRefresh?: boolean; signal?: AbortSignal }) => {
       const requestTakeoverMode = takeoverModeRef.current;
 
       if (!conv || requestTakeoverMode === "human") {
@@ -1549,6 +1549,7 @@ function SummaryPanel({
             accountName,
             takeoverMode: requestTakeoverMode,
             messages: getConversationAiMessages(conv),
+            forceRefresh: options?.forceRefresh,
           }),
         });
         const data = (await response.json()) as AiWorkflowResponse;
@@ -1778,7 +1779,7 @@ function SummaryPanel({
                     </h3>
                     <button
                       type="button"
-                      onClick={() => void runAiWorkflow()}
+                      onClick={() => void runAiWorkflow({ forceRefresh: true })}
                       disabled={aiLoading}
                       className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border border-[#dde3ee] bg-white text-[#46506a] disabled:cursor-not-allowed disabled:opacity-55"
                       aria-label="Refresh AI qualification"

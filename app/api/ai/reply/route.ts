@@ -3,8 +3,7 @@ import logger from '@/lib/logger';
 import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
 import { detectConversationEscalation } from '@/lib/conversation-escalation';
 import { buildBookingFollowUpReply, buildBookingMemoryPrompt, shouldUseConversationAwareReply } from '@/lib/conversation-context';
-import { searchKnowledgeSources } from '@/lib/knowledge-base';
-import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
+import { runAssistantThread } from '@/lib/openai-assistants';
 import { recordOpenAiUsage } from '@/lib/openai-usage';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -143,13 +142,13 @@ export async function POST(request: Request) {
     const bookingMemoryPrompt = buildBookingMemoryPrompt(payload.messages);
     const bookingFollowUpReply = buildBookingFollowUpReply(payload.messages);
     const serviceSupabase = createSupabaseServiceClient();
-    const knowledge = latestUserQuestion
-      ? await searchKnowledgeSources({
-          supabase: serviceSupabase,
-          userId: assistantId,
-          question: latestUserQuestion,
-        })
-      : { mode: 'none' as const, matches: [], totalSources: 0 };
+
+    const assistantIdFromMetadata = metadata.openai_assistant_id as string | undefined;
+    if (!assistantIdFromMetadata) {
+      return NextResponse.json({ error: 'Assistant ID not found in settings. Please save your API key in Settings.' }, { status: 400 });
+    }
+
+    const knowledge = { mode: 'none' as const, matches: [], totalSources: 0, sourceTitle: undefined };
 
     if (bookingFollowUpReply) {
       await triggerRealtimeNotification(getUserChannel(user.id), {
@@ -176,36 +175,12 @@ export async function POST(request: Request) {
       });
     }
 
-    if (knowledge.mode === 'direct' && knowledge.directAnswer && !useConversationAwareReply) {
-      const reply = knowledge.directAnswer;
 
-      await triggerRealtimeNotification(getUserChannel(user.id), {
-        type: 'ai',
-        title: 'Knowledge reply drafted',
-        body: reply.slice(0, 120),
-        url: '/conversations',
-        metadata: {
-          assistantId,
-          autoSend: integration.autoSend,
-          knowledgeMode: knowledge.mode,
-          sourceTitle: knowledge.sourceTitle || '',
-        },
-      }).catch((notificationError) => {
-        logger.error('Realtime knowledge reply notification error:', { error: notificationError });
-      });
-
-      return NextResponse.json({
-        assistantId,
-        assistant_id: assistantId,
-        reply,
-        autoSend: integration.autoSend,
-        knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
-      });
-    }
 
     const apiKey = getStoredOpenAiKey(metadata);
 
     if (!apiKey) {
+      logger.warn("OpenAI API key is missing. Bailing out of reply request.");
       return NextResponse.json({ error: 'Save your OpenAI API key first.' }, { status: 400 });
     }
 
@@ -215,37 +190,11 @@ export async function POST(request: Request) {
       .slice(-12)
       .map(formatConversationLine)
       .join('\n');
-    const knowledgeContext = knowledge.mode === 'direct' && knowledge.directAnswer
-      ? `Saved business knowledge matched this conversation. Use this as source material, but adapt it to the full conversation.
-Do not copy a saved answer if it asks for details the customer already provided.
-
-Direct saved answer:
-${knowledge.directAnswer}`
-      : knowledge.mode === 'context' && knowledge.context
-      ? `Saved business knowledge matched this question. Use this as the source of truth when answering.
-Use exact saved prices, policies, hours, and requirements when the user has provided enough details.
-Ask only for facts still missing, such as exact start time, duration, or availability confirmation.
-If the saved knowledge does not answer the user, say the team can confirm manually instead of inventing details.
-
-${knowledge.context}`
-      : '';
-
-    const reply = await requestOpenAiChatCompletion({
+    const reply = await runAssistantThread({
       apiKey,
-      model: integration.model,
+      assistantId: assistantIdFromMetadata,
       maxTokens: 180,
-      onUsage: (usage) =>
-        recordOpenAiUsage({
-          supabase: serviceSupabase,
-          user,
-          model: integration.model,
-          usage,
-          source: 'ai-reply',
-        }),
-      messages: [
-        {
-          role: 'system',
-          content: `${integration.systemPrompt}
+      additionalInstructions: `${integration.systemPrompt}
 
 ${getAiBehaviorPrompt(integration.behavior)}
 
@@ -254,18 +203,17 @@ Preferred CTA: ${integration.ctaMessage}
 
 Return only the Instagram DM reply text. Keep it natural, brief, and useful. Do not mention being an AI unless asked. If saved knowledge is provided, do not give a vague answer when an exact saved answer is available.
 Never ask again for booking details that the customer already gave earlier in the conversation.`,
-        },
+      messages: [
         {
           role: 'user',
           content: `Business account: ${payload.accountName || 'TractionFlo'}
 Instagram participant: ${participantName}
-${knowledgeContext ? `\n${knowledgeContext}\n` : ''}
 ${bookingMemoryPrompt}
 
 Recent conversation:
 ${conversationLines || 'No prior messages.'}
 
-Write the next best reply.`,
+Write the next best reply. Use attached file_search knowledge for answers.`,
         },
       ],
     });

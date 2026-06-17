@@ -265,6 +265,7 @@ export function buildBookingMemoryPrompt(messages: ConversationContextMessage[] 
 Rules:
 - Do not ask again for any already confirmed detail.
 - If the customer says no need / without / do not need an add-on, treat that add-on as declined and never ask for it again.
+- If the user only sends a greeting (like "hi" or "hello"), respond ONLY with a friendly greeting and ask how you can help them. DO NOT ask for any booking or menu details in this message.
 - If the latest user message supplies a missing detail, acknowledge it and move to the next missing step, availability check, quote, or phone number.
 - Do not repeat the same question from the previous business reply.`;
 }

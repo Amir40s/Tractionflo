@@ -10,9 +10,8 @@ import {
   type AiLeadInsight,
   type AiWorkflowRunResult,
 } from '@/lib/ai-integration';
-import { buildBookingFollowUpReply, buildBookingMemoryPrompt, shouldUseConversationAwareReply } from '@/lib/conversation-context';
-import { searchKnowledgeSources } from '@/lib/knowledge-base';
-import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
+import { shouldUseConversationAwareReply } from '@/lib/conversation-context';
+import { runAssistantThread } from '@/lib/openai-assistants';
 import { recordOpenAiUsage } from '@/lib/openai-usage';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -31,12 +30,14 @@ type WorkflowPayload = {
   assistantId?: string;
   assistant_id?: string;
   participant?: {
+    id?: string;
     name?: string;
     username?: string;
   };
   accountName?: string;
   takeoverMode?: 'ai' | 'human';
   messages?: WorkflowMessage[];
+  forceRefresh?: boolean;
 };
 
 function formatConversationLine(message: WorkflowMessage) {
@@ -218,183 +219,55 @@ export async function POST(request: Request) {
     const metadata = user.user_metadata || {};
     const integration = normalizeAiIntegrationMetadata(metadata);
     const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
-    const escalation = detectConversationEscalation(payload.messages);
 
-    if (escalation) {
-      const workflowResult = {
-        starter: '',
-        reply: escalation.reply,
-        cta: '',
-        lead: enabledWorkflows.qualifyLeads
-          ? {
-              ...defaultAiLeadInsight,
-              score: 12,
-              stage: 'Needs human',
-              urgency: escalation.urgency,
-              intent: escalation.intent.replaceAll('_', ' '),
-              summary: escalation.summary,
-              signals: escalation.signals,
-              missing: [],
-              recommendedAction: escalation.recommendedAction,
-              cta: 'Take over human',
-            }
-          : {
-              ...defaultAiLeadInsight,
-              stage: 'Needs human',
-              urgency: escalation.urgency,
-              summary: escalation.summary,
-              recommendedAction: escalation.recommendedAction,
-            },
-        enabledWorkflows,
-      } satisfies AiWorkflowRunResult;
+    const participantId = payload.participant?.id || '';
+    const forceRefresh = Boolean(payload.forceRefresh);
+    const userMessageCount = (payload.messages || []).filter((msg) => msg.from === 'user').length;
 
-      await triggerRealtimeNotification(getUserChannel(user.id), {
-        type: 'agent',
-        title: 'Human handoff needed',
-        body: escalation.summary,
-        url: '/conversations',
-        metadata: {
-          assistantId,
-          category: escalation.intent,
-          urgency: escalation.urgency,
-        },
-      }).catch((notificationError) => {
-        logger.error('Realtime handoff notification error:', { error: notificationError });
-      });
+    // Load lead qualifications cache
+    const leadQualifications = (metadata.lead_qualifications || {}) as Record<string, any>;
+    const cachedLead = leadQualifications[participantId];
 
-      return NextResponse.json({
-        assistantId,
-        assistant_id: assistantId,
-        autoSend: false,
-        handoff: true,
-        escalation,
-        ...workflowResult,
-        knowledge: summarizeKnowledgeForResponse({ mode: 'none', matches: [] }, assistantId),
-      });
+    // Determine if we should qualify this lead during this run
+    let shouldQualifyLeads = false;
+    let qualificationMocked = false;
+    let qualificationReason = '';
+
+    if (enabledWorkflows.qualifyLeads) {
+      if (userMessageCount < 15) {
+        shouldQualifyLeads = false;
+        qualificationMocked = true;
+        qualificationReason = `Qualification will run once 15 messages are exchanged (currently at ${userMessageCount} user messages).`;
+      } else {
+        if (forceRefresh || !cachedLead) {
+          shouldQualifyLeads = true;
+        } else {
+          shouldQualifyLeads = false;
+        }
+      }
     }
+
+    const runWorkflows = {
+      ...enabledWorkflows,
+      qualifyLeads: shouldQualifyLeads,
+    };
 
     const newInboundLead = isNewInboundLead(payload.messages);
     const latestUserQuestion = getLatestUserQuestion(payload.messages);
     const useConversationAwareReply = shouldUseConversationAwareReply(payload.messages);
-    const bookingMemoryPrompt = buildBookingMemoryPrompt(payload.messages);
-    const bookingFollowUpReply = buildBookingFollowUpReply(payload.messages);
     const serviceSupabase = createSupabaseServiceClient();
-    const knowledge = latestUserQuestion && enabledWorkflows.answerQuestions
-      ? await searchKnowledgeSources({
-          supabase: serviceSupabase,
-          userId: assistantId,
-          question: latestUserQuestion,
-        })
-      : { mode: 'none' as const, matches: [], totalSources: 0 };
 
-    if (enabledWorkflows.answerQuestions && bookingFollowUpReply) {
-      const needsPhone = bookingFollowUpReply.toLowerCase().includes('share your phone number');
-      const workflowResult = {
-        starter: enabledWorkflows.startConversation && newInboundLead ? bookingFollowUpReply : '',
-        reply: bookingFollowUpReply,
-        cta: enabledWorkflows.moveToCta ? bookingFollowUpReply : '',
-        lead: enabledWorkflows.qualifyLeads
-          ? {
-              ...defaultAiLeadInsight,
-              score: needsPhone ? 68 : 82,
-              stage: needsPhone ? 'Qualified' : 'Ready for CTA',
-              urgency: 'Medium',
-              intent: needsPhone ? 'Booking details collected' : 'Booking confirmation',
-              summary: needsPhone
-                ? 'Customer supplied booking details and still needs to share a phone number.'
-                : 'Customer supplied booking details and phone number for final confirmation.',
-              signals: [knowledge.sourceTitle || 'Booking flow matched', needsPhone ? 'Missing phone number' : 'Phone number received'],
-              missing: needsPhone ? ['phone number'] : [],
-              recommendedAction: needsPhone
-                ? 'Ask for the phone number to finalize the booking.'
-                : 'Confirm availability and save the booking.',
-              cta: bookingFollowUpReply,
-            }
-          : {
-              ...defaultAiLeadInsight,
-              summary: 'AI Qualifies Leads is turned off.',
-              recommendedAction: 'Turn on lead qualification in AI Integration.',
-            },
-        enabledWorkflows,
-      } satisfies AiWorkflowRunResult;
-
-      await triggerRealtimeNotification(getUserChannel(user.id), {
-        type: 'ai',
-        title: 'Booking workflow completed',
-        body: workflowResult.reply.slice(0, 120),
-        url: '/conversations',
-        metadata: {
-          assistantId,
-          score: workflowResult.lead.score,
-          urgency: workflowResult.lead.urgency,
-          knowledgeMode: knowledge.mode,
-          sourceTitle: knowledge.sourceTitle || '',
-        },
-      }).catch((notificationError) => {
-        logger.error('Realtime booking workflow notification error:', { error: notificationError });
-      });
-
-      return NextResponse.json({
-        assistantId,
-        assistant_id: assistantId,
-        autoSend: integration.autoSend,
-        ...workflowResult,
-        knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
-      });
+    const assistantIdFromMetadata = metadata.openai_assistant_id as string | undefined;
+    if (!assistantIdFromMetadata) {
+      return NextResponse.json({ error: 'Assistant ID not found in settings. Please save your API key in Settings.' }, { status: 400 });
     }
 
-    if (knowledge.mode === 'direct' && knowledge.directAnswer && !useConversationAwareReply) {
-      const workflowResult = {
-        starter: enabledWorkflows.startConversation && newInboundLead ? knowledge.directAnswer : '',
-        reply: knowledge.directAnswer,
-        cta: enabledWorkflows.moveToCta ? integration.ctaMessage : '',
-        lead: enabledWorkflows.qualifyLeads
-          ? {
-              ...defaultAiLeadInsight,
-              score: 45,
-              stage: 'Warm',
-              intent: 'Knowledge answer',
-              summary: `Answered from ${knowledge.sourceTitle || 'saved knowledge'}.`,
-              signals: [knowledge.sourceTitle || 'Saved knowledge matched'],
-              recommendedAction: 'Send the saved-knowledge answer.',
-              cta: integration.ctaMessage,
-            }
-          : {
-              ...defaultAiLeadInsight,
-              summary: 'AI Qualifies Leads is turned off.',
-              recommendedAction: 'Turn on lead qualification in AI Integration.',
-            },
-        enabledWorkflows,
-      } satisfies AiWorkflowRunResult;
-
-      await triggerRealtimeNotification(getUserChannel(user.id), {
-        type: 'ai',
-        title: 'Knowledge workflow completed',
-        body: workflowResult.reply.slice(0, 120),
-        url: '/conversations',
-        metadata: {
-          assistantId,
-          score: workflowResult.lead.score,
-          urgency: workflowResult.lead.urgency,
-          knowledgeMode: knowledge.mode,
-          sourceTitle: knowledge.sourceTitle || '',
-        },
-      }).catch((notificationError) => {
-        logger.error('Realtime knowledge workflow notification error:', { error: notificationError });
-      });
-
-      return NextResponse.json({
-        assistantId,
-        assistant_id: assistantId,
-        autoSend: integration.autoSend,
-        ...workflowResult,
-        knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
-      });
-    }
+    const knowledge = { mode: 'none' as const, matches: [], totalSources: 0, sourceTitle: undefined };
 
     const apiKey = getStoredOpenAiKey(metadata);
 
     if (!apiKey) {
+      logger.warn("OpenAI API key is missing. Bailing out of workflow request.");
       return NextResponse.json({ error: 'Save your OpenAI API key in Settings > AI Integration first.' }, { status: 400 });
     }
 
@@ -404,37 +277,12 @@ export async function POST(request: Request) {
       .slice(-16)
       .map(formatConversationLine)
       .join('\n');
-    const knowledgeContext = knowledge.mode === 'direct' && knowledge.directAnswer
-      ? `Saved business knowledge matched this conversation. Use this as source material, but adapt it to the full conversation.
-Do not copy a saved answer if it asks for details the customer already provided.
-
-Direct saved answer:
-${knowledge.directAnswer}`
-      : knowledge.mode === 'context' && knowledge.context
-      ? `Saved business knowledge matched this conversation. Use this as the source of truth for the reply field.
-Use exact saved prices, policies, hours, and requirements when the user has provided enough details.
-Ask only for facts still missing, such as exact start time, duration, or availability confirmation.
-If the saved knowledge does not answer the user, say the team can confirm manually instead of inventing details.
-
-${knowledge.context}`
-      : '';
-
-    const rawResult = await requestOpenAiChatCompletion({
+    const rawResult = await runAssistantThread({
       apiKey,
-      model: integration.model,
+      assistantId: assistantIdFromMetadata,
       maxTokens: 700,
-      onUsage: (usage) =>
-        recordOpenAiUsage({
-          supabase: serviceSupabase,
-          user,
-          model: integration.model,
-          usage,
-          source: 'ai-workflow',
-        }),
-      messages: [
-        {
-          role: 'system',
-          content: `${integration.systemPrompt}
+      responseFormat: "json_object",
+      additionalInstructions: `${integration.systemPrompt}
 
 ${getAiBehaviorPrompt(integration.behavior)}
 
@@ -446,7 +294,7 @@ Never ask again for booking details that the customer already gave earlier in th
 JSON shape:
 {
   "starter": "first response to send when AI Starts Conversation is on and this is a new inbound lead; empty when not needed",
-  "reply": "best next answer to the latest user message; use exact saved knowledge when provided instead of vague ranges",
+  "reply": "best next answer to the latest user message; use exact attached file_search knowledge when provided instead of vague ranges",
   "cta": "short CTA message that moves a ready lead forward",
   "lead": {
     "score": 0-100,
@@ -460,20 +308,18 @@ JSON shape:
     "cta": "best CTA for this lead"
   }
 }`,
-        },
+      messages: [
         {
           role: 'user',
           content: `Business account: ${payload.accountName || 'TractionFlo'}
 Instagram participant: ${participantName}
 Enabled jobs:
-- AI Starts Conversation: ${enabledWorkflows.startConversation ? 'on' : 'off'}
-- AI Answers Questions: ${enabledWorkflows.answerQuestions ? 'on' : 'off'}
-- AI Qualifies Leads: ${enabledWorkflows.qualifyLeads ? 'on' : 'off'}
-- AI Moves Lead to CTA: ${enabledWorkflows.moveToCta ? 'on' : 'off'}
+- AI Starts Conversation: ${runWorkflows.startConversation ? 'on' : 'off'}
+- AI Answers Questions: ${runWorkflows.answerQuestions ? 'on' : 'off'}
+- AI Qualifies Leads: ${runWorkflows.qualifyLeads ? 'on' : 'off'}
+- AI Moves Lead to CTA: ${runWorkflows.moveToCta ? 'on' : 'off'}
 Conversation state:
 - New inbound lead with no business reply yet: ${newInboundLead ? 'yes' : 'no'}
-${knowledgeContext ? `\n${knowledgeContext}\n` : ''}
-${bookingMemoryPrompt}
 
 Recent conversation:
 ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}`,
@@ -481,10 +327,10 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       ],
     });
 
-    const normalizedWorkflowResult = normalizeWorkflowResult(rawResult, enabledWorkflows);
+    const normalizedWorkflowResult = normalizeWorkflowResult(rawResult, runWorkflows);
     const workflowResult =
       newInboundLead &&
-      enabledWorkflows.startConversation &&
+      runWorkflows.startConversation &&
       !normalizedWorkflowResult.starter &&
       normalizedWorkflowResult.reply
         ? {
@@ -492,6 +338,43 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
             starter: normalizedWorkflowResult.reply,
           }
         : normalizedWorkflowResult;
+
+    // Apply mock or cached lead details if we did not run qualification
+    if (enabledWorkflows.qualifyLeads) {
+      if (qualificationMocked) {
+        workflowResult.lead = {
+          ...defaultAiLeadInsight,
+          summary: qualificationReason,
+          recommendedAction: 'Keep chatting to build context.',
+        };
+      } else if (cachedLead && !shouldQualifyLeads) {
+        workflowResult.lead = cachedLead;
+      }
+    }
+
+    // Save generated qualification to user metadata cache
+    if (shouldQualifyLeads && participantId) {
+      const nextQualifications = {
+        ...leadQualifications,
+        [participantId]: workflowResult.lead,
+      };
+
+      try {
+        const { error: updateError } = await supabase.auth.updateUser({
+          data: {
+            ...metadata,
+            lead_qualifications: nextQualifications,
+          },
+        });
+        if (updateError) {
+          logger.error("Failed to save lead qualification in user metadata:", { error: updateError });
+        } else {
+          logger.info("Successfully cached lead qualification in user metadata", { participantId, lead: workflowResult.lead });
+        }
+      } catch (saveError) {
+        logger.error("Failed to save lead qualification to user metadata:", { error: saveError });
+      }
+    }
 
     await triggerRealtimeNotification(getUserChannel(user.id), {
       type: 'ai',
@@ -514,6 +397,7 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       assistant_id: assistantId,
       autoSend: integration.autoSend,
       ...workflowResult,
+      enabledWorkflows, // Return original workflows configurations to frontend
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
     });
   } catch (error) {
