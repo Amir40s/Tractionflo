@@ -9,6 +9,8 @@ import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 
+
+
 export const dynamic = 'force-dynamic';
 
 type ReplyMessage = {
@@ -175,8 +177,6 @@ export async function POST(request: Request) {
       });
     }
 
-
-
     const apiKey = getStoredOpenAiKey(metadata);
 
     if (!apiKey) {
@@ -196,6 +196,8 @@ export async function POST(request: Request) {
       maxTokens: 180,
       additionalInstructions: `${integration.systemPrompt}
 
+IMPORTANT: The attached files and vector store contain the primary truth for this business (such as menus, pricing, services, and policies). You MUST search these files using the file_search tool for any specific business inquiries (e.g. "menu", "pricing", "cost", "hours", "booking", or specific products/services). Do NOT rely on default prompts or assume the business context is TractionFlo if the knowledge base documents specify a different business (e.g. Taste Haven Restaurant).
+
 ${getAiBehaviorPrompt(integration.behavior)}
 
 Lead qualification rules: ${integration.leadQualificationRules}
@@ -213,10 +215,12 @@ ${bookingMemoryPrompt}
 Recent conversation:
 ${conversationLines || 'No prior messages.'}
 
-Write the next best reply. Use attached file_search knowledge for answers.`,
+Write the next best reply.`,
         },
       ],
     });
+
+
 
     await triggerRealtimeNotification(getUserChannel(user.id), {
       type: 'ai',

@@ -263,9 +263,44 @@ export async function GET(request: Request) {
 
     const supabase = createSupabaseServiceClient();
 
+    // Fetch the real Instagram Business Account ID (Page ID) to match webhook events
+    let igPageId = instagramProfile.id || tokenUserId;
+    try {
+      const meUrl = new URL('https://graph.instagram.com/v21.0/me');
+      meUrl.searchParams.set('fields', 'user_id,id');
+      meUrl.searchParams.set('access_token', accessToken);
+      const meRes = await fetch(meUrl.toString());
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        if (meData.user_id) {
+          igPageId = meData.user_id.toString();
+        } else if (meData.id) {
+          igPageId = meData.id.toString();
+        }
+      }
+    } catch (meError) {
+      console.error('Failed to fetch real Instagram Page ID in OAuth callback:', meError);
+    }
+
+    // Fast-path: check if this Instagram account is already connected to another TractionFlo user
+    const { data: existingConnection, error: connectionCheckError } = await supabase
+      .from('instagram_accounts')
+      .select('user_id')
+      .eq('ig_user_id', igPageId)
+      .not('user_id', 'is', null)
+      .maybeSingle();
+
+    if (connectionCheckError) {
+      console.error('Error checking existing Instagram connection:', connectionCheckError);
+    }
+
+    if (existingConnection && existingConnection.user_id !== ownerUserId) {
+      throw new Error('This Instagram account is already connected to another TractionFlo user.');
+    }
+
     await saveInstagramAccountToken(supabase, {
       user_id: ownerUserId,
-      ig_user_id: instagramProfile.id,
+      ig_user_id: igPageId,
       access_token: accessToken,
     });
 
@@ -276,7 +311,7 @@ export async function GET(request: Request) {
       url: '/settings',
       metadata: {
         userId: ownerUserId,
-        igUserId: instagramProfile.id,
+        igUserId: igPageId,
         username: instagramProfile.username,
       },
     }).catch((notificationError) => {

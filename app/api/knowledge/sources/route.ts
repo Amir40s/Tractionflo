@@ -19,7 +19,7 @@ import {
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 import { getStoredOpenAiKey } from "@/lib/ai-integration";
-import { getOrCreateAssistant, getOrCreateVectorStore, attachVectorStoreToAssistant, uploadFileToVectorStore } from "@/lib/openai-assistants";
+import { getOrCreateAssistant, getOrCreateVectorStore, attachVectorStoreToAssistant, uploadFileToVectorStore, syncVectorStoreWithStorage } from "@/lib/openai-assistants";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -95,6 +95,17 @@ export async function GET() {
     const supabase = createSupabaseServiceClient();
     const sources = await listKnowledgeSourceIndexes(supabase, user.id);
 
+    const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+    const apiKey = getStoredOpenAiKey(metadata);
+    const vectorStoreId = metadata.openai_vector_store_id as string | undefined;
+
+    if (apiKey && vectorStoreId) {
+      // Run vector store sync in background so it doesn't block the UI load time
+      syncVectorStoreWithStorage({ apiKey, vectorStoreId, userId: user.id, supabase }).catch((syncErr) => {
+        console.error("GET knowledge sources: sync error:", syncErr);
+      });
+    }
+
     return NextResponse.json({
       sources: sources.map(summarizeKnowledgeSource),
       assignmentLabels: knowledgeAssignmentLabels,
@@ -109,6 +120,7 @@ export async function GET() {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
 
 export async function POST(request: Request) {
   try {
