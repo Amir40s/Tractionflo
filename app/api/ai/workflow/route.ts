@@ -26,11 +26,14 @@ type WorkflowMessage = {
 };
 
 type WorkflowPayload = {
+  assistantId?: string;
+  assistant_id?: string;
   participant?: {
     name?: string;
     username?: string;
   };
   accountName?: string;
+  takeoverMode?: 'ai' | 'human';
   messages?: WorkflowMessage[];
 };
 
@@ -52,6 +55,29 @@ function getLatestUserQuestion(messages: WorkflowMessage[] = []) {
     .reverse()
     .map((message) => message.text?.trim() || '')
     .join('\n');
+}
+
+function resolveAssistantId(payload: WorkflowPayload, authenticatedUserId: string) {
+  const requestedAssistantId = (payload.assistantId || payload.assistant_id || '').trim();
+
+  if (!requestedAssistantId) {
+    return authenticatedUserId;
+  }
+
+  return requestedAssistantId === authenticatedUserId ? requestedAssistantId : null;
+}
+
+function summarizeKnowledgeForResponse(
+  knowledge: { mode: 'none' | 'direct' | 'context'; sourceTitle?: string; matches: unknown[] },
+  assistantId: string
+) {
+  return {
+    mode: knowledge.mode,
+    sourceTitle: knowledge.sourceTitle,
+    matches: knowledge.matches.length,
+    assistantId,
+    assistant_id: assistantId,
+  };
 }
 
 function isNewInboundLead(messages: WorkflowMessage[] = []) {
@@ -176,6 +202,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
+    if (payload.takeoverMode === 'human') {
+      return NextResponse.json({ error: 'AI workflow is paused while human takeover is active.' }, { status: 409 });
+    }
+
+    const assistantId = resolveAssistantId(payload, user.id);
+
+    if (!assistantId) {
+      return NextResponse.json({ error: 'Assistant ID does not match the authenticated account.' }, { status: 403 });
+    }
+
     const metadata = user.user_metadata || {};
     const integration = normalizeAiIntegrationMetadata(metadata);
     const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
@@ -188,7 +224,7 @@ export async function POST(request: Request) {
     const knowledge = latestUserQuestion && enabledWorkflows.answerQuestions
       ? await searchKnowledgeSources({
           supabase: serviceSupabase,
-          userId: user.id,
+          userId: assistantId,
           question: latestUserQuestion,
         })
       : { mode: 'none' as const, matches: [], totalSources: 0 };
@@ -230,6 +266,7 @@ export async function POST(request: Request) {
         body: workflowResult.reply.slice(0, 120),
         url: '/conversations',
         metadata: {
+          assistantId,
           score: workflowResult.lead.score,
           urgency: workflowResult.lead.urgency,
           knowledgeMode: knowledge.mode,
@@ -240,12 +277,10 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json({
+        assistantId,
+        assistant_id: assistantId,
         ...workflowResult,
-        knowledge: {
-          mode: knowledge.mode,
-          sourceTitle: knowledge.sourceTitle,
-          matches: knowledge.matches.length,
-        },
+        knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
       });
     }
 
@@ -279,6 +314,7 @@ export async function POST(request: Request) {
         body: workflowResult.reply.slice(0, 120),
         url: '/conversations',
         metadata: {
+          assistantId,
           score: workflowResult.lead.score,
           urgency: workflowResult.lead.urgency,
           knowledgeMode: knowledge.mode,
@@ -289,12 +325,10 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json({
+        assistantId,
+        assistant_id: assistantId,
         ...workflowResult,
-        knowledge: {
-          mode: knowledge.mode,
-          sourceTitle: knowledge.sourceTitle,
-          matches: knowledge.matches.length,
-        },
+        knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
       });
     }
 
@@ -405,6 +439,7 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       body: `Lead score ${workflowResult.lead.score}/100: ${workflowResult.lead.intent}`,
       url: '/conversations',
       metadata: {
+        assistantId,
         score: workflowResult.lead.score,
         urgency: workflowResult.lead.urgency,
         knowledgeMode: knowledge.mode,
@@ -415,12 +450,10 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
     });
 
     return NextResponse.json({
+      assistantId,
+      assistant_id: assistantId,
       ...workflowResult,
-      knowledge: {
-        mode: knowledge.mode,
-        sourceTitle: knowledge.sourceTitle,
-        matches: knowledge.matches.length,
-      },
+      knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not run AI workflow';
