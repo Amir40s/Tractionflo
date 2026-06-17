@@ -1,3 +1,5 @@
+import logger from './logger';
+
 type OpenAiChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -42,22 +44,13 @@ function logAiRequestToTerminal({
   maxTokens: number;
   messages: OpenAiChatMessage[];
 }) {
-  console.info(
-    [
-      "",
-      "----- AI REQUEST SENT -----",
-      `Endpoint: ${openAiChatCompletionsEndpoint}`,
-      "Method: POST",
-      "Authorization: [hidden]",
-      `Model: ${model}`,
-      `Max tokens: ${maxTokens}`,
-      `Time: ${new Date().toISOString()}`,
-      "Messages:",
-      formatAiMessagesForTerminal(messages),
-      "---------------------------",
-      "",
-    ].join("\n")
-  );
+  logger.info("AI REQUEST SENT", {
+    endpoint: openAiChatCompletionsEndpoint,
+    method: "POST",
+    model,
+    maxTokens,
+    messages,
+  });
 }
 
 function logAiResponseToTerminal({
@@ -72,25 +65,17 @@ function logAiResponseToTerminal({
   durationMs: number;
 }) {
   const content = data.choices?.[0]?.message?.content?.trim() || "";
-  const usage = data.usage
-    ? `Usage: prompt=${data.usage.prompt_tokens || 0}, completion=${data.usage.completion_tokens || 0}, total=${data.usage.total_tokens || 0}`
-    : "Usage: unavailable";
+  const usage = data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
-  console.info(
-    [
-      "",
-      "----- AI RESPONSE RECEIVED -----",
-      `Status: ${response.status} ${response.statusText}`,
-      `Model: ${model}`,
-      `Duration: ${durationMs}ms`,
-      `Time: ${new Date().toISOString()}`,
-      usage,
-      data.error?.message ? `Error: ${data.error.message}` : "",
-      content ? `Content:\n${content}` : "Content: [empty]",
-      "--------------------------------",
-      "",
-    ].join("\n")
-  );
+  logger.info("AI RESPONSE RECEIVED", {
+    status: response.status,
+    statusText: response.statusText,
+    model,
+    durationMs,
+    usage,
+    error: data.error?.message || undefined,
+    content,
+  });
 }
 
 export async function requestOpenAiChatCompletion({
@@ -150,7 +135,7 @@ export async function requestOpenAiChatCompletion({
     try {
       await onUsage(usage);
     } catch (error) {
-      console.error("OpenAI usage logging error:", error);
+      logger.error("OpenAI usage logging error:", { error });
     }
   }
 

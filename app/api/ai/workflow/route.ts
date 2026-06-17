@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import logger from '@/lib/logger';
 import {
   defaultAiLeadInsight,
   getEnabledWorkflowMap,
@@ -188,6 +189,7 @@ function normalizeWorkflowResult(value: string, enabledWorkflows: AiWorkflowRunR
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as WorkflowPayload;
+    logger.info("Received request in /api/ai/workflow", { payload });
     const supabase = await createClient();
     const {
       data: { user },
@@ -273,7 +275,7 @@ export async function POST(request: Request) {
           sourceTitle: knowledge.sourceTitle || '',
         },
       }).catch((notificationError) => {
-        console.error('Realtime booking workflow notification error:', notificationError);
+        logger.error('Realtime booking workflow notification error:', { error: notificationError });
       });
 
       return NextResponse.json({
@@ -321,7 +323,7 @@ export async function POST(request: Request) {
           sourceTitle: knowledge.sourceTitle || '',
         },
       }).catch((notificationError) => {
-        console.error('Realtime knowledge workflow notification error:', notificationError);
+        logger.error('Realtime knowledge workflow notification error:', { error: notificationError });
       });
 
       return NextResponse.json({
@@ -446,7 +448,7 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
         sourceTitle: knowledge.sourceTitle || '',
       },
     }).catch((notificationError) => {
-      console.error('Realtime AI workflow notification error:', notificationError);
+      logger.error('Realtime AI workflow notification error:', { error: notificationError });
     });
 
     return NextResponse.json({
@@ -457,7 +459,7 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not run AI workflow';
-    console.error('OpenAI workflow error:', error);
+    logger.error('OpenAI workflow error:', { error });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

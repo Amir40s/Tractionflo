@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import logger from '@/lib/logger';
 import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
 import { buildBookingFollowUpReply, buildBookingMemoryPrompt, shouldUseConversationAwareReply } from '@/lib/conversation-context';
 import { searchKnowledgeSources } from '@/lib/knowledge-base';
@@ -75,6 +76,7 @@ function summarizeKnowledgeForResponse(
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as ReplyPayload;
+    logger.info("Received request in /api/ai/reply", { payload });
     const supabase = await createClient();
     const {
       data: { user },
@@ -133,7 +135,7 @@ export async function POST(request: Request) {
           sourceTitle: knowledge.sourceTitle || '',
         },
       }).catch((notificationError) => {
-        console.error('Realtime booking reply notification error:', notificationError);
+        logger.error('Realtime booking reply notification error:', { error: notificationError });
       });
 
       return NextResponse.json({
@@ -160,7 +162,7 @@ export async function POST(request: Request) {
           sourceTitle: knowledge.sourceTitle || '',
         },
       }).catch((notificationError) => {
-        console.error('Realtime knowledge reply notification error:', notificationError);
+        logger.error('Realtime knowledge reply notification error:', { error: notificationError });
       });
 
       return NextResponse.json({
@@ -251,7 +253,7 @@ Write the next best reply.`,
         sourceTitle: knowledge.sourceTitle || '',
       },
     }).catch((notificationError) => {
-      console.error('Realtime AI reply notification error:', notificationError);
+      logger.error('Realtime AI reply notification error:', { error: notificationError });
     });
 
     return NextResponse.json({
@@ -263,7 +265,7 @@ Write the next best reply.`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not generate AI reply';
-    console.error('OpenAI reply generation error:', error);
+    logger.error('OpenAI reply generation error:', { error });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
