@@ -43,6 +43,7 @@ export type KnowledgeSourceIndex = {
   updatedAt: string;
   chunks: KnowledgeSourceChunk[];
   qaPairs: KnowledgeQaPair[];
+  openAiFileId?: string;
 };
 
 export type KnowledgeSourceSummary = Omit<KnowledgeSourceIndex, "chunks" | "qaPairs"> & {
@@ -530,6 +531,7 @@ export function buildKnowledgeSourceIndex({
   status,
   createdAt,
   updatedAt,
+  openAiFileId,
 }: {
   userId: string;
   sourceId: string;
@@ -546,6 +548,7 @@ export function buildKnowledgeSourceIndex({
   status?: KnowledgeSourceIndex["status"];
   createdAt?: string;
   updatedAt?: string;
+  openAiFileId?: string;
 }): KnowledgeSourceIndex {
   const normalizedText = normalizeKnowledgeText(text);
   const kind = getKnowledgeSourceKind(fileName, mimeType);
@@ -589,6 +592,7 @@ export function buildKnowledgeSourceIndex({
     updatedAt: updatedAt || now,
     chunks,
     qaPairs,
+    openAiFileId,
   };
 }
 
@@ -725,6 +729,7 @@ export function normalizeKnowledgeSourceIndex(value: unknown): KnowledgeSourceIn
     updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : new Date().toISOString(),
     chunks: normalizedChunks,
     qaPairs: normalizedQaPairs,
+    openAiFileId: typeof source.openAiFileId === "string" ? source.openAiFileId : undefined,
   };
 }
 

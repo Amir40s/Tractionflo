@@ -13,6 +13,8 @@ import {
 } from "@/lib/knowledge-base";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
+import { getStoredOpenAiKey } from "@/lib/ai-integration";
+import { removeFileFromVectorStore, uploadFileToVectorStore } from "@/lib/openai-assistants";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -376,7 +378,29 @@ export async function PATCH(request: Request, context: { params: { sourceId: str
         status: nextSource.status,
         createdAt: nextSource.createdAt,
         updatedAt: new Date().toISOString(),
+        openAiFileId: nextSource.openAiFileId,
       });
+
+      if (nextSource.openAiFileId) {
+        const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+        const apiKey = getStoredOpenAiKey(metadata);
+        const vectorStoreId = metadata.openai_vector_store_id as string | undefined;
+        if (apiKey && vectorStoreId) {
+          try {
+            await removeFileFromVectorStore({ apiKey, vectorStoreId, fileId: nextSource.openAiFileId });
+            const newFile = await uploadFileToVectorStore({
+              apiKey,
+              vectorStoreId,
+              fileBuffer: Buffer.from(indexedText, "utf8"),
+              fileName: nextSource.fileName,
+              mimeType: "text/plain",
+            });
+            nextSource.openAiFileId = newFile.id;
+          } catch (e) {
+            console.error("Failed to replace OpenAI file during PATCH", e);
+          }
+        }
+      }
     }
 
     if (sectionsToSave.length === 0) {
@@ -426,6 +450,15 @@ export async function DELETE(_request: Request, context: { params: { sourceId: s
 
     if (paths.length > 0) {
       await supabase.storage.from(knowledgeBucketName).remove(paths);
+    }
+
+    if (source.openAiFileId) {
+      const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+      const apiKey = getStoredOpenAiKey(metadata);
+      const vectorStoreId = metadata.openai_vector_store_id as string | undefined;
+      if (apiKey && vectorStoreId) {
+        await removeFileFromVectorStore({ apiKey, vectorStoreId, fileId: source.openAiFileId });
+      }
     }
 
     return NextResponse.json({

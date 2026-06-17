@@ -97,7 +97,7 @@ export default async function LoginPage({
               <p className="text-foreground-muted text-sm font-medium">Login to your account and continue to manage your Instagram Automation</p>
             </div>
 
-            <form className="space-y-4">
+            <form action={login} className="space-y-4">
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
@@ -140,7 +140,7 @@ export default async function LoginPage({
               )}
 
               <button 
-                formAction={login}
+                type="submit"
                 className="w-full bg-primary hover:bg-primary-hover text-black font-bold py-3.5 px-4 rounded-xl transition-all shadow-md flex justify-center items-center gap-2 text-base"
               >
                 Login to Dashboard

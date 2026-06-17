@@ -18,6 +18,8 @@ import {
 } from "@/lib/knowledge-base";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
+import { getStoredOpenAiKey } from "@/lib/ai-integration";
+import { getOrCreateAssistant, getOrCreateVectorStore, attachVectorStoreToAssistant, uploadFileToVectorStore } from "@/lib/openai-assistants";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -121,6 +123,33 @@ export async function POST(request: Request) {
     await ensureKnowledgeBucket(supabase);
     const existingSources = await listKnowledgeSourceIndexes(supabase, user.id);
 
+    const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+    const apiKey = getStoredOpenAiKey(metadata);
+
+    if (!apiKey) {
+      return NextResponse.json({ error: "OpenAI API key is missing. Please save it in Settings first to use the Assistants API." }, { status: 400 });
+    }
+
+    let assistantId = metadata.openai_assistant_id as string | undefined;
+    let vectorStoreId = metadata.openai_vector_store_id as string | undefined;
+
+    const assistant = await getOrCreateAssistant({ apiKey, assistantId });
+    const vectorStore = await getOrCreateVectorStore({ apiKey, vectorStoreId });
+    
+    if (assistant.id !== assistantId || vectorStore.id !== vectorStoreId) {
+      assistantId = assistant.id;
+      vectorStoreId = vectorStore.id;
+      await attachVectorStoreToAssistant({ apiKey, assistantId, vectorStoreId: vectorStoreId as string });
+      
+      const authSupabase = await createClient();
+      await authSupabase.auth.updateUser({ 
+        data: { 
+          openai_assistant_id: assistantId,
+          openai_vector_store_id: vectorStoreId
+        } 
+      });
+    }
+
     if (contentType.includes("application/json")) {
       const payload = (await request.json()) as ManualKnowledgePayload;
       const category = normalizeManualCategory(payload.category);
@@ -137,6 +166,15 @@ export async function POST(request: Request) {
       const { indexPath } = createKnowledgeStoragePaths(user.id, sourceId, fileName);
       const indexedText = `Category: ${category}\nTitle: ${title}\n\n${content}`;
       const bytes = Buffer.from(indexedText, "utf8");
+
+      const uploadedOpenAiFile = await uploadFileToVectorStore({
+        apiKey,
+        vectorStoreId: vectorStoreId!,
+        fileBuffer: bytes,
+        fileName,
+        mimeType: "text/plain", // OpenAI doesn't like custom mimetypes
+      });
+
       const assignment = existingSources.length === 0 ? "default" : normalizeAssignment(payload.assignment);
       const sourceIndex = buildKnowledgeSourceIndex({
         userId: user.id,
@@ -149,6 +187,7 @@ export async function POST(request: Request) {
         text: indexedText,
         assignment,
         categories: [category],
+        openAiFileId: uploadedOpenAiFile.id,
       });
 
       await saveKnowledgeSourceIndex(supabase, sourceIndex);
@@ -195,6 +234,15 @@ export async function POST(request: Request) {
     const sourceId = globalThis.crypto.randomUUID();
     const { filePath, indexPath } = createKnowledgeStoragePaths(user.id, sourceId, file.name);
     const bytes = Buffer.from(await file.arrayBuffer());
+    
+    const uploadedOpenAiFile = await uploadFileToVectorStore({
+      apiKey,
+      vectorStoreId: vectorStoreId!,
+      fileBuffer: bytes,
+      fileName: file.name,
+      mimeType,
+    });
+
     const extractedText = await extractKnowledgeText({
       buffer: bytes,
       fileName: file.name,
@@ -211,6 +259,7 @@ export async function POST(request: Request) {
       indexPath,
       text: extractedText,
       assignment,
+      openAiFileId: uploadedOpenAiFile.id,
     });
 
     const upload = await supabase.storage.from(knowledgeBucketName).upload(filePath, bytes, {
