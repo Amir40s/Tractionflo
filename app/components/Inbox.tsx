@@ -239,6 +239,8 @@ type ComposerDraft = {
   mode: ComposerMode;
 };
 
+const inboxConversationNotesStorageKey = "tractionflo:inbox-conversation-notes:v1";
+
 const savedSnippets = [
   "Thanks for reaching out! How can I help you today? 😊",
   "Absolutely, I can send the details here.",
@@ -407,6 +409,116 @@ function getLeadSummary(lead: AiLeadInsight | undefined) {
   return lead.summary || lead.recommendedAction;
 }
 
+function isNoteMessage(message: IGMessage) {
+  return message.from === "note";
+}
+
+function getInboxAccountKey(account: IGAccount | null, assistantId: string, igUserId: string) {
+  return account?.id || account?.assistant_id || account?.assistantId || assistantId || igUserId || "default";
+}
+
+function getConversationNoteKey(conversation: IGConversation, accountKey: string) {
+  const participantKey = conversation.participant.id || conversation.participant.username || conversation.id;
+
+  return `${accountKey}:${participantKey}`;
+}
+
+function normalizeStoredNote(note: unknown): IGMessage | null {
+  if (!note || typeof note !== "object") {
+    return null;
+  }
+
+  const candidate = note as Partial<IGMessage>;
+
+  if (candidate.from !== "note" || typeof candidate.text !== "string" || !candidate.text.trim()) {
+    return null;
+  }
+
+  return {
+    id: typeof candidate.id === "string" && candidate.id ? candidate.id : `note-${globalThis.crypto?.randomUUID?.() || Date.now()}`,
+    text: candidate.text,
+    attachments: [],
+    from: "note",
+    sender_name: typeof candidate.sender_name === "string" && candidate.sender_name ? candidate.sender_name : "Internal note",
+    sender_id: "internal-note",
+    time: typeof candidate.time === "string" && candidate.time ? candidate.time : new Date().toISOString(),
+    status: "sent",
+  };
+}
+
+function readStoredConversationNotes() {
+  if (typeof window === "undefined") {
+    return {} as Record<string, IGMessage[]>;
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(inboxConversationNotesStorageKey);
+
+    if (!storedValue) {
+      return {} as Record<string, IGMessage[]>;
+    }
+
+    const parsed = JSON.parse(storedValue) as Record<string, unknown>;
+
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([key, value]) => {
+          const notes = Array.isArray(value)
+            ? value
+                .map(normalizeStoredNote)
+                .filter((note): note is IGMessage => Boolean(note))
+                .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+            : [];
+
+          return [key, notes];
+        })
+        .filter(([, notes]) => notes.length > 0)
+    );
+  } catch {
+    return {} as Record<string, IGMessage[]>;
+  }
+}
+
+function writeStoredConversationNotes(notesByKey: Record<string, IGMessage[]>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(inboxConversationNotesStorageKey, JSON.stringify(notesByKey));
+  } catch {
+    // Notes are a convenience layer; keep the inbox usable if storage is unavailable.
+  }
+}
+
+function getConversationNotes(conversation: IGConversation | null) {
+  return (conversation?.messages || [])
+    .filter(isNoteMessage)
+    .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+}
+
+function mergeConversationNotes(
+  conversations: IGConversation[],
+  notesByKey: Record<string, IGMessage[]>,
+  accountKey: string
+) {
+  return conversations.map((conversation) => {
+    const noteKey = getConversationNoteKey(conversation, accountKey);
+    const storedNotes = notesByKey[noteKey] || [];
+    const messageIds = new Set(conversation.messages.map((message) => message.id));
+    const notesToAdd = storedNotes.filter((note) => !messageIds.has(note.id));
+
+    if (notesToAdd.length === 0) {
+      return conversation;
+    }
+
+    return {
+      ...conversation,
+      messages: [...notesToAdd, ...conversation.messages],
+    };
+  });
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Avatar({ src, name, size = "h-10 w-10" }: { src: string; name: string; size?: string }) {
@@ -455,6 +567,7 @@ function ConvList({
   onRefresh,
   onDisconnect,
   onConnectNew,
+  connectionNotice,
   disconnecting,
   connectingNew,
 }: {
@@ -468,10 +581,12 @@ function ConvList({
   onRefresh: () => void;
   onDisconnect: () => void;
   onConnectNew: () => void;
+  connectionNotice: string | null;
   disconnecting: boolean;
   connectingNew: boolean;
 }) {
-  const isConnected = Boolean(account || convs.length > 0 || (error && error !== "No Instagram account connected"));
+  const ownershipError = Boolean(error && /already connected to another TractionFlo user/i.test(error));
+  const isConnected = Boolean(account || convs.length > 0);
   const needsConnection = error === "No Instagram account connected";
   const needsReconnect = Boolean(error && /access token|session has expired|oauth/i.test(error));
 
@@ -518,6 +633,12 @@ function ConvList({
       </header>
 
       <div className="flex-1 overflow-y-auto px-2.5 pb-3">
+        {connectionNotice && (
+          <div className="mx-3 mb-3 rounded-[10px] border border-[#ccefd8] bg-[#f4fff8] px-3 py-2 text-[11px] font-semibold text-[#0a8f3a]">
+            {connectionNotice}
+          </div>
+        )}
+
         {loading ? (
           <div className="flex flex-col items-center justify-center gap-3 pt-16 text-center">
             <Loader2 size={22} className="animate-spin text-[#4b3cff]" />
@@ -544,8 +665,15 @@ function ConvList({
         ) : error ? (
           <div className="mx-3 mt-6 rounded-[10px] border border-[#ffd5dd] bg-[#fff7f9] p-4 text-center">
             <TriangleAlert size={18} className="mx-auto mb-2 text-[#df405b]" />
-            <p className="text-[12px] font-extrabold text-[#df405b]">Could not load DMs</p>
+            <p className="text-[12px] font-extrabold text-[#df405b]">
+              {ownershipError ? "Instagram already linked" : "Could not load DMs"}
+            </p>
             <p className="mt-1 text-[11px] font-medium text-[#596175]">{error}</p>
+            {ownershipError && (
+              <p className="mt-2 text-[11px] font-medium leading-[1.45] text-[#596175]">
+                Disconnect this Instagram from the first TractionFlo account before connecting it here.
+              </p>
+            )}
             <button
               type="button"
               onClick={onRefresh}
@@ -554,14 +682,14 @@ function ConvList({
               <RefreshCw size={13} />
               Retry
             </button>
-            {needsReconnect && (
+            {(needsReconnect || ownershipError) && (
               <button
                 type="button"
                 onClick={onConnectNew}
                 disabled={connectingNew}
                 className="mt-2 flex h-8 w-full items-center justify-center rounded-[8px] bg-[#3044ff] px-3 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {connectingNew ? "Opening Instagram" : "Reconnect Instagram"}
+                {connectingNew ? "Opening Instagram" : ownershipError ? "Try another Instagram" : "Reconnect Instagram"}
               </button>
             )}
           </div>
@@ -1513,6 +1641,7 @@ function SummaryPanel({
   const lastMessage = msgs[msgs.length - 1];
   const latestInboundMessage = lastMessage?.from === "user" ? lastMessage : null;
   const lastAutoSendKeyRef = useRef("");
+  const conversationNotes = getConversationNotes(conv);
 
   useEffect(() => {
     takeoverModeRef.current = takeoverMode;
@@ -1770,6 +1899,34 @@ function SummaryPanel({
                 </div>
               </div>
 
+              <div className="mt-3 rounded-[10px] border border-[#edf0f6] bg-[#fffdf7] p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="flex min-w-0 items-center gap-1.5 text-[12px] font-extrabold text-black">
+                    <Bookmark size={14} className="text-[#9b6a00]" strokeWidth={2.35} />
+                    Notes
+                  </h3>
+                  <span className="rounded-full bg-[#fff1c7] px-2 py-0.5 text-[10px] font-extrabold text-[#8a6500]">
+                    {conversationNotes.length}
+                  </span>
+                </div>
+                <div className="mt-2 space-y-2">
+                  {conversationNotes.length > 0 ? (
+                    conversationNotes.slice(0, 3).map((note) => (
+                      <div key={note.id} className="rounded-[8px] border border-[#ffe7ad] bg-white px-2.5 py-2">
+                        <p className="whitespace-pre-wrap break-words text-[11px] font-semibold leading-[1.45] text-[#342b13]">
+                          {note.text}
+                        </p>
+                        <p className="mt-1 text-[10px] font-bold text-[#8a7a58]">{relativeTime(note.time)}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-[8px] bg-white px-2.5 py-2 text-[11px] font-semibold leading-relaxed text-[#8a7a58]">
+                      No saved notes for this person.
+                    </p>
+                  )}
+                </div>
+              </div>
+
               {!isHumanTakeover ? (
                 <div className="mt-3 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-2.5">
                   <div className="flex items-center justify-between gap-2">
@@ -1943,6 +2100,7 @@ export default function Inbox() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [connectingNew, setConnectingNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [composerStatus, setComposerStatus] = useState<ComposerStatus>({
     sending: false,
@@ -1956,7 +2114,11 @@ export default function Inbox() {
   const [assignmentSavingAgentId, setAssignmentSavingAgentId] = useState("");
   const [assignmentStatus, setAssignmentStatus] = useState("");
   const [takeoverModes, setTakeoverModes] = useState<Record<string, ConversationTakeoverMode>>({});
+  const [savedConversationNotes, setSavedConversationNotes] = useState<Record<string, IGMessage[]>>(() =>
+    readStoredConversationNotes()
+  );
   const hasLoadedInboxRef = useRef(false);
+  const oauthErrorRef = useRef("");
   const activeIdRef = useRef<string | null>(null);
   const activeTakeoverModeRef = useRef<ConversationTakeoverMode>("ai");
 
@@ -1973,7 +2135,7 @@ export default function Inbox() {
       setRefreshing(true);
     }
 
-    setError(null);
+    setError(oauthErrorRef.current || null);
     try {
       const res = await fetch("/api/instagram/conversations", { cache: "no-store" });
       const data: APIResponse = await res.json();
@@ -1984,9 +2146,14 @@ export default function Inbox() {
         setIgUserId("");
         setAssistantId(data.assistant_id || data.assistantId || data.account?.assistant_id || data.account?.assistantId || "");
         setAccount(data.account ?? null);
-        setError(data.error);
+        setError(oauthErrorRef.current || data.error);
       } else {
-        const nextConversations = data.conversations || [];
+        oauthErrorRef.current = "";
+        const nextAssistantId = data.assistant_id || data.assistantId || data.account?.assistant_id || data.account?.assistantId || "";
+        const nextIgUserId = data.ig_user_id || igUserId;
+        const nextAccount = data.account ?? null;
+        const nextAccountKey = getInboxAccountKey(nextAccount, nextAssistantId, nextIgUserId);
+        const nextConversations = mergeConversationNotes(data.conversations || [], savedConversationNotes, nextAccountKey);
         const requestedConversationId =
           typeof window !== "undefined" && !hasLoadedInboxRef.current
             ? new URLSearchParams(window.location.search).get("conversation")
@@ -1995,8 +2162,8 @@ export default function Inbox() {
           getConversationsSignature(current) === getConversationsSignature(nextConversations) ? current : nextConversations
         );
         if (data.ig_user_id) setIgUserId(data.ig_user_id);
-        setAssistantId(data.assistant_id || data.assistantId || data.account?.assistant_id || data.account?.assistantId || "");
-        setAccount(data.account ?? null);
+        setAssistantId(nextAssistantId);
+        setAccount(nextAccount);
         if (requestedConversationId && nextConversations.some((conversation) => conversation.id === requestedConversationId)) {
           setActiveId(requestedConversationId);
         } else if (nextConversations.length > 0 && !activeIdRef.current) {
@@ -2010,7 +2177,7 @@ export default function Inbox() {
       setRefreshing(false);
       hasLoadedInboxRef.current = true;
     }
-  }, []);
+  }, [igUserId, savedConversationNotes]);
 
   const disconnectInstagram = useCallback(async () => {
     setDisconnecting(true);
@@ -2044,6 +2211,8 @@ export default function Inbox() {
   const connectNewInstagram = useCallback(async () => {
     setConnectingNew(true);
     setError(null);
+    setConnectionNotice(null);
+    oauthErrorRef.current = "";
 
     window.location.href = "/api/auth/instagram?next=/conversations";
   }, []);
@@ -2173,6 +2342,23 @@ export default function Inbox() {
       );
 
       if (payload.mode === "note") {
+        const accountKey = getInboxAccountKey(account, assistantId, igUserId);
+        const noteKey = getConversationNoteKey(targetConv, accountKey);
+
+        setSavedConversationNotes((current) => {
+          const currentNotes = current[noteKey] || [];
+          const nextNotes = [localMessage, ...currentNotes.filter((note) => note.id !== localMessage.id)]
+            .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+            .slice(0, 50);
+          const nextNotesByKey = {
+            ...current,
+            [noteKey]: nextNotes,
+          };
+
+          writeStoredConversationNotes(nextNotesByKey);
+
+          return nextNotesByKey;
+        });
         setComposerStatus({ sending: false, error: null, notice: "Note saved" });
         return;
       }
@@ -2291,10 +2477,39 @@ export default function Inbox() {
         throw new Error(message);
       }
     },
-    [account?.name, account?.username, activeId, convs, fetchConvs, igUserId]
+    [account, activeId, assistantId, convs, fetchConvs, igUserId]
   );
 
   useEffect(() => {
+    let messageTimeout: number | undefined;
+
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      const igError = url.searchParams.get("ig_error");
+      const igConnected = url.searchParams.get("ig_connected") === "true";
+
+      if (igError) {
+        oauthErrorRef.current = igError;
+        messageTimeout = window.setTimeout(() => {
+          setError(igError);
+          setConnectionNotice(null);
+        }, 0);
+      } else if (igConnected) {
+        oauthErrorRef.current = "";
+        messageTimeout = window.setTimeout(() => {
+          setConnectionNotice("Instagram connected. Refreshing inbox...");
+          setError(null);
+        }, 0);
+      }
+
+      if (igError || igConnected) {
+        url.searchParams.delete("ig_error");
+        url.searchParams.delete("ig_connected");
+        url.searchParams.delete("ig_error_code");
+        window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      }
+    }
+
     const timeout = window.setTimeout(() => {
       void fetchConvs({ showLoader: true });
     }, 0);
@@ -2303,6 +2518,10 @@ export default function Inbox() {
     }, 15_000);
 
     return () => {
+      if (messageTimeout) {
+        window.clearTimeout(messageTimeout);
+      }
+
       window.clearTimeout(timeout);
       window.clearInterval(interval);
     };
@@ -2435,6 +2654,7 @@ export default function Inbox() {
         }}
         onDisconnect={disconnectInstagram}
         onConnectNew={connectNewInstagram}
+        connectionNotice={connectionNotice}
         disconnecting={disconnecting}
         connectingNew={connectingNew}
       />
