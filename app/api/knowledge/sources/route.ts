@@ -6,6 +6,7 @@ import {
   ensureKnowledgeBucket,
   extractKnowledgeText,
   getKnowledgeSourceKind,
+  knowledgeCategoryOptions,
   knowledgeAssignmentLabels,
   knowledgeBucketName,
   listKnowledgeSourceIndexes,
@@ -13,6 +14,7 @@ import {
   saveKnowledgeSourceIndex,
   summarizeKnowledgeSource,
   type KnowledgeAssignment,
+  type KnowledgeCategoryOption,
 } from "@/lib/knowledge-base";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
@@ -24,10 +26,36 @@ function isUploadFile(value: FormDataEntryValue | null): value is File {
   return typeof File !== "undefined" && value instanceof File;
 }
 
-function normalizeAssignment(value: FormDataEntryValue | null): KnowledgeAssignment {
+type ManualKnowledgePayload = {
+  title?: string;
+  category?: string;
+  content?: string;
+  assignment?: string;
+};
+
+function normalizeAssignment(value: FormDataEntryValue | string | null | undefined): KnowledgeAssignment {
   return value === "default" || value === "auto" || value === "cricket" || value === "padel" || value === "general"
     ? value
     : "auto";
+}
+
+function normalizeManualCategory(value: unknown): KnowledgeCategoryOption {
+  return knowledgeCategoryOptions.includes(value as KnowledgeCategoryOption)
+    ? (value as KnowledgeCategoryOption)
+    : "Business Information";
+}
+
+function normalizeManualTitle(value: unknown, category: KnowledgeCategoryOption) {
+  if (typeof value !== "string") {
+    return category;
+  }
+
+  const title = value.trim().replace(/\s+/g, " ").slice(0, 120);
+  return title || category;
+}
+
+function normalizeManualContent(value: unknown) {
+  return typeof value === "string" ? value.trim().slice(0, 80_000) : "";
 }
 
 async function getAuthenticatedKnowledgeUser() {
@@ -70,7 +98,7 @@ export async function GET() {
       assignmentLabels: knowledgeAssignmentLabels,
       limits: {
         maxFileBytes: maxKnowledgeFileBytes,
-        supportedTypes: ["PDF", "TXT"],
+        supportedTypes: ["PDF", "TXT", "Manual text"],
       },
     });
   } catch (error) {
@@ -86,6 +114,51 @@ export async function POST(request: Request) {
 
     if (error || !user) {
       return error;
+    }
+
+    const contentType = request.headers.get("content-type") || "";
+    const supabase = createSupabaseServiceClient();
+    await ensureKnowledgeBucket(supabase);
+    const existingSources = await listKnowledgeSourceIndexes(supabase, user.id);
+
+    if (contentType.includes("application/json")) {
+      const payload = (await request.json()) as ManualKnowledgePayload;
+      const category = normalizeManualCategory(payload.category);
+      const title = normalizeManualTitle(payload.title, category);
+      const content = normalizeManualContent(payload.content);
+
+      if (content.length < 10) {
+        return NextResponse.json({ error: "Add at least 10 characters of manual knowledge." }, { status: 400 });
+      }
+
+      const sourceId = globalThis.crypto.randomUUID();
+      const safeTitleForFile = title.replace(/[^a-zA-Z0-9._ -]/g, "-").replace(/\s+/g, " ").trim() || category;
+      const fileName = `${safeTitleForFile}.manual.txt`;
+      const { indexPath } = createKnowledgeStoragePaths(user.id, sourceId, fileName);
+      const indexedText = `Category: ${category}\nTitle: ${title}\n\n${content}`;
+      const bytes = Buffer.from(indexedText, "utf8");
+      const assignment = existingSources.length === 0 ? "default" : normalizeAssignment(payload.assignment);
+      const sourceIndex = buildKnowledgeSourceIndex({
+        userId: user.id,
+        sourceId,
+        fileName,
+        mimeType: "text/x-tractionflo-manual",
+        fileSize: bytes.byteLength,
+        filePath: "",
+        indexPath,
+        text: indexedText,
+        assignment,
+        categories: [category],
+      });
+
+      await saveKnowledgeSourceIndex(supabase, sourceIndex);
+
+      const nextSources = [sourceIndex, ...existingSources].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+
+      return NextResponse.json({
+        source: summarizeKnowledgeSource(sourceIndex),
+        sources: nextSources.map(summarizeKnowledgeSource),
+      });
     }
 
     const formData = await request.formData();
@@ -108,10 +181,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: message }, { status: 400 });
     }
 
-    const supabase = createSupabaseServiceClient();
-    await ensureKnowledgeBucket(supabase);
-
-    const existingSources = await listKnowledgeSourceIndexes(supabase, user.id);
     const sourceId = globalThis.crypto.randomUUID();
     const { filePath, indexPath } = createKnowledgeStoragePaths(user.id, sourceId, file.name);
     const bytes = Buffer.from(await file.arrayBuffer());

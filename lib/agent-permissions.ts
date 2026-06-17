@@ -1,6 +1,7 @@
 export type PagePermissionId =
   | "dashboard"
   | "inbox"
+  | "instagram-content"
   | "opportunities"
   | "audience"
   | "knowledge"
@@ -21,6 +22,7 @@ export type UserPermissionProfile = {
 export const pagePermissionOptions: { id: PagePermissionId; label: string; detail: string }[] = [
   { id: "dashboard", label: "Dashboard", detail: "Overview, revenue, and activity" },
   { id: "inbox", label: "Conversations", detail: "Assigned Instagram conversations" },
+  { id: "instagram-content", label: "Posts & Stories", detail: "Instagram posts, stories, and comment replies" },
   { id: "opportunities", label: "Opportunities", detail: "Lead pipeline and review cards" },
   { id: "audience", label: "Audience", detail: "Audience segments and insights" },
   { id: "knowledge", label: "Knowledge Base", detail: "Training sources and content" },

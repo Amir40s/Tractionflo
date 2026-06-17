@@ -57,6 +57,7 @@ import {
   Target,
   TriangleAlert,
   TrendingUp,
+  Trash2,
   UploadCloud,
   User,
   Users,
@@ -64,6 +65,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Inbox from "../components/Inbox";
+import InstagramContentPage from "../components/InstagramContentPage";
 import { signout } from "../login/actions";
 import {
   defaultAiBehaviorSettings,
@@ -89,9 +91,18 @@ import {
   settingsStateStorageKey,
   type NotificationSetting,
 } from "@/lib/notification-preferences";
-import type { KnowledgeAssignment, KnowledgeSourceSummary } from "@/lib/knowledge-base";
+import type { KnowledgeQaPair, KnowledgeSourceChunk, KnowledgeSourceSummary } from "@/lib/knowledge-base";
 
-type DashboardTab = "dashboard" | "inbox" | "opportunities" | "audience" | "knowledge" | "escalations" | "analytics" | "settings";
+type DashboardTab =
+  | "dashboard"
+  | "inbox"
+  | "instagram-content"
+  | "opportunities"
+  | "audience"
+  | "knowledge"
+  | "escalations"
+  | "analytics"
+  | "settings";
 
 type SuperAdminPage =
   | "overview"
@@ -253,6 +264,7 @@ function mergeAccountProfile(authProfile: AccountProfile | null, storedProfile: 
 const dashboardTabUrlValues: Record<DashboardTab, string> = {
   dashboard: "/dashboard",
   inbox: "/conversations",
+  "instagram-content": "/instagram-content",
   opportunities: "/opportunities",
   audience: "/audience",
   knowledge: "/knowledge-base",
@@ -270,6 +282,16 @@ function getDashboardTabFromUrl(): DashboardTab {
 
   if (pathname === "/conversations" || pathname === "/conversation") {
     return "inbox";
+  }
+
+  if (
+    pathname === "/instagram-content" ||
+    pathname.startsWith("/instagram-content/") ||
+    pathname === "/instagram" ||
+    pathname === "/instagram-posts" ||
+    pathname === "/instagram-stories"
+  ) {
+    return "instagram-content";
   }
 
   if (pathname === "/opportunities" || pathname === "/opporunies") {
@@ -300,6 +322,10 @@ function getDashboardTabFromUrl(): DashboardTab {
 
   if (view === "conversations" || view === "conversation" || view === "inbox") {
     return "inbox";
+  }
+
+  if (view === "instagram-content" || view === "instagram" || view === "instagram-posts" || view === "instagram-stories") {
+    return "instagram-content";
   }
 
   if (view === "opportunities" || view === "opporunies") {
@@ -572,13 +598,20 @@ type KnowledgeSource = {
   title: string;
   subtitle: string;
   type: string;
+  kind: KnowledgeSourceSummary["kind"];
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  characterCount: number;
+  sourceMode: "auto" | "manual";
+  sourceModeLabel: string;
   status: string;
   statusTone: string;
   updated: string;
   tone: string;
   typeTone: string;
   icon: LucideIcon;
-  assignment: KnowledgeAssignment;
+  directAnswerCount: number;
   active: boolean;
   wordCount: number;
   chunkCount: number;
@@ -605,13 +638,67 @@ type KnowledgeSourcesResponse = {
   error?: string;
 };
 
-const knowledgeAssignmentOptions: { value: KnowledgeAssignment; label: string }[] = [
-  { value: "auto", label: "Auto detect" },
-  { value: "default", label: "Default chatbot" },
-  { value: "cricket", label: "Cricket booking" },
-  { value: "padel", label: "Padel booking" },
-  { value: "general", label: "General support" },
-];
+type KnowledgeSourceDetail = KnowledgeSourceSummary & {
+  chunks: KnowledgeSourceChunk[];
+  qaPairs: KnowledgeQaPair[];
+};
+
+type KnowledgeSourceDetailResponse = {
+  source?: KnowledgeSourceSummary;
+  detail?: KnowledgeSourceDetail;
+  error?: string;
+};
+
+type KnowledgeViewTab = "overview" | "answers" | "text" | "details";
+
+type ManualFaqPair = {
+  id: string;
+  question: string;
+  answer: string;
+};
+
+type ManualKnowledgeDraft = {
+  title: string;
+  category: string;
+  content: string;
+  faqPairs: ManualFaqPair[];
+};
+
+type KnowledgeAssignmentValue = KnowledgeSourceSummary["assignment"];
+
+const knowledgeCategoryOptions = [
+  "FAQs",
+  "Products",
+  "Services",
+  "Pricing",
+  "Courses",
+  "Business Information",
+  "Lead Qualification",
+] as const;
+
+function createManualFaqPair(): ManualFaqPair {
+  return {
+    id: `faq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    question: "",
+    answer: "",
+  };
+}
+
+function getManualKnowledgeDraftContent(draft: ManualKnowledgeDraft) {
+  if (draft.category !== "FAQs") {
+    return draft.content.trim();
+  }
+
+  return draft.faqPairs
+    .map((pair) => ({
+      question: pair.question.trim(),
+      answer: pair.answer.trim(),
+    }))
+    .filter((pair) => pair.question || pair.answer)
+    .map((pair) => `Question: ${pair.question}\nAnswer: ${pair.answer}`)
+    .join("\n\n")
+    .trim();
+}
 
 type EscalationTab = {
   label: string;
@@ -773,6 +860,7 @@ type AppSettingsState = {
 const navItems: NavItem[] = [
   { label: "Dashboard", icon: Home, tab: "dashboard" },
   { label: "Conversations", icon: MessageSquare, tab: "inbox" },
+  { label: "Posts & Stories", icon: Heart, tab: "instagram-content" },
   { label: "Opportunities", icon: Target, tab: "opportunities" },
   { label: "Audience", icon: Users, tab: "audience" },
   { label: "Knowledge Base", icon: BookOpen, tab: "knowledge" },
@@ -1239,7 +1327,7 @@ function MobileNavigation({
   );
 
   return (
-    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-8 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur lg:hidden">
+    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-5 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur sm:grid-cols-9 lg:hidden">
       {mobileItems.map((item) => {
         const Icon = item.icon;
         const isActive = item.tab === activeTab;
@@ -1248,6 +1336,8 @@ function MobileNavigation({
             ? "Home"
             : item.label === "Conversations"
             ? "Chats"
+            : item.label === "Posts & Stories"
+            ? "Posts"
             : item.label === "Opportunities"
               ? "Opps"
               : item.label === "Knowledge Base"
@@ -10067,12 +10157,12 @@ function formatKnowledgeUpdated(value: string) {
 }
 
 function getKnowledgeSourceIcon(source: KnowledgeSourceSummary) {
-  if (source.categories.includes("Pricing")) {
-    return DollarSign;
+  if (source.categories.includes("FAQs")) {
+    return CircleHelp;
   }
 
-  if (source.categories.includes("Policies")) {
-    return Shield;
+  if (source.categories.includes("Pricing")) {
+    return DollarSign;
   }
 
   if (source.categories.includes("Courses")) {
@@ -10083,25 +10173,46 @@ function getKnowledgeSourceIcon(source: KnowledgeSourceSummary) {
     return Box;
   }
 
+  if (source.categories.includes("Lead Qualification")) {
+    return Target;
+  }
+
+  if (source.categories.includes("Business Information")) {
+    return BriefcaseBusiness;
+  }
+
+  if (source.categories.includes("Services")) {
+    return Sparkles;
+  }
+
   return FileText;
 }
 
 function mapKnowledgeSourceSummary(source: KnowledgeSourceSummary): KnowledgeSource {
   const isPdf = source.kind === "pdf";
+  const isManual = source.kind === "manual";
   const activeStatus = source.active ? "Ready" : "Inactive";
+  const answerCount = source.directAnswerCount || 0;
 
   return {
     id: source.id,
     title: source.title,
-    subtitle: `${formatKnowledgeInteger(source.wordCount)} words • ${formatKnowledgeInteger(source.chunkCount)} chunks • ${formatKnowledgeBytes(source.fileSize)}`,
-    type: isPdf ? "PDF" : "TXT",
+    subtitle: `${formatKnowledgeInteger(source.wordCount)} words • ${formatKnowledgeInteger(source.chunkCount)} chunks${answerCount > 0 ? ` • ${formatKnowledgeInteger(answerCount)} answer${answerCount === 1 ? "" : "s"}` : ""} • ${formatKnowledgeBytes(source.fileSize)}`,
+    type: isPdf ? "PDF" : isManual ? "Manual" : "TXT",
+    kind: source.kind,
+    fileName: source.fileName,
+    mimeType: source.mimeType,
+    fileSize: source.fileSize,
+    characterCount: source.characterCount,
+    sourceMode: isManual ? "manual" : "auto",
+    sourceModeLabel: isManual ? "Manual entry" : "Auto scanned",
     status: activeStatus,
     statusTone: source.active ? "bg-[#e7f8ed] text-[#0a9b3f]" : "bg-[#eff1f6] text-[#596175]",
     updated: formatKnowledgeUpdated(source.updatedAt),
-    tone: isPdf ? "bg-[#fff0f3] text-[#df405b]" : "bg-[#eef4ff] text-[#246bff]",
-    typeTone: isPdf ? "bg-[#fff0f3] text-[#df405b]" : "bg-[#eef4ff] text-[#246bff]",
+    tone: isPdf ? "bg-[#fff0f3] text-[#df405b]" : isManual ? "bg-[#f0edff] text-[#4b3cff]" : "bg-[#eef4ff] text-[#246bff]",
+    typeTone: isPdf ? "bg-[#fff0f3] text-[#df405b]" : isManual ? "bg-[#f0edff] text-[#4b3cff]" : "bg-[#eef4ff] text-[#246bff]",
     icon: getKnowledgeSourceIcon(source),
-    assignment: source.assignment,
+    directAnswerCount: answerCount,
     active: source.active,
     wordCount: source.wordCount,
     chunkCount: source.chunkCount,
@@ -10115,12 +10226,12 @@ function buildKnowledgeTabsFromSources(sources: KnowledgeSourceSummary[]): Knowl
   return [
     { label: "All Sources", count: formatKnowledgeInteger(sources.length), icon: Bot },
     { label: "FAQs", count: formatKnowledgeInteger(activeSources.filter((source) => source.directAnswerCount > 0 || source.categories.includes("FAQs")).length), icon: CircleHelp },
-    { label: "Pricing", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Pricing")).length), icon: DollarSign },
     { label: "Products", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Products")).length), icon: Box },
     { label: "Services", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Services")).length), icon: Sparkles },
+    { label: "Pricing", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Pricing")).length), icon: DollarSign },
     { label: "Courses", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Courses")).length), icon: GraduationCap },
-    { label: "Policies", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Policies")).length), icon: Shield },
-    { label: "Website", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Website")).length), icon: Globe2 },
+    { label: "Business Info", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Business Information")).length), icon: BriefcaseBusiness },
+    { label: "Lead Qualification", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Lead Qualification")).length), icon: Target },
     { label: "PDFs", count: formatKnowledgeInteger(activeSources.filter((source) => source.kind === "pdf").length), icon: FileText },
   ];
 }
@@ -10148,10 +10259,10 @@ function buildKnowledgeInsightsFromSources(sources: KnowledgeSourceSummary[], fa
       icon: Check,
     },
     {
-      title: "Auto assignment",
-      detail: `${formatKnowledgeInteger(sources.filter((source) => source.assignment === "auto").length)} sources set to auto detect`,
+      title: "Active sources",
+      detail: `${formatKnowledgeInteger(activeSources.length)} sources enabled for AI replies`,
       tone: "bg-[#eef4ff] text-[#246bff]",
-      icon: Sparkles,
+      icon: BookOpen,
     },
   ];
 }
@@ -10159,7 +10270,7 @@ function buildKnowledgeInsightsFromSources(sources: KnowledgeSourceSummary[], fa
 function buildKnowledgeUpdatesFromSources(sources: KnowledgeSourceSummary[]): KnowledgeUpdate[] {
   return sources.slice(0, 4).map((source) => ({
     title: `${source.title} indexed`,
-    detail: `${formatKnowledgeInteger(source.chunkCount)} chunks saved for ${source.assignment === "auto" ? "auto detection" : "assigned replies"}`,
+    detail: `${formatKnowledgeInteger(source.chunkCount)} searchable chunks saved`,
     time: formatKnowledgeUpdated(source.updatedAt),
     tone: source.kind === "pdf" ? "bg-[#fff0f3] text-[#df405b]" : "bg-[#eef4ff] text-[#246bff]",
     icon: source.kind === "pdf" ? FileText : Database,
@@ -10196,22 +10307,441 @@ function KnowledgeTabs({ tabs }: { tabs: KnowledgeTab[] }) {
   );
 }
 
+const manualKnowledgePlaceholders: Record<string, string> = {
+  FAQs: "Question: What is included?\nAnswer: Include the exact answer customers should receive.\n\nQuestion: How do I book?\nAnswer: Explain the booking steps.",
+  Products: "Product name:\nDescription:\nBest for:\nPrice or package:\nHow to order:",
+  Services: "Service name:\nWhat is included:\nWho it is for:\nAvailability:\nNext step:",
+  Pricing: "Plan or package:\nPrice:\nWhat is included:\nPayment terms:\nRefund or cancellation note:",
+  Courses: "Course name:\nDuration:\nWho it is for:\nModules or outcomes:\nPrice:\nHow to enroll:",
+  "Business Information": "Business name:\nLocation:\nHours:\nContact:\nBrand tone:\nImportant links:",
+  "Lead Qualification": "Qualifying questions:\n1. Ask about budget.\n2. Ask about timeline.\n3. Ask what result they want.\n\nQualified lead rules:\nFollow-up action:",
+};
+
+function KnowledgeManualSourceForm({
+  draft,
+  isSaving,
+  sourceContext,
+  onClose,
+  onChange,
+  onSave,
+}: {
+  draft: ManualKnowledgeDraft;
+  isSaving: boolean;
+  sourceContext?: KnowledgeSource | null;
+  onClose?: () => void;
+  onChange: (draft: ManualKnowledgeDraft) => void;
+  onSave: () => void;
+}) {
+  const categoryPlaceholder = manualKnowledgePlaceholders[draft.category] || manualKnowledgePlaceholders["Business Information"];
+  const isFaqCategory = draft.category === "FAQs";
+  const compiledContent = getManualKnowledgeDraftContent(draft);
+
+  function updateFaqPair(pairId: string, patch: Partial<ManualFaqPair>) {
+    onChange({
+      ...draft,
+      faqPairs: draft.faqPairs.map((pair) => (pair.id === pairId ? { ...pair, ...patch } : pair)),
+    });
+  }
+
+  function addFaqPair() {
+    onChange({
+      ...draft,
+      faqPairs: [...draft.faqPairs, createManualFaqPair()],
+    });
+  }
+
+  function removeFaqPair(pairId: string) {
+    const nextPairs = draft.faqPairs.filter((pair) => pair.id !== pairId);
+
+    onChange({
+      ...draft,
+      faqPairs: nextPairs.length > 0 ? nextPairs : [createManualFaqPair()],
+    });
+  }
+
+  return (
+    <section className="rounded-[12px] border border-[#e7eaf2] bg-white p-4 shadow-[0_18px_45px_rgba(20,28,53,0.025)]">
+      <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
+        <div>
+          <h2 className="flex items-center gap-2 text-[15px] font-extrabold text-black">
+            <PencilLine size={17} className="text-[#3044ff]" strokeWidth={2.35} />
+            {sourceContext ? "Add Q&A to source" : "Add knowledge manually"}
+          </h2>
+          <p className="mt-1 max-w-[660px] text-[12px] font-semibold leading-relaxed text-[#596175]">
+            {sourceContext
+              ? "Add new questions, answers, or notes into this existing source. It stays as one record and updates the direct answer count."
+              : "Add FAQs, products, services, pricing, courses, business information, or lead qualification rules. Active manual sources are used by chat, inbox, and Instagram comment answers."}
+          </p>
+          {sourceContext ? (
+            <p className="mt-2 inline-flex rounded-[7px] bg-[#f0edff] px-2.5 py-1 text-[11px] font-extrabold text-[#3044ff]">
+              Updating existing source: {sourceContext.title}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSaving}
+              className="flex h-10 items-center justify-center gap-2 rounded-[8px] border border-[#dfe4ef] bg-white px-4 text-[12px] font-extrabold text-[#31394f] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <X size={15} strokeWidth={2.35} />
+              Close
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={isSaving || compiledContent.length < 10}
+            className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.18)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? <RefreshCw size={15} className="animate-spin" strokeWidth={2.35} /> : <Check size={15} strokeWidth={2.35} />}
+            {isSaving ? "Saving..." : sourceContext ? "Add to source" : "Save manual source"}
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <div className="space-y-2">
+          {knowledgeCategoryOptions.map((category) => {
+            const isActive = draft.category === category;
+
+            return (
+              <button
+                key={category}
+                type="button"
+                onClick={() => onChange({ ...draft, category, faqPairs: draft.faqPairs.length > 0 ? draft.faqPairs : [createManualFaqPair()] })}
+                className={`flex h-9 w-full items-center justify-between rounded-[8px] border px-3 text-left text-[12px] font-extrabold transition ${
+                  isActive ? "border-[#3044ff] bg-[#f0edff] text-[#3044ff]" : "border-[#e2e6f0] bg-white text-[#31394f] hover:border-[#cbd2e2]"
+                }`}
+              >
+                <span>{category}</span>
+                {isActive ? <Check size={14} strokeWidth={2.45} /> : null}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="space-y-3">
+          <input
+            value={draft.title}
+            onChange={(event) => onChange({ ...draft, title: event.target.value })}
+            placeholder={`${draft.category} title`}
+            className="h-10 w-full rounded-[8px] border border-[#dfe4ef] bg-white px-3 text-[12px] font-semibold text-black outline-none transition focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+          />
+          {isFaqCategory ? (
+            <div className="space-y-3">
+              {draft.faqPairs.map((pair, index) => (
+                <div key={pair.id} className="rounded-[10px] border border-[#dfe4ef] bg-[#fbfcff] p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">
+                      FAQ {index + 1}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => removeFaqPair(pair.id)}
+                      disabled={draft.faqPairs.length === 1 && !pair.question.trim() && !pair.answer.trim()}
+                      className="flex h-7 items-center justify-center gap-1 rounded-[7px] border border-[#ffd1dc] bg-white px-2 text-[10px] font-extrabold text-[#df405b] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <X size={12} strokeWidth={2.4} />
+                      Remove
+                    </button>
+                  </div>
+                  <input
+                    value={pair.question}
+                    onChange={(event) => updateFaqPair(pair.id, { question: event.target.value })}
+                    placeholder="Question"
+                    className="h-10 w-full rounded-[8px] border border-[#dfe4ef] bg-white px-3 text-[12px] font-semibold text-black outline-none transition focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+                  />
+                  <textarea
+                    value={pair.answer}
+                    onChange={(event) => updateFaqPair(pair.id, { answer: event.target.value })}
+                    placeholder="Answer"
+                    className="mt-2 min-h-[96px] w-full resize-y rounded-[8px] border border-[#dfe4ef] bg-white px-3 py-3 text-[12px] font-semibold leading-relaxed text-black outline-none transition focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+                  />
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addFaqPair}
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-[#3044ff] bg-white px-3 text-[12px] font-extrabold text-[#3044ff] transition hover:bg-[#f5f7ff]"
+              >
+                <Plus size={15} strokeWidth={2.35} />
+                Add more FAQ
+              </button>
+              <p className="text-[11px] font-semibold leading-relaxed text-[#596175]">
+                Each question and answer is saved as a direct answer, so matching customer questions can be answered from knowledge immediately.
+              </p>
+            </div>
+          ) : (
+            <>
+              <textarea
+                value={draft.content}
+                onChange={(event) => onChange({ ...draft, content: event.target.value })}
+                placeholder={categoryPlaceholder}
+                className="min-h-[190px] w-full resize-y rounded-[10px] border border-[#dfe4ef] bg-white px-3 py-3 text-[12px] font-semibold leading-relaxed text-black outline-none transition focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+              />
+              <p className="text-[11px] font-semibold leading-relaxed text-[#596175]">
+                Other categories can be plain text, lists, or pasted notes.
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function KnowledgeManualSourceModal({
+  draft,
+  isSaving,
+  sourceContext,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  draft: ManualKnowledgeDraft;
+  isSaving: boolean;
+  sourceContext: KnowledgeSource | null;
+  onChange: (draft: ManualKnowledgeDraft) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/32 px-4 py-5 backdrop-blur-sm">
+      <button type="button" aria-label="Close manual knowledge modal" className="absolute inset-0 cursor-default" onClick={isSaving ? undefined : onClose} />
+      <div className="relative max-h-[90vh] w-[min(1040px,100%)] overflow-y-auto rounded-[14px] bg-white p-3 shadow-[0_32px_90px_rgba(12,18,38,0.24)]">
+        <KnowledgeManualSourceForm
+          draft={draft}
+          isSaving={isSaving}
+          sourceContext={sourceContext}
+          onChange={onChange}
+          onClose={onClose}
+          onSave={onSave}
+        />
+      </div>
+    </div>
+  );
+}
+
+function KnowledgeSourceViewModal({
+  source,
+  isLoading,
+  error,
+  activeTab,
+  onTabChange,
+  onClose,
+  onDelete,
+  onDeleteAnswer,
+  deletingSourceId,
+  deletingAnswerId,
+}: {
+  source: KnowledgeSourceDetail | null;
+  isLoading: boolean;
+  error: string;
+  activeTab: KnowledgeViewTab;
+  onTabChange: (tab: KnowledgeViewTab) => void;
+  onClose: () => void;
+  onDelete: (sourceId: string) => void;
+  onDeleteAnswer: (sourceId: string, qaPairId: string) => void;
+  deletingSourceId: string;
+  deletingAnswerId: string;
+}) {
+  const tabs: { id: KnowledgeViewTab; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "answers", label: `Answers (${source?.qaPairs.length || 0})` },
+    { id: "text", label: `PDF text (${source?.chunks.length || 0})` },
+    { id: "details", label: "Details" },
+  ];
+  const isDeletingSource = Boolean(source && deletingSourceId === source.id);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/32 px-4 py-5 backdrop-blur-sm">
+      <button type="button" aria-label="Close source view" className="absolute inset-0 cursor-default" onClick={onClose} />
+      <section className="relative flex max-h-[90vh] w-[min(980px,100%)] flex-col overflow-hidden rounded-[14px] border border-[#e1e5ef] bg-white shadow-[0_32px_90px_rgba(12,18,38,0.24)]">
+        <div className="flex items-start justify-between gap-4 border-b border-[#edf0f6] p-5">
+          <div>
+            <h2 className="text-[20px] font-extrabold leading-tight text-black">{source?.title || "Knowledge source"}</h2>
+            <p className="mt-1 text-[12px] font-semibold text-[#596175]">
+              {isLoading ? "Loading indexed source data..." : source ? `${source.fileName || source.title} • ${formatKnowledgeBytes(source.fileSize)}` : "Source details"}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {source ? (
+              <button
+                type="button"
+                onClick={() => onDelete(source.id)}
+                disabled={isDeletingSource || Boolean(deletingAnswerId)}
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[9px] border border-[#ffd1dc] bg-[#fff7f9] px-3 text-[12px] font-extrabold text-[#df405b] transition hover:bg-[#fff0f4] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isDeletingSource ? <RefreshCw size={14} className="animate-spin" strokeWidth={2.35} /> : <Trash2 size={14} strokeWidth={2.35} />}
+                Delete
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-10 w-10 items-center justify-center rounded-[9px] border border-[#dfe4ef] bg-white text-black"
+              aria-label="Close source view"
+            >
+              <X size={18} strokeWidth={2.35} />
+            </button>
+          </div>
+        </div>
+
+        <div className="border-b border-[#edf0f6] px-5 py-3">
+          <div className="flex flex-wrap gap-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => onTabChange(tab.id)}
+                className={`h-9 rounded-[8px] px-3 text-[12px] font-extrabold transition ${
+                  activeTab === tab.id ? "bg-[#3044ff] text-white" : "border border-[#dfe4ef] bg-white text-[#46506a] hover:bg-[#f8f9fc]"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="min-h-[360px] overflow-y-auto p-5">
+          {isLoading ? (
+            <div className="flex h-[260px] items-center justify-center gap-3 rounded-[12px] bg-[#f8f9fc] text-[13px] font-extrabold text-[#46506a]">
+              <RefreshCw size={18} className="animate-spin text-[#3044ff]" strokeWidth={2.35} />
+              Loading source...
+            </div>
+          ) : error ? (
+            <div className="rounded-[10px] border border-[#ffd1dc] bg-[#fff7f9] px-4 py-3 text-[12px] font-extrabold text-[#df405b]">{error}</div>
+          ) : source ? (
+            <>
+              {activeTab === "overview" ? (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {[
+                    ["Type", source.kind.toUpperCase()],
+                    ["Status", source.active ? "Active" : "Inactive"],
+                    ["Words", formatKnowledgeInteger(source.wordCount)],
+                    ["Characters", formatKnowledgeInteger(source.characterCount)],
+                    ["Chunks", formatKnowledgeInteger(source.chunkCount)],
+                    ["Direct answers", formatKnowledgeInteger(source.qaPairs.length || source.directAnswerCount)],
+                    ["File size", formatKnowledgeBytes(source.fileSize)],
+                    ["Created", formatKnowledgeUpdated(source.createdAt)],
+                    ["Updated", formatKnowledgeUpdated(source.updatedAt)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-[10px] border border-[#edf0f6] bg-[#fbfcff] p-3">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wide text-[#697083]">{label}</p>
+                      <p className="mt-1 text-[13px] font-extrabold text-black">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {activeTab === "answers" ? (
+                <div className="space-y-3">
+                  {source.qaPairs.length === 0 ? (
+                    <p className="rounded-[10px] bg-[#f8f9fc] px-4 py-5 text-[12px] font-semibold text-[#596175]">No direct answers were extracted from this source.</p>
+                  ) : (
+                    source.qaPairs.map((pair, index) => (
+                      <article key={pair.id} className="rounded-[10px] border border-[#edf0f6] bg-white p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-[10px] font-extrabold uppercase tracking-wide text-[#697083]">Answer {index + 1}</p>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteAnswer(source.id, pair.id)}
+                            disabled={Boolean(deletingSourceId) || Boolean(deletingAnswerId)}
+                            className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-[#ffd1dc] bg-[#fff7f9] px-3 text-[11px] font-extrabold text-[#df405b] transition hover:bg-[#fff0f4] disabled:cursor-not-allowed disabled:opacity-60"
+                            aria-label={`Delete answer ${index + 1}`}
+                          >
+                            {deletingAnswerId === pair.id ? <RefreshCw size={13} className="animate-spin" strokeWidth={2.35} /> : <Trash2 size={13} strokeWidth={2.35} />}
+                            Delete
+                          </button>
+                        </div>
+                        <h3 className="mt-2 text-[13px] font-extrabold text-black">{pair.question}</h3>
+                        <p className="mt-2 whitespace-pre-wrap text-[12px] font-medium leading-relaxed text-[#31394f]">{pair.answer}</p>
+                      </article>
+                    ))
+                  )}
+                </div>
+              ) : null}
+
+              {activeTab === "text" ? (
+                <div className="space-y-3">
+                  {source.chunks.length === 0 ? (
+                    <p className="rounded-[10px] bg-[#f8f9fc] px-4 py-5 text-[12px] font-semibold text-[#596175]">No searchable text chunks were found.</p>
+                  ) : (
+                    source.chunks.map((chunk) => (
+                      <article key={chunk.id} className="rounded-[10px] border border-[#edf0f6] bg-white p-4">
+                        <p className="text-[10px] font-extrabold uppercase tracking-wide text-[#697083]">Chunk {chunk.order + 1}</p>
+                        <p className="mt-2 whitespace-pre-wrap text-[12px] font-medium leading-relaxed text-[#31394f]">{chunk.text}</p>
+                      </article>
+                    ))
+                  )}
+                </div>
+              ) : null}
+
+              {activeTab === "details" ? (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <section className="rounded-[10px] border border-[#edf0f6] bg-white p-4">
+                    <h3 className="text-[13px] font-extrabold text-black">Categories</h3>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {source.categories.length > 0 ? (
+                        source.categories.map((category) => (
+                          <span key={category} className="rounded-[7px] bg-[#f0edff] px-2.5 py-1 text-[11px] font-extrabold text-[#3044ff]">
+                            {category}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-[12px] font-semibold text-[#596175]">No categories detected.</span>
+                      )}
+                    </div>
+                  </section>
+                  <section className="rounded-[10px] border border-[#edf0f6] bg-white p-4">
+                    <h3 className="text-[13px] font-extrabold text-black">File details</h3>
+                    <dl className="mt-3 space-y-2 text-[12px]">
+                      {[
+                        ["File name", source.fileName || source.title],
+                        ["MIME type", source.mimeType || "text/plain"],
+                        ["Source ID", source.id],
+                      ].map(([label, value]) => (
+                        <div key={label} className="grid grid-cols-[110px_minmax(0,1fr)] gap-3">
+                          <dt className="font-extrabold text-[#46506a]">{label}</dt>
+                          <dd className="min-w-0 break-words font-semibold text-black">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function KnowledgeSourceRows({
   sources,
   onUploadClick,
   onDropFiles,
-  onAssignmentChange,
   onActiveChange,
-  onAutoAssignAll,
+  onView,
+  onAddManual,
+  onDelete,
+  deletingSourceId,
   isUploading,
   uploadMessage,
 }: {
   sources: KnowledgeSource[];
   onUploadClick: () => void;
   onDropFiles: (files: FileList | null) => void;
-  onAssignmentChange: (sourceId: string, assignment: KnowledgeAssignment) => void;
   onActiveChange: (sourceId: string, active: boolean) => void;
-  onAutoAssignAll: () => void;
+  onView: (sourceId: string) => void;
+  onAddManual: (source: KnowledgeSource) => void;
+  onDelete: (sourceId: string) => void;
+  deletingSourceId: string;
   isUploading: boolean;
   uploadMessage: string;
 }) {
@@ -10219,55 +10749,48 @@ function KnowledgeSourceRows({
     event.preventDefault();
     onDropFiles(event.dataTransfer.files);
   }
+  const emptyTitle = "No saved knowledge sources yet";
+  const emptyDetail = "Add FAQs, products, services, pricing, courses, business information, lead qualification rules, or PDFs to train the AI.";
 
   return (
     <section>
       <div className="mb-3 flex flex-col gap-2 rounded-[10px] border border-[#e7eaf2] bg-white p-3 shadow-[0_18px_45px_rgba(20,28,53,0.025)] sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-[13px] font-extrabold text-black">Saved knowledge routing</h2>
+          <h2 className="text-[13px] font-extrabold text-black">Saved knowledge sources</h2>
           <p className="mt-1 text-[11px] font-medium text-[#596175]">
-            One source is used by default. Multiple sources can be assigned manually or left on auto detect.
+            PDF/TXT and manual sources are listed here. Active sources are available to AI replies.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onAutoAssignAll}
-          disabled={sources.length < 2 || isUploading}
-          className="flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-black transition hover:bg-[#f8f9fc] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Sparkles size={14} className="text-[#3044ff]" strokeWidth={2.35} />
-          Auto assign
-        </button>
       </div>
 
-      <div className="overflow-hidden rounded-[12px] border border-[#e7eaf2] bg-white shadow-[0_18px_45px_rgba(20,28,53,0.025)]">
-        <div className="hidden grid-cols-[minmax(220px,1fr)_72px_132px_104px_108px_96px] border-b border-[#edf0f6] bg-[#fbfcff] px-4 py-3 text-[11px] font-semibold text-[#46506a] md:grid">
+      <div className="overflow-x-auto overflow-y-hidden rounded-[12px] border border-[#e7eaf2] bg-white shadow-[0_18px_45px_rgba(20,28,53,0.025)]">
+        <div className="hidden min-w-[1180px] grid-cols-[minmax(260px,1fr)_82px_120px_150px_120px_360px] border-b border-[#edf0f6] bg-[#fbfcff] px-4 py-3 text-[11px] font-semibold text-[#46506a] md:grid">
           <span>Source</span>
           <span>Type</span>
-          <span>Assignment</span>
           <span>Status</span>
           <span>Active</span>
           <span>Last updated</span>
+          <span>Actions</span>
         </div>
 
         {sources.length === 0 ? (
           <div className="border border-dashed border-[#d7deeb] px-5 py-10 text-center">
             <BookOpen className="mx-auto text-[#3044ff]" size={30} strokeWidth={2.35} />
-            <h2 className="mt-3 text-[15px] font-extrabold text-black">No saved knowledge sources yet</h2>
+            <h2 className="mt-3 text-[15px] font-extrabold text-black">{emptyTitle}</h2>
             <p className="mx-auto mt-2 max-w-[480px] text-[12px] font-medium leading-relaxed text-[#596175]">
-              This page now shows only real saved sources. Add your website, FAQs, pricing, policies, or PDFs to train the AI.
+              {emptyDetail}
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-[#edf0f6]">
+          <div className="min-w-[1180px] divide-y divide-[#edf0f6]">
             {sources.map((source) => {
               const Icon = source.icon;
 
               return (
-                <article
-                  key={source.id}
-                  className="grid gap-3 px-4 py-4 transition hover:bg-[#fbfcff] md:grid-cols-[minmax(220px,1fr)_72px_132px_104px_108px_96px] md:items-center"
-                >
+	                <article
+	                  key={source.id}
+	                  className="grid gap-3 px-4 py-4 transition hover:bg-[#fbfcff] md:grid-cols-[minmax(260px,1fr)_82px_120px_150px_120px_360px] md:items-center"
+	                >
                   <div className="flex min-w-0 items-center gap-4">
                     <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] ${source.tone}`}>
                       <Icon size={21} strokeWidth={2.25} />
@@ -10275,6 +10798,16 @@ function KnowledgeSourceRows({
                     <span className="min-w-0">
                       <span className="block truncate text-[13px] font-extrabold text-black">{source.title}</span>
                       <span className="mt-1 block truncate text-[12px] font-medium text-[#46506a]">{source.subtitle}</span>
+                      <span className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <span className={`inline-flex h-6 items-center rounded-[7px] px-2 text-[10px] font-extrabold ${source.sourceMode === "auto" ? "bg-[#eef4ff] text-[#246bff]" : "bg-[#f0edff] text-[#4b3cff]"}`}>
+                          {source.sourceModeLabel}
+                        </span>
+                        {source.directAnswerCount > 0 ? (
+                          <span className="inline-flex h-6 items-center rounded-[7px] bg-[#eafaf0] px-2 text-[10px] font-extrabold text-[#0a9b3f]">
+                            {formatKnowledgeInteger(source.directAnswerCount)} answer{source.directAnswerCount === 1 ? "" : "s"}
+                          </span>
+                        ) : null}
+                      </span>
                     </span>
                   </div>
 
@@ -10283,22 +10816,6 @@ function KnowledgeSourceRows({
                     <span className={`inline-flex h-6 items-center rounded-[7px] px-2.5 text-[11px] font-bold ${source.typeTone}`}>
                       {source.type}
                     </span>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 md:block">
-                    <span className="text-[10px] font-extrabold uppercase text-[#7b8498] md:hidden">Assignment</span>
-                    <select
-                      aria-label={`${source.title} assignment`}
-                      value={source.assignment}
-                      onChange={(event) => onAssignmentChange(source.id, event.target.value as KnowledgeAssignment)}
-                      className="h-8 min-w-[150px] rounded-[8px] border border-[#dde3ee] bg-white px-2 text-[10px] font-extrabold text-black outline-none transition focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 md:w-full md:min-w-0"
-                    >
-                      {knowledgeAssignmentOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
                   </div>
 
                   <div className="flex items-center justify-between gap-3 md:block">
@@ -10325,11 +10842,58 @@ function KnowledgeSourceRows({
                       {source.updated}
                     </p>
                   </div>
+
+                  <div className="flex items-center justify-between gap-3 md:block">
+                    <span className="text-[10px] font-extrabold uppercase text-[#7b8498] md:hidden">Actions</span>
+                    <div className="flex flex-wrap items-center justify-end gap-2 md:justify-start">
+                      <button
+                        type="button"
+                        onClick={() => onView(source.id)}
+                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[8px] border border-[#dfe4ef] bg-white px-3 text-[11px] font-extrabold text-[#31394f] transition hover:bg-[#f8f9fc]"
+                      >
+                        <Eye size={13} strokeWidth={2.35} />
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onAddManual(source)}
+                        disabled={isUploading}
+                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[8px] border border-[#d7d5ff] bg-[#f5f3ff] px-3 text-[11px] font-extrabold text-[#3044ff] transition hover:bg-[#efedff] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <PencilLine size={13} strokeWidth={2.35} />
+                        Add Q&A
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(source.id)}
+                        disabled={isUploading || deletingSourceId === source.id}
+                        className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[8px] border border-[#ffd1dc] bg-[#fff7f9] px-3 text-[11px] font-extrabold text-[#df405b] transition hover:bg-[#fff0f4] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {deletingSourceId === source.id ? (
+                          <RefreshCw size={13} className="animate-spin" strokeWidth={2.35} />
+                        ) : (
+                          <Trash2 size={13} strokeWidth={2.35} />
+                        )}
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                 </article>
               );
             })}
           </div>
         )}
+      </div>
+
+      <div className="mt-6 rounded-[10px] border border-[#e7eaf2] bg-white p-3 shadow-[0_18px_45px_rgba(20,28,53,0.025)]">
+        <div>
+          <div>
+            <h3 className="text-[13px] font-extrabold text-black">Auto scan upload</h3>
+            <p className="mt-1 text-[11px] font-medium leading-relaxed text-[#596175]">
+              Upload a PDF or TXT file and TractionFlo will scan it into searchable chunks and direct answers.
+            </p>
+          </div>
+        </div>
       </div>
 
       <button
@@ -10338,12 +10902,12 @@ function KnowledgeSourceRows({
         onDragOver={(event) => event.preventDefault()}
         onDrop={handleDrop}
         disabled={isUploading}
-        className="mt-6 flex h-[78px] w-full items-center justify-center gap-3 rounded-[10px] border border-dashed border-[#d7deeb] bg-white text-center shadow-[0_18px_45px_rgba(20,28,53,0.025)] transition hover:border-[#3044ff] hover:bg-[#fbfcff] disabled:cursor-not-allowed disabled:opacity-70"
+        className="mt-3 flex h-[78px] w-full items-center justify-center gap-3 rounded-[10px] border border-dashed border-[#d7deeb] bg-white text-center shadow-[0_18px_45px_rgba(20,28,53,0.025)] transition hover:border-[#3044ff] hover:bg-[#fbfcff] disabled:cursor-not-allowed disabled:opacity-70"
       >
         {isUploading ? <RefreshCw size={18} className="animate-spin text-[#3044ff]" strokeWidth={2.2} /> : <UploadCloud size={18} className="text-[#31394f]" strokeWidth={2.2} />}
         <span>
           <span className="block text-[14px] font-semibold text-black">
-            {isUploading ? "Indexing knowledge..." : <>Drag and drop files here&nbsp; or&nbsp; <span className="font-extrabold text-[#3044ff]">browse</span></>}
+            {isUploading ? "Indexing knowledge..." : <>Drag and drop PDFs/TXT here&nbsp; or&nbsp; <span className="font-extrabold text-[#3044ff]">browse</span></>}
           </span>
           <span className="mt-1 block text-[11px] font-medium text-[#46506a]">{uploadMessage || "PDF or TXT up to 50MB"}</span>
         </span>
@@ -10469,8 +11033,23 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
   const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSourceSummary[]>([]);
   const [isKnowledgeLoading, setIsKnowledgeLoading] = useState(true);
   const [isUploadingKnowledge, setIsUploadingKnowledge] = useState(false);
+  const [isSavingManualKnowledge, setIsSavingManualKnowledge] = useState(false);
+  const [deletingKnowledgeSourceId, setDeletingKnowledgeSourceId] = useState("");
+  const [deletingKnowledgeAnswerId, setDeletingKnowledgeAnswerId] = useState("");
   const [knowledgeError, setKnowledgeError] = useState("");
   const [uploadMessage, setUploadMessage] = useState("");
+  const [isManualKnowledgeModalOpen, setIsManualKnowledgeModalOpen] = useState(false);
+  const [manualKnowledgeSourceContext, setManualKnowledgeSourceContext] = useState<KnowledgeSource | null>(null);
+  const [viewingKnowledgeSourceId, setViewingKnowledgeSourceId] = useState("");
+  const [viewingKnowledgeSource, setViewingKnowledgeSource] = useState<KnowledgeSourceDetail | null>(null);
+  const [knowledgeViewError, setKnowledgeViewError] = useState("");
+  const [knowledgeViewTab, setKnowledgeViewTab] = useState<KnowledgeViewTab>("overview");
+  const [manualKnowledgeDraft, setManualKnowledgeDraft] = useState<ManualKnowledgeDraft>({
+    title: "",
+    category: knowledgeCategoryOptions[0],
+    content: "",
+    faqPairs: [createManualFaqPair()],
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -10505,6 +11084,58 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
       isMounted = false;
     };
   }, []);
+
+  function resetManualKnowledgeDraft(source?: KnowledgeSource | null) {
+    setManualKnowledgeDraft({
+      title: source ? source.title : "",
+      category: source ? "FAQs" : knowledgeCategoryOptions[0],
+      content: "",
+      faqPairs: [createManualFaqPair()],
+    });
+  }
+
+  function openManualKnowledgeModal(source?: KnowledgeSource | null) {
+    const nextSource = source || null;
+
+    setManualKnowledgeSourceContext(nextSource);
+    resetManualKnowledgeDraft(nextSource);
+    setIsManualKnowledgeModalOpen(true);
+  }
+
+  function closeManualKnowledgeModal() {
+    if (isSavingManualKnowledge) {
+      return;
+    }
+
+    setIsManualKnowledgeModalOpen(false);
+    setManualKnowledgeSourceContext(null);
+  }
+
+  async function openKnowledgeSourceView(sourceId: string) {
+    setViewingKnowledgeSourceId(sourceId);
+    setViewingKnowledgeSource(null);
+    setKnowledgeViewError("");
+    setKnowledgeViewTab("overview");
+
+    try {
+      const response = await fetch(`/api/knowledge/sources/${sourceId}`, { cache: "no-store" });
+      const payload = (await response.json()) as KnowledgeSourceDetailResponse;
+
+      if (!response.ok || payload.error || !payload.detail) {
+        throw new Error(payload.error || "Could not load knowledge source");
+      }
+
+      setViewingKnowledgeSource(payload.detail);
+    } catch (viewError) {
+      setKnowledgeViewError(viewError instanceof Error ? viewError.message : "Could not load knowledge source");
+    }
+  }
+
+  function closeKnowledgeSourceView() {
+    setViewingKnowledgeSourceId("");
+    setViewingKnowledgeSource(null);
+    setKnowledgeViewError("");
+  }
 
   async function uploadKnowledgeFiles(files: FileList | null) {
     const file = files?.[0];
@@ -10547,7 +11178,76 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
     }
   }
 
-  async function updateKnowledgeSource(sourceId: string, partial: { assignment?: KnowledgeAssignment; active?: boolean }) {
+  async function saveManualKnowledgeSource() {
+    const manualContent = getManualKnowledgeDraftContent(manualKnowledgeDraft);
+
+    if (isSavingManualKnowledge || manualContent.length < 10) {
+      return;
+    }
+
+    const isAppendingToSource = Boolean(manualKnowledgeSourceContext?.id);
+    const endpoint = isAppendingToSource
+      ? `/api/knowledge/sources/${manualKnowledgeSourceContext?.id}`
+      : "/api/knowledge/sources";
+
+    setIsSavingManualKnowledge(true);
+    setKnowledgeError("");
+    setUploadMessage(
+      isAppendingToSource
+        ? `Adding ${manualKnowledgeDraft.category} knowledge to ${manualKnowledgeSourceContext?.title}...`
+        : `Saving ${manualKnowledgeDraft.category} knowledge...`
+    );
+
+    try {
+      const response = await fetch(endpoint, {
+        method: isAppendingToSource ? "PATCH" : "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: manualKnowledgeDraft.title,
+          category: manualKnowledgeDraft.category,
+          content: manualContent,
+          assignment: knowledgeSources.length === 0 ? "default" : "auto",
+        }),
+      });
+      const payload = (await response.json()) as KnowledgeSourcesResponse;
+
+      if (!response.ok || payload.error) {
+        throw new Error(
+          payload.error || (isAppendingToSource ? "Could not add knowledge to this source" : "Could not save manual knowledge source")
+        );
+      }
+
+      setKnowledgeSources(payload.sources || []);
+      setUploadMessage(
+        isAppendingToSource
+          ? `${manualKnowledgeDraft.category} knowledge added to ${manualKnowledgeSourceContext?.title}.`
+          : `${manualKnowledgeDraft.title || manualKnowledgeDraft.category} saved and ready for AI replies.`
+      );
+      setManualKnowledgeDraft((current) => ({
+        ...current,
+        title: "",
+        content: "",
+        faqPairs: [createManualFaqPair()],
+      }));
+      setIsManualKnowledgeModalOpen(false);
+      setManualKnowledgeSourceContext(null);
+    } catch (saveError) {
+      const message = saveError instanceof Error
+        ? saveError.message
+        : isAppendingToSource
+          ? "Could not add knowledge to this source"
+          : "Could not save manual knowledge source";
+      setKnowledgeError(message);
+      setUploadMessage(message);
+    } finally {
+      setIsSavingManualKnowledge(false);
+    }
+  }
+
+  async function updateKnowledgeSource(sourceId: string, partial: { active?: boolean; assignment?: KnowledgeAssignmentValue }) {
     setKnowledgeError("");
 
     try {
@@ -10566,49 +11266,112 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
       }
 
       setKnowledgeSources(payload.sources || []);
-      setUploadMessage("Knowledge routing updated.");
+      setUploadMessage("Knowledge source updated.");
     } catch (updateError) {
       setKnowledgeError(updateError instanceof Error ? updateError.message : "Could not update knowledge source");
     }
   }
 
-  async function autoAssignAllKnowledgeSources() {
-    if (knowledgeSources.length < 2) {
+  async function deleteKnowledgeSource(sourceId: string) {
+    if (deletingKnowledgeSourceId) {
       return;
     }
 
-    setIsUploadingKnowledge(true);
-    setUploadMessage("Setting sources to auto detect...");
+    const source = knowledgeSources.find((item) => item.id === sourceId) || (viewingKnowledgeSource?.id === sourceId ? viewingKnowledgeSource : null);
+    const shouldDelete = window.confirm(`Delete ${source?.title || "this knowledge source"}?`);
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeletingKnowledgeSourceId(sourceId);
+    setKnowledgeError("");
+    setUploadMessage("");
 
     try {
-      let nextSources = knowledgeSources;
+      const response = await fetch(`/api/knowledge/sources/${sourceId}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json()) as KnowledgeSourcesResponse & { deleted?: boolean };
 
-      for (const source of knowledgeSources) {
-        const response = await fetch(`/api/knowledge/sources/${source.id}`, {
-          method: "PATCH",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ assignment: "auto" satisfies KnowledgeAssignment }),
-        });
-        const payload = (await response.json()) as KnowledgeSourcesResponse;
-
-        if (!response.ok || payload.error) {
-          throw new Error(payload.error || "Could not auto assign knowledge sources");
-        }
-
-        nextSources = payload.sources || nextSources;
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Could not delete knowledge source");
       }
 
-      setKnowledgeSources(nextSources);
-      setUploadMessage("Auto detection is enabled for all sources.");
-    } catch (autoAssignError) {
-      const message = autoAssignError instanceof Error ? autoAssignError.message : "Could not auto assign knowledge sources";
+      setKnowledgeSources((currentSources) => currentSources.filter((item) => item.id !== sourceId));
+      if (viewingKnowledgeSourceId === sourceId) {
+        closeKnowledgeSourceView();
+      }
+      setUploadMessage(`${source?.title || "Knowledge source"} deleted.`);
+    } catch (deleteError) {
+      const message = deleteError instanceof Error ? deleteError.message : "Could not delete knowledge source";
       setKnowledgeError(message);
       setUploadMessage(message);
     } finally {
-      setIsUploadingKnowledge(false);
+      setDeletingKnowledgeSourceId("");
+    }
+  }
+
+  async function deleteKnowledgeAnswer(sourceId: string, qaPairId: string) {
+    if (deletingKnowledgeAnswerId) {
+      return;
+    }
+
+    const answer = viewingKnowledgeSource?.id === sourceId
+      ? viewingKnowledgeSource.qaPairs.find((pair) => pair.id === qaPairId)
+      : null;
+    const shouldDelete = window.confirm(`Delete this answer section${answer?.question ? `: ${answer.question.slice(0, 80)}` : ""}?`);
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeletingKnowledgeAnswerId(qaPairId);
+    setKnowledgeError("");
+    setKnowledgeViewError("");
+    setUploadMessage("");
+
+    try {
+      const response = await fetch(`/api/knowledge/sources/${sourceId}`, {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ deleteQaPairId: qaPairId }),
+      });
+      const payload = (await response.json()) as KnowledgeSourcesResponse & KnowledgeSourceDetailResponse;
+
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Could not delete answer section");
+      }
+
+      if (payload.sources) {
+        setKnowledgeSources(payload.sources);
+      }
+
+      if (payload.detail) {
+        setViewingKnowledgeSource(payload.detail);
+      } else {
+        setViewingKnowledgeSource((current) =>
+          current?.id === sourceId
+            ? {
+                ...current,
+                qaPairs: current.qaPairs.filter((pair) => pair.id !== qaPairId),
+                directAnswerCount: Math.max(0, current.directAnswerCount - 1),
+                updatedAt: new Date().toISOString(),
+              }
+            : current
+        );
+      }
+
+      setUploadMessage("Answer section deleted.");
+    } catch (deleteError) {
+      const message = deleteError instanceof Error ? deleteError.message : "Could not delete answer section";
+      setKnowledgeViewError(message);
+      setKnowledgeError(message);
+    } finally {
+      setDeletingKnowledgeAnswerId("");
     }
   }
 
@@ -10647,12 +11410,12 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
             </div>
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploadingKnowledge}
+              onClick={() => openManualKnowledgeModal()}
+              disabled={isUploadingKnowledge || isSavingManualKnowledge}
               className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.2)] sm:w-[124px]"
             >
-              {isUploadingKnowledge ? <RefreshCw size={16} className="animate-spin" strokeWidth={2.4} /> : <Plus size={16} strokeWidth={2.4} />}
-              <span className="hidden sm:inline">{isUploadingKnowledge ? "Adding" : "Add source"}</span>
+              {isUploadingKnowledge || isSavingManualKnowledge ? <RefreshCw size={16} className="animate-spin" strokeWidth={2.4} /> : <Plus size={16} strokeWidth={2.4} />}
+              <span className="hidden sm:inline">{isUploadingKnowledge || isSavingManualKnowledge ? "Adding" : "Add source"}</span>
             </button>
             <button
               type="button"
@@ -10682,16 +11445,20 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
         )}
 
         <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_344px]">
-          <KnowledgeSourceRows
-            sources={sourceRows}
-            onUploadClick={() => fileInputRef.current?.click()}
-            onDropFiles={(files) => void uploadKnowledgeFiles(files)}
-            onAssignmentChange={(sourceId, assignment) => void updateKnowledgeSource(sourceId, { assignment })}
-            onActiveChange={(sourceId, active) => void updateKnowledgeSource(sourceId, { active })}
-            onAutoAssignAll={() => void autoAssignAllKnowledgeSources()}
-            isUploading={isUploadingKnowledge}
-            uploadMessage={uploadMessage}
-          />
+          <div>
+            <KnowledgeSourceRows
+              sources={sourceRows}
+              onUploadClick={() => fileInputRef.current?.click()}
+              onDropFiles={(files) => void uploadKnowledgeFiles(files)}
+              onActiveChange={(sourceId, active) => void updateKnowledgeSource(sourceId, { active })}
+              onView={(sourceId) => void openKnowledgeSourceView(sourceId)}
+              onAddManual={(source) => openManualKnowledgeModal(source)}
+              onDelete={(sourceId) => void deleteKnowledgeSource(sourceId)}
+              deletingSourceId={deletingKnowledgeSourceId}
+              isUploading={isUploadingKnowledge}
+              uploadMessage={uploadMessage}
+            />
+          </div>
 
           <aside className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
             <TrainingStatusCard percent={trainingPercent} sourceCount={knowledgeSources.length} />
@@ -10699,6 +11466,32 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
             <KnowledgeUpdatesCard updates={knowledgeUpdates} />
           </aside>
         </div>
+
+        {isManualKnowledgeModalOpen ? (
+          <KnowledgeManualSourceModal
+            draft={manualKnowledgeDraft}
+            isSaving={isSavingManualKnowledge}
+            sourceContext={manualKnowledgeSourceContext}
+            onChange={setManualKnowledgeDraft}
+            onClose={closeManualKnowledgeModal}
+            onSave={() => void saveManualKnowledgeSource()}
+          />
+        ) : null}
+
+        {viewingKnowledgeSourceId ? (
+          <KnowledgeSourceViewModal
+            source={viewingKnowledgeSource}
+            isLoading={!viewingKnowledgeSource && !knowledgeViewError}
+            error={knowledgeViewError}
+            activeTab={knowledgeViewTab}
+            onTabChange={setKnowledgeViewTab}
+            onClose={closeKnowledgeSourceView}
+            onDelete={(sourceId) => void deleteKnowledgeSource(sourceId)}
+            onDeleteAnswer={(sourceId, qaPairId) => void deleteKnowledgeAnswer(sourceId, qaPairId)}
+            deletingSourceId={deletingKnowledgeSourceId}
+            deletingAnswerId={deletingKnowledgeAnswerId}
+          />
+        ) : null}
       </div>
     </main>
   );
@@ -11487,12 +12280,12 @@ function buildCreatorLiveSummary(
   const knowledgeTabs: KnowledgeTab[] = [
     { label: "All Sources", count: "0", icon: Bot },
     { label: "FAQs", count: "0", icon: CircleHelp },
-    { label: "Pricing", count: "0", icon: DollarSign },
     { label: "Products", count: "0", icon: Box },
     { label: "Services", count: "0", icon: Sparkles },
+    { label: "Pricing", count: "0", icon: DollarSign },
     { label: "Courses", count: "0", icon: GraduationCap },
-    { label: "Policies", count: "0", icon: Shield },
-    { label: "Website", count: "0", icon: Globe2 },
+    { label: "Business Info", count: "0", icon: BriefcaseBusiness },
+    { label: "Lead Qualification", count: "0", icon: Target },
     { label: "PDFs", count: "0", icon: FileText },
   ];
 
@@ -12608,6 +13401,8 @@ function DashboardContent() {
         />
       ) : activeTab === "opportunities" ? (
         <OpportunitiesPage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
+      ) : activeTab === "instagram-content" ? (
+        <InstagramContentPage />
       ) : activeTab === "audience" ? (
         <AudiencePage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
       ) : activeTab === "knowledge" ? (

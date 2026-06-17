@@ -25,6 +25,74 @@ export type OpenAiUsage = {
   totalTokens: number;
 };
 
+const openAiChatCompletionsEndpoint = "https://api.openai.com/v1/chat/completions";
+
+function formatAiMessagesForTerminal(messages: OpenAiChatMessage[]) {
+  return messages
+    .map((message, index) => `[${index + 1}] ${message.role.toUpperCase()}\n${message.content}`)
+    .join("\n\n");
+}
+
+function logAiRequestToTerminal({
+  model,
+  maxTokens,
+  messages,
+}: {
+  model: string;
+  maxTokens: number;
+  messages: OpenAiChatMessage[];
+}) {
+  console.info(
+    [
+      "",
+      "----- AI REQUEST SENT -----",
+      `Endpoint: ${openAiChatCompletionsEndpoint}`,
+      "Method: POST",
+      "Authorization: [hidden]",
+      `Model: ${model}`,
+      `Max tokens: ${maxTokens}`,
+      `Time: ${new Date().toISOString()}`,
+      "Messages:",
+      formatAiMessagesForTerminal(messages),
+      "---------------------------",
+      "",
+    ].join("\n")
+  );
+}
+
+function logAiResponseToTerminal({
+  model,
+  response,
+  data,
+  durationMs,
+}: {
+  model: string;
+  response: Response;
+  data: OpenAiChatResponse;
+  durationMs: number;
+}) {
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const usage = data.usage
+    ? `Usage: prompt=${data.usage.prompt_tokens || 0}, completion=${data.usage.completion_tokens || 0}, total=${data.usage.total_tokens || 0}`
+    : "Usage: unavailable";
+
+  console.info(
+    [
+      "",
+      "----- AI RESPONSE RECEIVED -----",
+      `Status: ${response.status} ${response.statusText}`,
+      `Model: ${model}`,
+      `Duration: ${durationMs}ms`,
+      `Time: ${new Date().toISOString()}`,
+      usage,
+      data.error?.message ? `Error: ${data.error.message}` : "",
+      content ? `Content:\n${content}` : "Content: [empty]",
+      "--------------------------------",
+      "",
+    ].join("\n")
+  );
+}
+
 export async function requestOpenAiChatCompletion({
   apiKey,
   model,
@@ -38,7 +106,10 @@ export async function requestOpenAiChatCompletion({
   maxTokens?: number;
   onUsage?: (usage: OpenAiUsage) => Promise<void> | void;
 }) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  logAiRequestToTerminal({ model, maxTokens, messages });
+
+  const startedAt = Date.now();
+  const response = await fetch(openAiChatCompletionsEndpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -52,6 +123,12 @@ export async function requestOpenAiChatCompletion({
     }),
   });
   const data = (await response.json()) as OpenAiChatResponse;
+  logAiResponseToTerminal({
+    model,
+    response,
+    data,
+    durationMs: Date.now() - startedAt,
+  });
 
   if (!response.ok) {
     throw new Error(data.error?.message || `OpenAI request failed with status ${response.status}`);

@@ -5,7 +5,7 @@ export const maxKnowledgeFileBytes = 50 * 1024 * 1024;
 
 export type KnowledgeAssignment = "default" | "auto" | "cricket" | "padel" | "general";
 
-export type KnowledgeSourceKind = "pdf" | "txt";
+export type KnowledgeSourceKind = "pdf" | "txt" | "manual";
 
 export type KnowledgeSourceChunk = {
   id: string;
@@ -123,14 +123,28 @@ const stopWords = new Set([
 
 const categoryKeywordMap: Record<string, string[]> = {
   FAQs: ["question", "answer", "faq", "common customer", "asked"],
-  Pricing: ["price", "pricing", "cost", "fee", "package", "pkr", "payment", "deposit"],
   Products: ["product", "kit", "equipment", "racket", "bat", "ball", "membership"],
   Services: ["service", "booking", "coaching", "practice", "corporate", "event"],
+  Pricing: ["price", "pricing", "cost", "fee", "package", "pkr", "payment", "deposit"],
   Courses: ["course", "academy", "training", "lesson", "class"],
+  "Business Information": ["business", "company", "brand", "about us", "location", "hours", "contact", "address", "mission"],
+  "Lead Qualification": ["lead", "qualification", "qualify", "budget", "timeline", "decision", "intent", "requirement", "phone", "email"],
   Policies: ["policy", "cancel", "refund", "reschedule", "rain", "rules"],
   Website: ["website", "link", "online", "form"],
   PDFs: ["pdf"],
 };
+
+export const knowledgeCategoryOptions = [
+  "FAQs",
+  "Products",
+  "Services",
+  "Pricing",
+  "Courses",
+  "Business Information",
+  "Lead Qualification",
+] as const;
+
+export type KnowledgeCategoryOption = (typeof knowledgeCategoryOptions)[number];
 
 export const knowledgeAssignmentLabels: Record<KnowledgeAssignment, string> = {
   default: "Default chatbot",
@@ -154,6 +168,10 @@ export function getKnowledgeSourceKind(fileName: string, mimeType: string): Know
 
   if (normalizedMime === "application/pdf" || normalizedName.endsWith(".pdf")) {
     return "pdf";
+  }
+
+  if (normalizedMime === "text/x-tractionflo-manual" || normalizedName.endsWith(".manual.txt")) {
+    return "manual";
   }
 
   if (supportedTextMimeTypes.has(normalizedMime) || normalizedName.endsWith(".txt") || normalizedName.endsWith(".md")) {
@@ -261,7 +279,7 @@ export async function extractKnowledgeText({
 }) {
   const kind = getKnowledgeSourceKind(fileName, mimeType);
 
-  if (kind === "txt") {
+  if (kind === "txt" || kind === "manual") {
     return buffer.toString("utf8");
   }
 
@@ -295,6 +313,7 @@ function getWordCount(text: string) {
 
 function getSourceTitle(fileName: string) {
   return fileName
+    .replace(/\.manual\.txt$/i, "")
     .replace(/\.[a-z0-9]+$/i, "")
     .replace(/[-_]+/g, " ")
     .replace(/\s+/g, " ")
@@ -313,6 +332,14 @@ function getCategories(text: string, fileName: string, kind: KnowledgeSourceKind
   }
 
   return categories.length > 0 ? categories : ["Services"];
+}
+
+function mergeKnowledgeCategories(detectedCategories: string[], selectedCategories?: string[]) {
+  const validSelectedCategories = (selectedCategories || [])
+    .map((category) => category.trim())
+    .filter((category) => knowledgeCategoryOptions.includes(category as KnowledgeCategoryOption));
+
+  return Array.from(new Set([...validSelectedCategories, ...detectedCategories]));
 }
 
 function chunkKnowledgeText(text: string) {
@@ -387,6 +414,7 @@ function extractQaPairs(text: string) {
 export function buildKnowledgeSourceIndex({
   userId,
   sourceId,
+  title,
   fileName,
   mimeType,
   fileSize,
@@ -394,9 +422,15 @@ export function buildKnowledgeSourceIndex({
   indexPath,
   text,
   assignment,
+  categories,
+  active,
+  status,
+  createdAt,
+  updatedAt,
 }: {
   userId: string;
   sourceId: string;
+  title?: string;
   fileName: string;
   mimeType: string;
   fileSize: number;
@@ -404,6 +438,11 @@ export function buildKnowledgeSourceIndex({
   indexPath: string;
   text: string;
   assignment: KnowledgeAssignment;
+  categories?: string[];
+  active?: boolean;
+  status?: KnowledgeSourceIndex["status"];
+  createdAt?: string;
+  updatedAt?: string;
 }): KnowledgeSourceIndex {
   const normalizedText = normalizeKnowledgeText(text);
   const kind = getKnowledgeSourceKind(fileName, mimeType);
@@ -429,22 +468,22 @@ export function buildKnowledgeSourceIndex({
     version: 1,
     id: sourceId,
     userId,
-    title: getSourceTitle(fileName),
+    title: title?.trim() || getSourceTitle(fileName),
     fileName,
     mimeType,
     kind,
     filePath,
     indexPath,
     assignment,
-    active: true,
-    status: "ready",
-    categories: getCategories(normalizedText, fileName, kind),
+    active: typeof active === "boolean" ? active : true,
+    status: status || "ready",
+    categories: mergeKnowledgeCategories(getCategories(normalizedText, fileName, kind), categories),
     wordCount: getWordCount(normalizedText),
     characterCount: normalizedText.length,
     chunkCount: chunks.length,
     fileSize,
-    createdAt: now,
-    updatedAt: now,
+    createdAt: createdAt || now,
+    updatedAt: updatedAt || now,
     chunks,
     qaPairs,
   };
@@ -514,7 +553,7 @@ export function normalizeKnowledgeSourceIndex(value: unknown): KnowledgeSourceIn
     title: typeof source.title === "string" && source.title ? source.title : "Knowledge Source",
     fileName: typeof source.fileName === "string" && source.fileName ? source.fileName : "knowledge-source",
     mimeType: typeof source.mimeType === "string" ? source.mimeType : "application/octet-stream",
-    kind: source.kind === "pdf" ? "pdf" : "txt",
+    kind: source.kind === "pdf" || source.kind === "manual" ? source.kind : "txt",
     filePath: typeof source.filePath === "string" ? source.filePath : "",
     indexPath: String(source.indexPath),
     assignment: normalizeAssignment(source.assignment),

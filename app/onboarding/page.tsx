@@ -58,7 +58,7 @@ const steps: OnboardingStep[] = [
     id: "opportunity",
     label: "Top Opportunity",
     title: "Here is one opportunity",
-    subtitle: "We found 12 high value opportunities.",
+    subtitle: "We found high value opportunities from your connected Instagram activity.",
   },
   {
     id: "audience",
@@ -85,6 +85,280 @@ const steps: OnboardingStep[] = [
     subtitle: "Unlock everything TractionFlo found for you.",
   },
 ];
+
+type OnboardingConversationMessage = {
+  text?: string;
+  from?: "me" | "user";
+  attachments?: unknown[];
+};
+
+type OnboardingConversation = {
+  id: string;
+  participant?: {
+    name?: string;
+    username?: string;
+    profile_pic?: string;
+  };
+  messages?: OnboardingConversationMessage[];
+};
+
+type OnboardingData = {
+  connected: boolean;
+  isLoading: boolean;
+  accountName: string;
+  username: string;
+  avatarUrl: string;
+  followers: number;
+  following: number;
+  mediaCount: number;
+  conversationCount: number;
+  messageCount: number;
+  userMessageCount: number;
+  replyCount: number;
+  mediaMessageCount: number;
+  opportunityCount: number;
+  highIntentLeads: number;
+  partnerships: number;
+  superfans: number;
+  atRisk: number;
+  estimatedRevenue: number;
+  topOpportunityName: string;
+  topOpportunityUsername: string;
+  topOpportunityAvatar: string;
+  topOpportunityScore: number;
+  topOpportunityValue: number;
+  websiteHost: string;
+  audienceTopics: {
+    icon: LucideIcon;
+    value: number;
+    label: string;
+    width: string;
+    tone: string;
+    iconTone: string;
+  }[];
+};
+
+const fallbackAvatar = "https://i.pravatar.cc/96?img=47";
+const fallbackLeadAvatar = "https://i.pravatar.cc/96?img=32";
+
+const defaultOnboardingData: OnboardingData = {
+  connected: false,
+  isLoading: true,
+  accountName: "Instagram account",
+  username: "instagram",
+  avatarUrl: fallbackAvatar,
+  followers: 0,
+  following: 0,
+  mediaCount: 0,
+  conversationCount: 0,
+  messageCount: 0,
+  userMessageCount: 0,
+  replyCount: 0,
+  mediaMessageCount: 0,
+  opportunityCount: 0,
+  highIntentLeads: 0,
+  partnerships: 0,
+  superfans: 0,
+  atRisk: 0,
+  estimatedRevenue: 0,
+  topOpportunityName: "Instagram lead",
+  topOpportunityUsername: "instagram_user",
+  topOpportunityAvatar: fallbackLeadAvatar,
+  topOpportunityScore: 0,
+  topOpportunityValue: 0,
+  websiteHost: "your website",
+  audienceTopics: [],
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function getString(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function getNumber(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, number) : fallback;
+}
+
+function countMatches(messages: string[], pattern: RegExp) {
+  return messages.filter((message) => pattern.test(message)).length;
+}
+
+function percentOf(value: number, total: number) {
+  if (!total) {
+    return 0;
+  }
+
+  return Math.max(1, Math.min(100, Math.round((value / total) * 100)));
+}
+
+function buildAudienceTopics(messages: string[]) {
+  const total = Math.max(1, messages.length);
+  const booking = countMatches(messages, /book|booking|date|time|availability|schedule|slot|ground|padel|cricket/i);
+  const pricing = countMatches(messages, /price|pricing|cost|rate|package|payment|fee|budget/i);
+  const services = countMatches(messages, /service|product|course|coaching|training|match|team|players/i);
+  const partnerships = countMatches(messages, /partner|partnership|collab|brand|sponsor|campaign/i);
+  const support = countMatches(messages, /refund|issue|problem|complaint|cancel|support|not working|angry/i);
+
+  const topicRows = [
+    {
+      icon: CalendarCheck,
+      value: percentOf(booking, total),
+      label: "Asked about booking",
+      tone: "bg-[#4b3cff]",
+      iconTone: "bg-[#f0edff] text-[#4b3cff]",
+    },
+    {
+      icon: CircleDollarSign,
+      value: percentOf(pricing, total),
+      label: "Asked about pricing",
+      tone: "bg-[#13a84f]",
+      iconTone: "bg-[#eafaf0] text-[#13a84f]",
+    },
+    {
+      icon: Target,
+      value: percentOf(services, total),
+      label: "Asked about services",
+      tone: "bg-[#ff850d]",
+      iconTone: "bg-[#fff6e8] text-[#d98613]",
+    },
+    {
+      icon: Handshake,
+      value: percentOf(partnerships, total),
+      label: "Partnership signals",
+      tone: "bg-[#df405b]",
+      iconTone: "bg-[#fff0f3] text-[#df405b]",
+    },
+    {
+      icon: MessageCircle,
+      value: percentOf(Math.max(0, total - booking - pricing - services - partnerships - support), total),
+      label: "Other questions",
+      tone: "bg-[#246bff]",
+      iconTone: "bg-[#eef4ff] text-[#246bff]",
+    },
+  ];
+
+  return topicRows.map((topic) => ({
+    ...topic,
+    width: `${Math.max(12, topic.value)}%`,
+  }));
+}
+
+function normalizeConversations(value: unknown): OnboardingConversation[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isRecord).map((conversation, index) => {
+    const participant = isRecord(conversation.participant) ? conversation.participant : {};
+    const messages = Array.isArray(conversation.messages)
+      ? conversation.messages.filter(isRecord).map((message) => ({
+          text: getString(message.text),
+          from: message.from === "me" ? ("me" as const) : ("user" as const),
+          attachments: Array.isArray(message.attachments) ? message.attachments : [],
+        }))
+      : [];
+
+    return {
+      id: getString(conversation.id, `conversation-${index}`),
+      participant: {
+        name: getString(participant.name),
+        username: getString(participant.username),
+        profile_pic: getString(participant.profile_pic),
+      },
+      messages,
+    };
+  });
+}
+
+function buildOnboardingData(statusPayload: unknown, contentPayload: unknown, conversationsPayload: unknown): OnboardingData {
+  const status = isRecord(statusPayload) ? statusPayload : {};
+  const content = isRecord(contentPayload) ? contentPayload : {};
+  const conversationsRoot = isRecord(conversationsPayload) ? conversationsPayload : {};
+  const statusAccount = isRecord(status.account) ? status.account : {};
+  const contentAccount = isRecord(content.account) ? content.account : {};
+  const conversationsAccount = isRecord(conversationsRoot.account) ? conversationsRoot.account : {};
+  const conversations = normalizeConversations(conversationsRoot.conversations);
+  const connected = Boolean(status.connected || contentAccount.id || conversationsRoot.ig_user_id);
+
+  const username =
+    getString(contentAccount.username) ||
+    getString(statusAccount.username) ||
+    getString(conversationsAccount.username);
+  const accountName = getString(contentAccount.name) || getString(statusAccount.name) || username || "Instagram account";
+  const followers = getNumber(contentAccount.followersCount);
+  const following = getNumber(contentAccount.followingCount);
+  const mediaCount = getNumber(contentAccount.mediaCount);
+  const posts = Array.isArray(content.posts) ? content.posts.length : 0;
+  const stories = Array.isArray(content.stories) ? content.stories.length : 0;
+  const messageGroups = conversations.flatMap((conversation) => conversation.messages || []);
+  const userMessages = messageGroups.filter((message) => message.from === "user");
+  const replyMessages = messageGroups.filter((message) => message.from === "me");
+  const userTexts = userMessages.map((message) => message.text || "").filter(Boolean);
+  const allUserText = userTexts.join("\n");
+  const partnershipSignals = countMatches(userTexts, /partner|partnership|collab|brand|sponsor|campaign/i);
+  const atRiskSignals = countMatches(userTexts, /refund|issue|problem|complaint|cancel|support|not working|angry/i);
+  const highIntentLeads = conversations.filter((conversation) => {
+    const text = (conversation.messages || []).map((message) => message.text || "").join("\n");
+    return /book|booking|buy|price|pricing|cost|rate|package|payment|fee|budget|availability|slot/i.test(text);
+  }).length;
+  const superfans = conversations.filter((conversation) => (conversation.messages || []).filter((message) => message.from === "user").length >= 3).length;
+  const topOpportunity =
+    conversations
+      .map((conversation) => ({
+        conversation,
+        score:
+          (conversation.messages || []).length +
+          (/price|pricing|cost|rate|package/i.test((conversation.messages || []).map((message) => message.text || "").join("\n")) ? 5 : 0) +
+          (/book|booking|availability|slot/i.test((conversation.messages || []).map((message) => message.text || "").join("\n")) ? 5 : 0),
+      }))
+      .sort((first, second) => second.score - first.score)[0]?.conversation || conversations[0];
+  const topMessageText = (topOpportunity?.messages || []).map((message) => message.text || "").join("\n");
+  const topOpportunityScore = topOpportunity
+    ? Math.min(99, 45 + (topOpportunity.messages || []).length * 5 + (/price|pricing|booking|book|buy|rate/i.test(topMessageText) ? 18 : 0))
+    : 0;
+  const opportunityCount = Math.max(highIntentLeads + partnershipSignals + superfans + atRiskSignals, highIntentLeads);
+  const estimatedRevenue =
+    highIntentLeads * 2800 +
+    partnershipSignals * 5000 +
+    Math.min(superfans, 25) * 120 +
+    atRiskSignals * 297;
+
+  return {
+    connected,
+    isLoading: false,
+    accountName,
+    username: username || "instagram",
+    avatarUrl: fallbackAvatar,
+    followers,
+    following,
+    mediaCount: Math.max(mediaCount, posts + stories),
+    conversationCount: getNumber(conversationsRoot.conversation_count, conversations.length),
+    messageCount: messageGroups.length,
+    userMessageCount: userMessages.length,
+    replyCount: replyMessages.length,
+    mediaMessageCount: messageGroups.filter((message) => (message.attachments || []).length > 0).length,
+    opportunityCount,
+    highIntentLeads,
+    partnerships: partnershipSignals,
+    superfans,
+    atRisk: atRiskSignals,
+    estimatedRevenue,
+    topOpportunityName:
+      getString(topOpportunity?.participant?.name) ||
+      getString(topOpportunity?.participant?.username) ||
+      (connected ? "Instagram lead" : "No lead detected yet"),
+    topOpportunityUsername: getString(topOpportunity?.participant?.username, "instagram_user"),
+    topOpportunityAvatar: getString(topOpportunity?.participant?.profile_pic, fallbackLeadAvatar),
+    topOpportunityScore,
+    topOpportunityValue: Math.max(0, Math.round(topOpportunityScore * 32)),
+    websiteHost: username ? `${username}.instagram` : "your website",
+    audienceTopics: buildAudienceTopics(userTexts.length ? userTexts : [allUserText].filter(Boolean)),
+  };
+}
 
 function BrandMark({ dark = false }: { dark?: boolean }) {
   return (
@@ -303,48 +577,82 @@ function MetricTile({
   );
 }
 
-function ConnectInstagramStep() {
-  const tasks = [
-    "Connecting account",
-    "Fetching followers",
-    "Analyzing conversations",
-    "Detecting opportunities",
-  ];
+function ConnectInstagramStep({
+  data,
+  onConnectInstagram,
+}: {
+  data: OnboardingData;
+  onConnectInstagram: () => void;
+}) {
+  const tasks = data.connected
+    ? [
+        "Connected account",
+        `Loaded ${data.followers.toLocaleString()} followers`,
+        `Analyzed ${data.conversationCount.toLocaleString()} conversations`,
+        `Detected ${data.opportunityCount.toLocaleString()} opportunities`,
+      ]
+    : ["Connect account", "Fetch followers", "Analyze conversations", "Detect opportunities"];
   const [progressIndex, setProgressIndex] = useState(0);
 
   useEffect(() => {
+    if (!data.connected) {
+      const timeout = window.setTimeout(() => setProgressIndex(0), 0);
+      return () => window.clearTimeout(timeout);
+    }
+
     const interval = window.setInterval(() => {
       setProgressIndex((current) => (current >= tasks.length ? 0 : current + 1));
     }, 900);
 
     return () => window.clearInterval(interval);
-  }, [tasks.length]);
+  }, [data.connected, tasks.length]);
 
   return (
     <div className="space-y-7">
       <AnimatedCard className="flex items-center gap-4 rounded-[12px] border border-[#e7eaf2] bg-white p-4 shadow-[0_18px_45px_rgba(20,28,53,0.045)]">
         <span
-          aria-label="Creator profile"
+          aria-label={data.connected ? data.accountName : "Instagram disconnected"}
           role="img"
           className="relative h-14 w-14 rounded-full bg-cover bg-center"
-          style={{ backgroundImage: "url(https://i.pravatar.cc/96?img=47)" }}
+          style={{ backgroundImage: data.connected ? `url(${data.avatarUrl})` : undefined }}
         >
           <span className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-[8px] bg-gradient-to-br from-[#f97316] via-[#ec4899] to-[#7c3aed] text-white">
             <Camera size={17} strokeWidth={2.4} />
           </span>
         </span>
         <div>
-          <p className="text-[15px] font-extrabold text-black">@sarah.creates</p>
+          <p className="text-[15px] font-extrabold text-black">
+            {data.isLoading ? "Checking Instagram..." : data.connected ? `@${data.username}` : "Instagram disconnected"}
+          </p>
           <p className="mt-1 text-[12px] font-bold text-[#697083]">
-            <AnimatedCounter value={12483} /> followers
+            {data.connected ? (
+              <>
+                <AnimatedCounter value={data.followers} /> followers
+              </>
+            ) : (
+              "Connect your Instagram Business account"
+            )}
           </p>
         </div>
       </AnimatedCard>
 
+      {!data.connected && !data.isLoading ? (
+        <motion.button
+          type="button"
+          onClick={onConnectInstagram}
+          whileHover={{ y: -2, boxShadow: "0 18px 44px rgba(75,60,255,0.26)" }}
+          whileTap={{ scale: 0.98 }}
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-[10px] bg-[#4b3cff] text-[14px] font-extrabold text-white shadow-[0_14px_34px_rgba(75,60,255,0.18)]"
+        >
+          <Camera size={18} strokeWidth={2.4} />
+          Connect Instagram
+        </motion.button>
+      ) : null}
+
       <div className="space-y-5">
         {tasks.map((task, index) => {
           const isDone = index < progressIndex;
-          const isActive = index === progressIndex;
+          const isActive = data.connected ? index === progressIndex : index === 0;
 
           return (
             <motion.div
@@ -362,7 +670,7 @@ function ConnectInstagramStep() {
                 <AnimatePresence mode="wait" initial={false}>
                   {isDone ? (
                     <AnimatedCheckIcon key="done" />
-                  ) : isActive ? (
+                  ) : isActive && data.connected ? (
                     <SpinnerRing key="spin" />
                   ) : null}
                 </AnimatePresence>
@@ -382,50 +690,63 @@ function ConnectInstagramStep() {
   );
 }
 
-function RevenueStep() {
+function RevenueStep({ data }: { data: OnboardingData }) {
   return (
     <div className="space-y-7 text-center">
       <div>
         <p className="text-[64px] font-extrabold leading-none tracking-[-0.04em] text-[#4b3cff] sm:text-[78px]">
-          <AnimatedCounter value={18400} prefix="$" duration={1100} />
+          <AnimatedCounter value={data.estimatedRevenue} prefix="$" duration={1100} />
         </p>
         <p className="mt-3 text-[16px] font-extrabold text-[#30384d]">Potential Revenue Found</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <MetricTile icon={Users} value={12} label="High Intent Leads" detail="People ready to buy" tone="bg-[#eafaf0] text-[#13a84f]" delay={0.05} />
-        <MetricTile icon={Handshake} value={4} label="Partnerships" detail="Brand opportunities" tone="bg-[#fff6e8] text-[#d98613]" delay={0.15} />
-        <MetricTile icon={Star} value={23} label="Superfans" detail="Highly engaged" tone="bg-[#f0edff] text-[#4b3cff]" delay={0.25} />
-        <MetricTile icon={TriangleAlert} value={2} label="At-Risk Customers" detail="Need attention" tone="bg-[#fff0f3] text-[#df405b]" delay={0.35} />
+        <MetricTile icon={Users} value={data.highIntentLeads} label="High Intent Leads" detail="Pricing or booking intent" tone="bg-[#eafaf0] text-[#13a84f]" delay={0.05} />
+        <MetricTile icon={Handshake} value={data.partnerships} label="Partnerships" detail="Brand or collab signals" tone="bg-[#fff6e8] text-[#d98613]" delay={0.15} />
+        <MetricTile icon={Star} value={data.superfans} label="Superfans" detail="Repeat engaged conversations" tone="bg-[#f0edff] text-[#4b3cff]" delay={0.25} />
+        <MetricTile icon={TriangleAlert} value={data.atRisk} label="At-Risk Customers" detail="Refund or support language" tone="bg-[#fff0f3] text-[#df405b]" delay={0.35} />
       </div>
 
-      <SecureNote>Analysis based on 12,483 followers and recent conversations.</SecureNote>
+      <SecureNote>
+        Analysis based on {data.followers.toLocaleString()} followers and {data.conversationCount.toLocaleString()} recent conversations.
+      </SecureNote>
     </div>
   );
 }
 
-function OpportunityStep() {
+function OpportunityStep({ data }: { data: OnboardingData }) {
+  const remainingOpportunities = Math.max(0, data.opportunityCount - 1);
+  const reasons = [
+    data.highIntentLeads > 0 ? "Asked about booking, pricing, or purchase details" : "Recently messaged your Instagram account",
+    data.replyCount > 0 ? "Your team has already replied in this thread" : "Ready for a first helpful response",
+    data.mediaMessageCount > 0 ? "Shared media or attachment context" : "Can be handled from conversation context",
+  ];
+
   return (
     <div className="space-y-5">
       <AnimatedCard className="rounded-[12px] border border-[#e7eaf2] bg-white p-5 shadow-[0_18px_45px_rgba(20,28,53,0.045)]">
         <div className="flex items-start gap-4">
           <span
-            aria-label="Jessica Parker"
+            aria-label={data.topOpportunityName}
             role="img"
             className="h-16 w-16 rounded-full bg-cover bg-center"
-            style={{ backgroundImage: "url(https://i.pravatar.cc/96?img=32)" }}
+            style={{ backgroundImage: `url(${data.topOpportunityAvatar})` }}
           />
           <div className="min-w-0 flex-1">
-            <h3 className="text-[18px] font-extrabold text-black">Jessica Parker</h3>
-            <p className="mt-1 text-[12px] font-bold text-[#697083]">@jess.parker</p>
+            <h3 className="text-[18px] font-extrabold text-black">{data.topOpportunityName}</h3>
+            <p className="mt-1 text-[12px] font-bold text-[#697083]">@{data.topOpportunityUsername}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-[6px] bg-[#eafaf0] px-2.5 py-1 text-[11px] font-extrabold text-[#13a84f]">High Intent</span>
-              <span className="rounded-[6px] bg-[#f0edff] px-2.5 py-1 text-[11px] font-extrabold text-[#4b3cff]">New Lead</span>
+              <span className="rounded-[6px] bg-[#eafaf0] px-2.5 py-1 text-[11px] font-extrabold text-[#13a84f]">
+                {data.topOpportunityScore >= 70 ? "High Intent" : "Active Lead"}
+              </span>
+              <span className="rounded-[6px] bg-[#f0edff] px-2.5 py-1 text-[11px] font-extrabold text-[#4b3cff]">
+                Live Instagram
+              </span>
             </div>
           </div>
           <div className="rounded-[10px] bg-[#f0edff] px-4 py-3 text-center">
             <p className="text-[24px] font-extrabold leading-none text-[#4b3cff]">
-              <AnimatedCounter value={92} duration={900} />
+              <AnimatedCounter value={data.topOpportunityScore} duration={900} />
             </p>
             <p className="mt-1 text-[10px] font-bold text-[#697083]">Lead Score</p>
           </div>
@@ -434,14 +755,14 @@ function OpportunityStep() {
         <div className="mt-5 flex items-center justify-between border-t border-[#edf0f6] pt-4">
           <span className="text-[13px] font-bold text-[#46506a]">Potential Value</span>
           <span className="text-[22px] font-extrabold text-[#4b3cff]">
-            <AnimatedCounter value={2800} prefix="$" duration={950} />
+            <AnimatedCounter value={data.topOpportunityValue} prefix="$" duration={950} />
           </span>
         </div>
 
         <div className="mt-4 rounded-[10px] border border-[#e7eaf2] bg-[#fbfcff] p-4">
           <p className="text-[12px] font-extrabold text-black">Why this person is interested:</p>
           <div className="mt-3 space-y-2">
-            {["Asked about coaching 3 times", "Requested pricing", "Engaged with your testimonials"].map((item, index) => (
+            {reasons.map((item, index) => (
               <motion.p
                 key={item}
                 initial={{ opacity: 0, x: -8 }}
@@ -468,20 +789,25 @@ function OpportunityStep() {
       </AnimatedCard>
 
       <SecureNote>
-        <span className="font-extrabold text-[#4b3cff]">11 more opportunities found.</span> Upgrade to see all.
+        <span className="font-extrabold text-[#4b3cff]">
+          {remainingOpportunities.toLocaleString()} more opportunities found.
+        </span>{" "}
+        Review your connected Instagram activity to see all.
       </SecureNote>
     </div>
   );
 }
 
-function AudienceStep() {
-  const topics = [
-    { icon: GraduationCap, value: 37, label: "Asked about coaching", width: "88%", tone: "bg-[#4b3cff]", iconTone: "bg-[#f0edff] text-[#4b3cff]" },
-    { icon: CircleDollarSign, value: 24, label: "Asked about pricing", width: "56%", tone: "bg-[#13a84f]", iconTone: "bg-[#eafaf0] text-[#13a84f]" },
-    { icon: Users, value: 18, label: "Interested in consulting", width: "40%", tone: "bg-[#ff850d]", iconTone: "bg-[#fff6e8] text-[#d98613]" },
-    { icon: CalendarCheck, value: 12, label: "Asked about availability", width: "29%", tone: "bg-[#df405b]", iconTone: "bg-[#fff0f3] text-[#df405b]" },
-    { icon: MessageCircle, value: 9, label: "Other questions", width: "20%", tone: "bg-[#246bff]", iconTone: "bg-[#eef4ff] text-[#246bff]" },
-  ];
+function AudienceStep({ data }: { data: OnboardingData }) {
+  const topics = data.audienceTopics.length
+    ? data.audienceTopics
+    : [
+        { icon: GraduationCap, value: 0, label: "Waiting for audience data", width: "12%", tone: "bg-[#4b3cff]", iconTone: "bg-[#f0edff] text-[#4b3cff]" },
+        { icon: CircleDollarSign, value: 0, label: "Pricing signals", width: "12%", tone: "bg-[#13a84f]", iconTone: "bg-[#eafaf0] text-[#13a84f]" },
+        { icon: Users, value: 0, label: "Service questions", width: "12%", tone: "bg-[#ff850d]", iconTone: "bg-[#fff6e8] text-[#d98613]" },
+        { icon: CalendarCheck, value: 0, label: "Booking requests", width: "12%", tone: "bg-[#df405b]", iconTone: "bg-[#fff0f3] text-[#df405b]" },
+        { icon: MessageCircle, value: 0, label: "Other questions", width: "12%", tone: "bg-[#246bff]", iconTone: "bg-[#eef4ff] text-[#246bff]" },
+      ];
 
   return (
     <div className="space-y-6">
@@ -529,13 +855,16 @@ function AudienceStep() {
   );
 }
 
-function TrainingStep() {
+function TrainingStep({ data }: { data: OnboardingData }) {
+  const confidence = data.connected
+    ? Math.min(98, 58 + Math.min(20, data.conversationCount * 2) + Math.min(20, data.userMessageCount))
+    : 0;
   const sources = [
-    { icon: BookOpen, label: "Website", detail: "sarahcreates.com" },
-    { icon: MessageCircle, label: "FAQ", detail: "24 questions" },
-    { icon: CircleDollarSign, label: "Pricing", detail: "3 packages" },
-    { icon: Target, label: "Services", detail: "6 services" },
-    { icon: Bot, label: "Brand Voice", detail: "Tone and style" },
+    { icon: BookOpen, label: "Instagram profile", detail: `@${data.username}` },
+    { icon: MessageCircle, label: "Conversation FAQ", detail: `${data.userMessageCount.toLocaleString()} customer messages` },
+    { icon: CircleDollarSign, label: "Pricing signals", detail: `${data.highIntentLeads.toLocaleString()} buying conversations` },
+    { icon: Target, label: "Content library", detail: `${data.mediaCount.toLocaleString()} media items loaded` },
+    { icon: Bot, label: "Brand Voice", detail: `${data.replyCount.toLocaleString()} replies analyzed` },
   ];
 
   return (
@@ -571,9 +900,9 @@ function TrainingStep() {
       </AnimatedCard>
 
       <div className="flex flex-col items-center justify-center">
-        <AnimatedDonut percent={92}>
+        <AnimatedDonut percent={confidence}>
           <span className="text-[32px] font-extrabold text-black">
-            <AnimatedCounter value={92} suffix="%" duration={1100} />
+            <AnimatedCounter value={confidence} suffix="%" duration={1100} />
           </span>
           <span className="mt-1 text-[12px] font-bold text-[#697083]">AI Confidence</span>
         </AnimatedDonut>
@@ -629,9 +958,9 @@ function ActionPlanStep() {
   );
 }
 
-function UnlockStep({ onFinish }: { onFinish: () => void | Promise<void> }) {
+function UnlockStep({ data, onFinish }: { data: OnboardingData; onFinish: () => void | Promise<void> }) {
   const unlockItems = [
-    "View all 12 opportunities",
+    `View all ${data.opportunityCount.toLocaleString()} opportunities`,
     "AI starts conversations",
     "AI qualifies leads",
     "AI answers and handles DMs",
@@ -657,15 +986,15 @@ function UnlockStep({ onFinish }: { onFinish: () => void | Promise<void> }) {
         >
           <p className="text-[15px] font-bold text-[#dbe2ff]">Your Audience Contains</p>
           <p className="mt-5 text-[56px] font-extrabold leading-none tracking-[-0.04em] text-[#a999ff]">
-            <AnimatedCounter value={18400} prefix="$" duration={1200} />
+            <AnimatedCounter value={data.estimatedRevenue} prefix="$" duration={1200} />
           </p>
           <p className="mt-4 text-[18px] font-bold text-[#dbe2ff]">Potential Revenue</p>
           <div className="mt-8 grid grid-cols-4 border-t border-white/10 pt-5 text-center">
             {[
-              [12, "Hot Leads"],
-              [4, "Partnerships"],
-              [23, "Superfans"],
-              [2, "At-Risk Customers"],
+              [data.highIntentLeads, "Hot Leads"],
+              [data.partnerships, "Partnerships"],
+              [data.superfans, "Superfans"],
+              [data.atRisk, "At-Risk Customers"],
             ].map(([value, label], index) => (
               <div key={label}>
                 <p className="text-[24px] font-extrabold text-white">
@@ -742,40 +1071,91 @@ function UnlockStep({ onFinish }: { onFinish: () => void | Promise<void> }) {
   );
 }
 
-function StepContent({ step, onFinish }: { step: StepId; onFinish: () => void | Promise<void> }) {
+function StepContent({
+  step,
+  data,
+  onConnectInstagram,
+  onFinish,
+}: {
+  step: StepId;
+  data: OnboardingData;
+  onConnectInstagram: () => void;
+  onFinish: () => void | Promise<void>;
+}) {
   if (step === "connect") {
-    return <ConnectInstagramStep />;
+    return <ConnectInstagramStep data={data} onConnectInstagram={onConnectInstagram} />;
   }
 
   if (step === "revenue") {
-    return <RevenueStep />;
+    return <RevenueStep data={data} />;
   }
 
   if (step === "opportunity") {
-    return <OpportunityStep />;
+    return <OpportunityStep data={data} />;
   }
 
   if (step === "audience") {
-    return <AudienceStep />;
+    return <AudienceStep data={data} />;
   }
 
   if (step === "training") {
-    return <TrainingStep />;
+    return <TrainingStep data={data} />;
   }
 
   if (step === "action-plan") {
     return <ActionPlanStep />;
   }
 
-  return <UnlockStep onFinish={onFinish} />;
+  return <UnlockStep data={data} onFinish={onFinish} />;
 }
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [stepIndex, setStepIndex] = useState(0);
+  const [onboardingData, setOnboardingData] = useState<OnboardingData>(defaultOnboardingData);
   const currentStep = steps[stepIndex];
   const isFinalStep = stepIndex === steps.length - 1;
   const progress = useMemo(() => ((stepIndex + 1) / steps.length) * 100, [stepIndex]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadOnboardingData() {
+      try {
+        const requestOptions = {
+          headers: { Accept: "application/json" },
+          cache: "no-store" as RequestCache,
+        };
+        const [statusResult, contentResult, conversationsResult] = await Promise.allSettled([
+          fetch("/api/auth/instagram/status", requestOptions).then((response) => response.json() as Promise<unknown>),
+          fetch("/api/instagram/content", requestOptions).then((response) => response.json() as Promise<unknown>),
+          fetch("/api/instagram/conversations", requestOptions).then((response) => response.json() as Promise<unknown>),
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setOnboardingData(
+          buildOnboardingData(
+            statusResult.status === "fulfilled" ? statusResult.value : {},
+            contentResult.status === "fulfilled" ? contentResult.value : {},
+            conversationsResult.status === "fulfilled" ? conversationsResult.value : {},
+          ),
+        );
+      } catch {
+        if (isMounted) {
+          setOnboardingData({ ...defaultOnboardingData, isLoading: false });
+        }
+      }
+    }
+
+    void loadOnboardingData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   async function finishOnboarding() {
     window.localStorage.setItem("tractionflo_onboarding_completed", "true");
@@ -801,6 +1181,10 @@ export default function OnboardingPage() {
 
   function goBack() {
     setStepIndex((current) => Math.max(current - 1, 0));
+  }
+
+  function connectInstagram() {
+    window.location.href = "/api/auth/instagram?next=/onboarding";
   }
 
   return (
@@ -877,7 +1261,12 @@ export default function OnboardingPage() {
                       transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
                       className="w-full max-w-[660px]"
                     >
-                    <StepContent step={currentStep.id} onFinish={finishOnboarding} />
+                    <StepContent
+                      step={currentStep.id}
+                      data={onboardingData}
+                      onConnectInstagram={connectInstagram}
+                      onFinish={finishOnboarding}
+                    />
                     </motion.div>
                   </AnimatePresence>
                 </div>
@@ -898,7 +1287,12 @@ export default function OnboardingPage() {
                     exit={{ opacity: 0, y: -18 }}
                     transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                   >
-                    <StepContent step={currentStep.id} onFinish={finishOnboarding} />
+                    <StepContent
+                      step={currentStep.id}
+                      data={onboardingData}
+                      onConnectInstagram={connectInstagram}
+                      onFinish={finishOnboarding}
+                    />
                   </motion.div>
                 </AnimatePresence>
               </div>

@@ -122,7 +122,7 @@ export async function signup(formData: FormData) {
 }
 
 async function signInWithGoogle(errorPath: '/login' | '/signup') {
-  const supabase = await createClient().catch((error) => redirectToAuthConfigError('/login', error))
+  const supabase = await createClient().catch((error) => redirectToAuthConfigError(errorPath, error))
   const origin = await getAppOrigin()
 
   if (!origin) {
