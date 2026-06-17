@@ -16,7 +16,7 @@ import {
 import { searchKnowledgeSources } from '@/lib/knowledge-base';
 import { runAssistantThread } from '@/lib/openai-assistants';
 import { recordOpenAiUsage } from '@/lib/openai-usage';
-import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
+import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +41,7 @@ type InstagramWebhookMessageEvent = {
 type AutomationMessageEvent = {
   mid: string;
   senderId: string;
+  recipientId: string;
   text: string;
   timestamp?: number;
   previousSenderMessageCount: number;
@@ -267,7 +268,13 @@ async function processInstagramAutomations(
     return;
   }
 
-  const automationUser = await findAutomationUser(supabase);
+  for (const event of events) {
+    try {
+      if (!event.recipientId) {
+        continue;
+      }
+
+      const account = await getFreshInstagramAccountByIgUserId(supabase, event.recipientId);
 
   if (!automationUser) {
     logger.info("processInstagramAutomations: No automation user found. This means Auto-Send AI Replies is DISABLED in your settings. Bailing out.");
@@ -329,6 +336,8 @@ async function processInstagramAutomations(
         url: '/conversations',
         metadata: {
           source: 'instagram-webhook-automation',
+          userId: user.id,
+          igUserId: event.recipientId,
           senderId: event.senderId,
           messageId: sent.message_id || '',
           welcome: isFirstInboundDm,
@@ -392,8 +401,9 @@ export async function POST(request: Request) {
           const text = msg.message?.text?.trim();
           const mid = msg.message?.mid || '';
           const senderId = msg.sender?.id || '';
+          const recipientId = msg.recipient?.id || entry.id || '';
 
-          if (msg.message?.is_echo || !text || !senderId) {
+          if (msg.message?.is_echo || !text || !senderId || !recipientId) {
             continue;
           }
 
@@ -411,6 +421,7 @@ export async function POST(request: Request) {
             automationEvents.push({
               mid,
               senderId,
+              recipientId,
               text,
               timestamp: msg.timestamp,
               previousSenderMessageCount,

@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import {
   ArrowLeft,
-  Bell,
   Bookmark,
   Braces,
   CalendarDays,
@@ -35,6 +34,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiLeadInsight, AiWorkflowRunResult } from "@/lib/ai-integration";
 import { settingsStateStorageKey } from "@/lib/notification-preferences";
+import NotificationBell from "./NotificationBell";
 
 const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
   ssr: false,
@@ -124,6 +124,12 @@ type AiReplyResponse = {
 
 type AiWorkflowResponse = Partial<AiWorkflowRunResult> & {
   error?: string;
+  autoSend?: boolean;
+  handoff?: boolean;
+  escalation?: {
+    summary?: string;
+    recommendedAction?: string;
+  };
   knowledge?: {
     mode?: "none" | "direct" | "context";
     sourceTitle?: string;
@@ -1324,10 +1330,10 @@ function ChatThread({
           <button type="button" className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee] xl:hidden">
             <Search size={17} />
           </button>
-          <button type="button" className="relative flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee] xl:hidden">
-            <Bell size={17} />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#3044ff]" />
-          </button>
+          <NotificationBell
+            iconSize={17}
+            buttonClassName="relative flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee] bg-white transition hover:bg-[#f6f7fb] xl:hidden"
+          />
         </div>
       </header>
 
@@ -1461,7 +1467,6 @@ function SummaryPanel({
   assistantId,
   accountName,
   composerStatus,
-  refreshing,
   takeoverMode,
   onToggleTakeoverMode,
   onDraftSuggestedReply,
@@ -1472,7 +1477,6 @@ function SummaryPanel({
   assistantId: string;
   accountName: string;
   composerStatus: ComposerStatus;
-  refreshing: boolean;
   takeoverMode: ConversationTakeoverMode;
   onToggleTakeoverMode: () => void;
   onDraftSuggestedReply: (text: string) => void;
@@ -1480,7 +1484,6 @@ function SummaryPanel({
 }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [aiWorkflow, setAiWorkflow] = useState<AiWorkflowResponse | null>(null);
   const [aiStatus, setAiStatus] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -1507,15 +1510,8 @@ function SummaryPanel({
   const searchMatches = trimmedSearch
     ? msgs.filter((message) => getSearchableMessageText(message).includes(trimmedSearch))
     : [];
-  const recentUserMessages = msgs
-    .filter((message) => message.from === "user")
-    .slice(-4)
-    .reverse();
   const lastMessage = msgs[msgs.length - 1];
   const latestInboundMessage = lastMessage?.from === "user" ? lastMessage : null;
-  const liveNotice = lastUserMsg
-    ? `${getMessagePreview(lastUserMsg)} • ${relativeTime(lastUserMsg.time)}`
-    : "No recent user messages";
   const lastAutoSendKeyRef = useRef("");
 
   useEffect(() => {
@@ -1567,7 +1563,13 @@ function SummaryPanel({
         }
 
         setAiWorkflow(data);
-        setAiStatus("AI takeover active. Replies send automatically after drafting.");
+        setAiStatus(
+          data.handoff
+            ? data.escalation?.recommendedAction || "Human handoff needed. AI auto-send is paused."
+            : data.autoSend === false
+              ? "AI reply ready. Auto-send is off."
+              : "AI takeover active. Replies send automatically after drafting."
+        );
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
@@ -1644,6 +1646,8 @@ function SummaryPanel({
       aiLoading ||
       composerStatus.sending ||
       !reply ||
+      aiWorkflow?.autoSend === false ||
+      aiWorkflow?.handoff ||
       !latestInboundMessage
     ) {
       return;
@@ -1673,6 +1677,8 @@ function SummaryPanel({
       });
   }, [
     aiLoading,
+    aiWorkflow?.autoSend,
+    aiWorkflow?.handoff,
     aiWorkflow?.reply,
     composerStatus.sending,
     conv,
@@ -1695,45 +1701,11 @@ function SummaryPanel({
           />
           <span className="rounded bg-[#eff1f6] px-1.5 py-0.5 text-[11px] font-extrabold text-[#8b92a6]">⌘K</span>
         </label>
-        <div className="relative">
-          <button
-            type="button"
-            aria-label="Conversation notifications"
-            onClick={() => setNotificationsOpen((open) => !open)}
-            className="relative flex h-8 w-8 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white transition hover:bg-[#f6f7fb]"
-          >
-            <Bell size={17} />
-            {(recentUserMessages.length > 0 || refreshing) && (
-              <span className="absolute right-2 top-1.5 h-2.5 w-2.5 rounded-full bg-[#3044ff]" />
-            )}
-          </button>
-          {notificationsOpen && (
-            <div className="absolute right-0 top-10 z-30 w-72 rounded-[10px] border border-[#dde3ee] bg-white p-3 shadow-[0_20px_55px_rgba(20,28,53,0.14)]">
-              <div className="flex items-center justify-between">
-                <h3 className="text-[12px] font-extrabold text-black">Live activity</h3>
-                <span className="text-[10px] font-bold text-[#596175]">{refreshing ? "Syncing" : "Live"}</span>
-              </div>
-              <p className="mt-2 rounded-[8px] bg-[#f6f7ff] p-2 text-[11px] font-medium leading-[1.35] text-[#3c4358]">
-                {liveNotice}
-              </p>
-              <div className="mt-2 space-y-1">
-                {recentUserMessages.length > 0 ? (
-                  recentUserMessages.map((message) => (
-                    <div key={message.id} className="rounded-[8px] px-2 py-1.5 text-[11px] hover:bg-[#f6f7fb]">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate font-bold text-black">{message.sender_name || getParticipantName(conv)}</span>
-                        <span className="shrink-0 text-[#596175]">{relativeTime(message.time)}</span>
-                      </div>
-                      <p className="mt-0.5 line-clamp-1 text-[#596175]">{getMessagePreview(message)}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="py-2 text-[11px] font-medium text-[#596175]">No user activity yet.</p>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        <NotificationBell
+          ariaLabel="Conversation notifications"
+          iconSize={17}
+          buttonClassName="relative flex h-8 w-8 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white transition hover:bg-[#f6f7fb]"
+        />
       </header>
 
       <div className="flex-1 overflow-y-auto p-3">
@@ -2015,13 +1987,19 @@ export default function Inbox() {
         setError(data.error);
       } else {
         const nextConversations = data.conversations || [];
+        const requestedConversationId =
+          typeof window !== "undefined" && !hasLoadedInboxRef.current
+            ? new URLSearchParams(window.location.search).get("conversation")
+            : "";
         setConvs((current) =>
           getConversationsSignature(current) === getConversationsSignature(nextConversations) ? current : nextConversations
         );
         if (data.ig_user_id) setIgUserId(data.ig_user_id);
         setAssistantId(data.assistant_id || data.assistantId || data.account?.assistant_id || data.account?.assistantId || "");
         setAccount(data.account ?? null);
-        if (nextConversations.length > 0 && !activeIdRef.current) {
+        if (requestedConversationId && nextConversations.some((conversation) => conversation.id === requestedConversationId)) {
+          setActiveId(requestedConversationId);
+        } else if (nextConversations.length > 0 && !activeIdRef.current) {
           setActiveId(nextConversations[0].id);
         }
       }
@@ -2483,7 +2461,6 @@ export default function Inbox() {
         assistantId={assistantId}
         accountName={formatInstagramAccount(account)}
         composerStatus={composerStatus}
-        refreshing={refreshing}
         takeoverMode={activeTakeoverMode}
         onToggleTakeoverMode={toggleTakeoverMode}
         onDraftSuggestedReply={draftSuggestedReply}

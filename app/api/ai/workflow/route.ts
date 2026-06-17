@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
+import { detectConversationEscalation } from '@/lib/conversation-escalation';
 import {
   defaultAiLeadInsight,
   getEnabledWorkflowMap,
@@ -394,6 +395,7 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
     return NextResponse.json({
       assistantId,
       assistant_id: assistantId,
+      autoSend: integration.autoSend,
       ...workflowResult,
       enabledWorkflows, // Return original workflows configurations to frontend
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),

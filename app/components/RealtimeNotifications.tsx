@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Pusher, { type Channel } from "pusher-js";
 import { Bell, Bot, CheckCircle2, CreditCard, MessageCircle, PlugZap, UserRound, X } from "lucide-react";
+import { requestBrowserNotificationPermission, showBrowserOsNotification } from "@/lib/browser-os-notifications";
 import {
   notificationPreferencesChangedEvent,
   normalizeNotificationSettings,
@@ -12,6 +13,13 @@ import {
   type NotificationSetting,
 } from "@/lib/notification-preferences";
 import type { RealtimeNotificationPayload, RealtimeNotificationType } from "@/lib/pusher";
+import {
+  mergeRealtimeNotificationHistory,
+  normalizeRealtimeNotificationHistory,
+  realtimeNotificationEventName,
+  realtimeNotificationHistoryEventName,
+  realtimeNotificationHistoryStorageKey,
+} from "@/lib/realtime-notification-history";
 
 type BootstrapResponse =
   | {
@@ -52,27 +60,38 @@ function getNotificationIcon(type: RealtimeNotificationType) {
   }
 }
 
-function emitNotificationEvent(notification: RealtimeNotificationPayload) {
-  window.dispatchEvent(new CustomEvent("tractionflo:notification", { detail: notification }));
+function readNotificationHistory() {
+  try {
+    return normalizeRealtimeNotificationHistory(
+      JSON.parse(window.localStorage.getItem(realtimeNotificationHistoryStorageKey) || "[]")
+    );
+  } catch {
+    return [];
+  }
 }
 
-function sendBrowserNotification(notification: RealtimeNotificationPayload) {
-  if (!("Notification" in window) || Notification.permission !== "granted") {
-    return;
+function emitNotificationEvent(notification: RealtimeNotificationPayload) {
+  const history = mergeRealtimeNotificationHistory(readNotificationHistory(), notification);
+
+  try {
+    window.localStorage.setItem(realtimeNotificationHistoryStorageKey, JSON.stringify(history));
+  } catch {
+    // Browsers can block storage in private contexts. The live event still updates the current window.
   }
 
-  const browserNotification = new Notification(notification.title, {
+  window.dispatchEvent(new CustomEvent(realtimeNotificationHistoryEventName, { detail: history }));
+  window.dispatchEvent(new CustomEvent(realtimeNotificationEventName, { detail: notification }));
+}
+
+async function sendBrowserNotification(notification: RealtimeNotificationPayload) {
+  const result = await showBrowserOsNotification({
+    title: notification.title,
     body: notification.body,
-    icon: "/favicon.ico",
     tag: notification.id,
+    url: notification.url,
   });
 
-  if (notification.url) {
-    browserNotification.onclick = () => {
-      window.focus();
-      window.location.assign(notification.url || "/dashboard");
-    };
-  }
+  return result.delivered;
 }
 
 export default function RealtimeNotifications() {
@@ -88,6 +107,30 @@ export default function RealtimeNotifications() {
   useEffect(() => {
     notificationSettingsRef.current = notificationSettings;
   }, [notificationSettings]);
+
+  useEffect(() => {
+    if (!("Notification" in window) || Notification.permission !== "default") {
+      return;
+    }
+
+    let requested = false;
+    const requestPermission = () => {
+      if (requested || Notification.permission !== "default") {
+        return;
+      }
+
+      requested = true;
+      void requestBrowserNotificationPermission();
+    };
+
+    window.addEventListener("pointerdown", requestPermission, { once: true });
+    window.addEventListener("keydown", requestPermission, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", requestPermission);
+      window.removeEventListener("keydown", requestPermission);
+    };
+  }, []);
 
   useEffect(() => {
     function handlePreferenceEvent(event: Event) {
@@ -143,7 +186,7 @@ export default function RealtimeNotifications() {
         subscribedChannelsRef.current = bootstrap.channels.map((channelName) => {
           const channel = pusher.subscribe(channelName);
 
-          channel.bind(bootstrap.eventName, (notification: RealtimeNotificationPayload) => {
+          channel.bind(bootstrap.eventName, async (notification: RealtimeNotificationPayload) => {
             if (!notification?.id || !notification.title) {
               return;
             }
@@ -160,7 +203,12 @@ export default function RealtimeNotifications() {
             }
 
             emitNotificationEvent(notification);
-            sendBrowserNotification(notification);
+            const didShowBrowserNotification = await sendBrowserNotification(notification);
+
+            if (didShowBrowserNotification) {
+              return;
+            }
+
             setToasts((current) => {
               if (current.some((toast) => toast.id === notification.id)) {
                 return current;

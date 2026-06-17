@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
+import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,23 +36,44 @@ function wantsJson(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const authSupabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await authSupabase.auth.getUser();
+
+    if (authError) {
+      throw authError;
+    }
+
+    if (!user) {
+      if (wantsJson(request)) {
+        return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+      }
+
+      const redirectUrl = getRedirectUrl(request);
+      redirectUrl.searchParams.set('ig_error', 'Log in before disconnecting Instagram.');
+      return NextResponse.redirect(redirectUrl, { status: 303 });
+    }
+
     const supabase = createSupabaseServiceClient();
     const { error } = await supabase
       .from('instagram_accounts')
       .delete()
-      .not('ig_user_id', 'is', null);
+      .eq('user_id', user.id);
 
     if (error) {
       throw error;
     }
 
-    await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+    await triggerRealtimeNotification([getUserChannel(user.id), getGlobalChannel(), getSuperAdminChannel()], {
       type: 'instagram',
       title: 'Instagram disconnected',
       body: 'An Instagram account was disconnected from TractionFlo.',
       url: '/settings',
       metadata: {
         source: 'instagram-disconnect',
+        userId: user.id,
       },
     }).catch((notificationError) => {
       console.error('Realtime Instagram disconnect notification error:', notificationError);

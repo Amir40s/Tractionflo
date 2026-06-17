@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getFreshInstagramAccount, type StoredInstagramAccount } from '@/lib/instagram-token';
 import { createSupabaseServiceClient } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,8 +36,22 @@ async function getInstagramProfile(account: StoredInstagramAccount) {
 
 export async function GET() {
   try {
+    const authSupabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await authSupabase.auth.getUser();
+
+    if (authError) {
+      throw authError;
+    }
+
+    if (!user) {
+      return NextResponse.json({ connected: false, account: null, error: 'Not authenticated' }, { status: 401 });
+    }
+
     const supabase = createSupabaseServiceClient();
-    const storedAccount = await getFreshInstagramAccount(supabase);
+    const storedAccount = await getFreshInstagramAccount(supabase, user.id);
     const account = storedAccount ? await getInstagramProfile(storedAccount) : null;
 
     return NextResponse.json({

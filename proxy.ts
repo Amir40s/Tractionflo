@@ -16,6 +16,6 @@ export const config = {
      * - api/auth (Instagram OAuth — no auth required)
      * - api/webhooks (Meta webhook — no auth required)
      */
-    '/((?!_next/static|_next/image|favicon.ico|api/messages|api/auth|api/webhooks|api/instagram|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|tractionflo-notifications-sw\\.js|api/messages|api/auth|api/webhooks|api/instagram|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

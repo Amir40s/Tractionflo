@@ -6,7 +6,18 @@ import {
   getSupabasePublicEnv,
 } from './env'
 
-const PUBLIC_PATHS = ['/', '/login', '/signup', '/privacy', '/terms', '/contact', '/auth', '/api/messages', '/api/auth']
+const PUBLIC_PATHS = [
+  '/',
+  '/login',
+  '/signup',
+  '/privacy',
+  '/terms',
+  '/contact',
+  '/auth',
+  '/tractionflo-notifications-sw.js',
+  '/api/messages',
+  '/api/auth',
+]
 
 function isPublicPath(pathname: string) {
   return (
