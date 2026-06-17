@@ -1,0 +1,119 @@
+GreenWicket Cricket Ground Booking System
+Knowledge Base Test File
+
+Business overview
+GreenWicket Cricket Ground is a private cricket ground for box cricket, tape-ball cricket, hard-ball net practice, corporate matches, school tournaments, and weekend league games. The ground is located near Main Canal Road, Lahore, 8 minutes from Expo Centre. The business handles bookings through WhatsApp, Instagram DM, phone call, and website form.
+
+Assistant behavior
+When a customer asks about booking, first ask for date, preferred time slot, match type, and number of players. Do not confirm availability until the booking calendar is checked. If the customer asks something not covered in this file, say that the team can confirm it manually instead of inventing details.
+
+Opening hours
+Monday to Thursday: 7:00 AM to 12:00 AM.
+Friday: 7:00 AM to 1:00 AM.
+Saturday and Sunday: 6:00 AM to 1:00 AM.
+Ramadan hours: 3:00 PM to 5:30 AM.
+
+Ground types
+Main Cricket Ground: full-size tape-ball and hard-ball practice matches.
+Box Cricket Arena: 6-a-side and 8-a-side short format matches.
+Practice Nets: 3 covered nets, suitable for batting and bowling practice.
+Kids Cricket Area: safe soft-ball cricket for children under 12.
+
+Booking prices
+Main Cricket Ground weekday morning slot, 7:00 AM to 12:00 PM: PKR 7,000 per hour.
+Main Cricket Ground weekday evening slot, 4:00 PM to 8:00 PM: PKR 10,000 per hour.
+Main Cricket Ground night slot with floodlights, 8:00 PM to 12:00 AM: PKR 12,500 per hour.
+Weekend main ground slot: PKR 14,000 per hour.
+Box Cricket Arena weekday: PKR 5,000 per hour.
+Box Cricket Arena weekend: PKR 7,500 per hour.
+Practice net single lane: PKR 2,000 per hour.
+Practice net full 3-lane rental: PKR 5,000 per hour.
+
+Floodlight policy
+Floodlights are included in night slot pricing after 8:00 PM.
+For slots before 8:00 PM, floodlights cost PKR 2,500 extra per hour if requested.
+
+Booking deposit
+Every booking requires a 30 percent advance payment.
+Corporate events require 50 percent advance payment.
+The remaining balance must be paid before play starts.
+Payment methods: JazzCash, EasyPaisa, bank transfer, and cash at reception.
+
+Cancellation and reschedule policy
+Cancel 24 hours or more before the booking: full advance can be moved to another date.
+Cancel 12 to 24 hours before the booking: 50 percent of the advance can be moved.
+Cancel less than 12 hours before the booking: advance is non-refundable.
+Rain policy: if rain makes the ground unplayable, the booking is moved to a new available slot at no extra charge.
+
+Facilities
+Free parking for up to 35 cars.
+Changing rooms available.
+Clean washrooms available.
+Filtered water station available.
+Scoreboard available for main ground bookings.
+Basic umpire can be arranged for PKR 2,000 per match.
+Professional umpire can be arranged for PKR 5,000 per match.
+Match photography can be arranged for PKR 8,000 per match.
+Live streaming can be arranged for PKR 15,000 per match.
+Tea and snack packages are available for teams.
+
+Equipment
+Tennis balls and tape balls are available for purchase at reception.
+Hard-ball cricket kit is not provided by default.
+Bats can be rented for PKR 500 per match.
+Stumps are included with every booking.
+Score sheets are included for corporate events.
+
+Rules
+Players must arrive 15 minutes before the slot.
+Late arrival does not extend the booking time.
+No smoking on the playing area.
+Outside food is allowed only in the seating area.
+Hard-ball matches require proper safety gear.
+Maximum players for main ground casual match: 22 players.
+Maximum players for box cricket: 16 players.
+Management can stop play for unsafe behavior.
+
+Corporate and tournament packages
+Corporate Match Basic Package: 2 hours ground, scoreboard, water, and basic umpire for PKR 28,000.
+Corporate Match Premium Package: 3 hours ground, floodlights, professional umpire, photography, water, and tea for PKR 55,000.
+School Tournament Package: half-day ground rental for PKR 65,000.
+Weekend League Package: 4 weekly matches per month starting from PKR 180,000.
+
+Common customer questions and answers
+Question: Do you have night cricket?
+Answer: Yes. Night cricket is available with floodlights from 8:00 PM to 12:00 AM on weekdays and until 1:00 AM on weekends.
+
+Question: How much is the main ground on Sunday night?
+Answer: Weekend main ground slots are PKR 14,000 per hour. Night slots include floodlights.
+
+Question: Can we book for a corporate match?
+Answer: Yes. Corporate match packages start from PKR 28,000. Please share your date, time, number of players, and whether you need umpire, photography, or refreshments.
+
+Question: Is advance payment required?
+Answer: Yes. Standard bookings require 30 percent advance payment. Corporate events require 50 percent advance payment.
+
+Question: What happens if it rains?
+Answer: If rain makes the ground unplayable, the booking is moved to a new available slot at no extra charge.
+
+Question: Do you provide bats and balls?
+Answer: Stumps are included. Tape balls and tennis balls are available for purchase. Bats can be rented for PKR 500 per match.
+
+Question: Do you have football or padel?
+Answer: No. GreenWicket is only for cricket bookings, practice nets, and cricket events.
+
+Lead capture fields
+Customer name.
+Phone number.
+Preferred date.
+Preferred time.
+Ground type.
+Match type.
+Number of players.
+Need umpire: yes or no.
+Need floodlights: yes or no.
+Need refreshments: yes or no.
+
+Preferred reply style
+Replies should be short, friendly, and direct. Mention the price only when the user asks about price or when confirming a package. Always end booking replies by asking for the date and time if missing.
+

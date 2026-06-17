@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Caveat, Plus_Jakarta_Sans } from "next/font/google";
+import RealtimeNotifications from "./components/RealtimeNotifications";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -27,7 +28,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${plusJakartaSans.variable} ${caveat.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <RealtimeNotifications />
+      </body>
     </html>
   );
 }

@@ -10,6 +10,52 @@ function redirectToAuthConfigError(pathname: '/login' | '/signup', error: unknow
   redirect(`${pathname}?error=${encodeURIComponent(message)}`)
 }
 
+function shouldShowOnboarding(metadata: Record<string, unknown> = {}) {
+  const role = typeof metadata.role === 'string' ? metadata.role.toLowerCase() : ''
+  const accountRole = typeof metadata.account_role === 'string' ? metadata.account_role.toLowerCase() : ''
+  const isSuperAdmin =
+    metadata.is_superadmin === true ||
+    role === 'super admin' ||
+    role === 'superadmin' ||
+    accountRole === 'superadmin'
+  const isAgent = metadata.is_agent === true || role === 'agent' || accountRole === 'agent'
+
+  return !isSuperAdmin && !isAgent && metadata.onboarding_completed !== true
+}
+
+function normalizeOrigin(value?: string | null) {
+  if (!value) {
+    return null
+  }
+
+  try {
+    return new URL(value).origin
+  } catch {
+    return null
+  }
+}
+
+async function getAppOrigin() {
+  const requestHeaders = await headers()
+  const requestOrigin = normalizeOrigin(requestHeaders.get('origin'))
+
+  if (requestOrigin) {
+    return requestOrigin
+  }
+
+  const forwardedHost = requestHeaders.get('x-forwarded-host')?.split(',')[0]?.trim()
+  const host = forwardedHost || requestHeaders.get('host')
+  const forwardedProto = requestHeaders.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  const protocol = forwardedProto || (host?.startsWith('localhost') || host?.startsWith('127.0.0.1') ? 'http' : 'https')
+  const requestHostOrigin = host ? normalizeOrigin(`${protocol}://${host}`) : null
+
+  return (
+    requestHostOrigin ||
+    normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL) ||
+    normalizeOrigin(process.env.ORIGIN)
+  )
+}
+
 export async function login(formData: FormData) {
   const supabase = await createClient().catch((error) => redirectToAuthConfigError('/login', error))
 
@@ -20,7 +66,7 @@ export async function login(formData: FormData) {
     return redirect('/login?error=Email and password are required')
   }
 
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,
   })
@@ -30,6 +76,11 @@ export async function login(formData: FormData) {
   }
 
   revalidatePath('/dashboard', 'layout')
+
+  if (shouldShowOnboarding(data.user?.user_metadata)) {
+    redirect('/onboarding')
+  }
+
   redirect('/dashboard')
 }
 
@@ -45,13 +96,14 @@ export async function signup(formData: FormData) {
     return redirect('/signup?error=Name, Email, and Password are required')
   }
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: {
         full_name: name,
         phone: phone || '',
+        onboarding_completed: false,
       }
     }
   })
@@ -61,15 +113,20 @@ export async function signup(formData: FormData) {
   }
 
   revalidatePath('/', 'layout')
+
+  if (data.session) {
+    redirect('/onboarding')
+  }
+
   redirect('/login?message=Check your email to continue sign in process')
 }
 
-export async function loginWithGoogle() {
-  const supabase = await createClient().catch((error) => redirectToAuthConfigError('/login', error))
-  const origin = (await headers()).get('origin')
+async function signInWithGoogle(errorPath: '/login' | '/signup') {
+  const supabase = await createClient().catch((error) => redirectToAuthConfigError(errorPath, error))
+  const origin = await getAppOrigin()
 
   if (!origin) {
-    redirect('/login?error=' + encodeURIComponent('Could not determine app URL for Google sign in'))
+    redirect(`${errorPath}?error=` + encodeURIComponent('Could not determine app URL for Google sign in'))
   }
 
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -84,14 +141,22 @@ export async function loginWithGoogle() {
   })
 
   if (error) {
-    redirect('/login?error=' + encodeURIComponent(error.message))
+    redirect(`${errorPath}?error=` + encodeURIComponent(error.message))
   }
 
   if (!data.url) {
-    redirect('/login?error=' + encodeURIComponent('Could not start Google sign in'))
+    redirect(`${errorPath}?error=` + encodeURIComponent('Could not start Google sign in'))
   }
 
   redirect(data.url)
+}
+
+export async function loginWithGoogle() {
+  await signInWithGoogle('/login')
+}
+
+export async function signupWithGoogle() {
+  await signInWithGoogle('/signup')
 }
 
 export async function signout() {

@@ -1,0 +1,127 @@
+PadelPoint Padel Ground Booking System
+Knowledge Base Test File
+
+Business overview
+PadelPoint is a premium padel court booking business with indoor and outdoor courts. Customers book courts for casual games, coaching, tournaments, birthday events, corporate wellness sessions, and beginner padel lessons. The venue is located at DHA Phase 6, Lahore, near Raya Commercial. Bookings are handled through Instagram DM, WhatsApp, phone call, and website booking form.
+
+Assistant behavior
+When a customer asks to book a court, ask for date, time, number of players, and whether they need rackets or coaching. Do not confirm final availability until the booking calendar is checked. If a question is not covered in this file, say the team can confirm it manually.
+
+Opening hours
+Monday to Thursday: 8:00 AM to 12:00 AM.
+Friday: 8:00 AM to 1:00 AM.
+Saturday and Sunday: 7:00 AM to 1:00 AM.
+Ladies-only coaching slots: Tuesday and Thursday from 11:00 AM to 2:00 PM.
+Kids academy slots: Saturday and Sunday from 9:00 AM to 12:00 PM.
+
+Court types
+Indoor Padel Court 1: air-conditioned court for premium bookings.
+Indoor Padel Court 2: air-conditioned court for coaching and private games.
+Outdoor Padel Court 1: evening and tournament games.
+Outdoor Padel Court 2: casual and group games.
+
+Booking prices
+Indoor court weekday morning, 8:00 AM to 2:00 PM: PKR 6,000 per hour.
+Indoor court weekday evening, 5:00 PM to 10:00 PM: PKR 9,000 per hour.
+Indoor court late night, 10:00 PM to 1:00 AM: PKR 10,500 per hour.
+Outdoor court weekday morning: PKR 4,500 per hour.
+Outdoor court weekday evening: PKR 7,000 per hour.
+Outdoor court late night: PKR 8,000 per hour.
+Weekend indoor court: PKR 11,000 per hour.
+Weekend outdoor court: PKR 8,500 per hour.
+
+Equipment rental
+Padel racket rental: PKR 700 per racket per session.
+New padel balls tube: PKR 1,800.
+Grip tape: PKR 600.
+Court booking does not include rackets by default.
+Players can bring their own rackets and balls.
+
+Coaching prices
+Beginner private coaching: PKR 7,500 per hour plus court fee.
+Group coaching for 4 players: PKR 12,000 per hour plus court fee.
+Kids academy monthly fee: PKR 22,000 per child, includes 8 sessions.
+Ladies-only group coaching monthly fee: PKR 18,000 per person, includes 8 sessions.
+Coach booking must be requested at least 12 hours in advance.
+
+Membership plans
+Silver Membership: PKR 35,000 per month, includes 5 off-peak court hours and 10 percent discount on racket rental.
+Gold Membership: PKR 65,000 per month, includes 10 off-peak court hours, priority booking, and 15 percent discount on coaching.
+Corporate Membership: starts at PKR 180,000 per month for 30 court hours and team booking support.
+
+Booking deposit
+Every court booking requires 50 percent advance payment.
+Tournament bookings require 60 percent advance payment.
+Membership invoices must be paid before the first session.
+Payment methods: bank transfer, JazzCash, EasyPaisa, debit card at reception, and cash.
+
+Cancellation and reschedule policy
+Cancel 18 hours or more before booking: full advance can be moved to another available slot.
+Cancel 8 to 18 hours before booking: 50 percent of advance can be moved.
+Cancel less than 8 hours before booking: advance is non-refundable.
+Coach cancellation less than 8 hours before the session is charged at 50 percent of coaching fee.
+Outdoor rain policy: if rain makes the outdoor court unplayable, the booking is moved to a new available slot or shifted to an indoor court if available. Indoor court price difference may apply.
+
+Facilities
+Air-conditioned indoor courts.
+Outdoor courts with professional lights.
+Free parking for up to 25 cars.
+Changing rooms and showers.
+Lockers available at reception.
+Cafe with water, coffee, protein shakes, and snacks.
+Seating area for guests.
+Basic first aid kit available.
+Tournament bracket support available.
+
+Rules
+Maximum 4 players on court during normal padel booking.
+Players must wear non-marking sports shoes.
+Players should arrive 10 minutes before the slot.
+Late arrival does not extend the booking time.
+No food or drinks inside the court glass area.
+Children under 12 must be supervised by an adult.
+Management may stop play for unsafe behavior.
+Pets are not allowed inside the court area.
+
+Events and packages
+Birthday Padel Event: 2 hours outdoor court, seating area, basic decor, and soft drinks for PKR 45,000.
+Corporate Wellness Session: 3 hours, two courts, coach introduction, water, and tournament support for PKR 95,000.
+Mini Tournament Package: 4 hours, two courts, bracket support, referee, and water for PKR 125,000.
+Beginner Trial Session: 1 hour group class for up to 4 players for PKR 14,000 plus court fee.
+
+Common customer questions and answers
+Question: How much is indoor padel on Saturday evening?
+Answer: Weekend indoor court booking is PKR 11,000 per hour.
+
+Question: Do you provide rackets?
+Answer: Rackets are available for rent at PKR 700 per racket per session. Court booking does not include rackets by default.
+
+Question: Can beginners play?
+Answer: Yes. Beginners are welcome. PadelPoint also offers beginner private coaching and group coaching.
+
+Question: Do you have ladies-only coaching?
+Answer: Yes. Ladies-only coaching slots are available Tuesday and Thursday from 11:00 AM to 2:00 PM.
+
+Question: What if it rains?
+Answer: Outdoor bookings can be moved to another slot or shifted to an indoor court if available. Indoor court price difference may apply.
+
+Question: Can we book for a corporate event?
+Answer: Yes. The Corporate Wellness Session includes 3 hours, two courts, coach introduction, water, and tournament support for PKR 95,000.
+
+Question: Is this a cricket ground?
+Answer: No. PadelPoint is only for padel court bookings, padel coaching, memberships, and padel events.
+
+Lead capture fields
+Customer name.
+Phone number.
+Preferred date.
+Preferred time.
+Indoor or outdoor court.
+Number of players.
+Need rackets: yes or no.
+Need coaching: yes or no.
+Need event package: yes or no.
+
+Preferred reply style
+Replies should be short, friendly, and clear. For booking requests, ask for date, time, and number of players if missing. For price questions, answer with the exact price from this file and mention whether rackets or coaching are extra.
+
