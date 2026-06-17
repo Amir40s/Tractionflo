@@ -18,11 +18,14 @@ type ReplyMessage = {
 };
 
 type ReplyPayload = {
+  assistantId?: string;
+  assistant_id?: string;
   participant?: {
     name?: string;
     username?: string;
   };
   accountName?: string;
+  takeoverMode?: 'ai' | 'human';
   messages?: ReplyMessage[];
 };
 
@@ -46,6 +49,29 @@ function getLatestUserQuestion(messages: ReplyMessage[] = []) {
     .join('\n');
 }
 
+function resolveAssistantId(payload: ReplyPayload, authenticatedUserId: string) {
+  const requestedAssistantId = (payload.assistantId || payload.assistant_id || '').trim();
+
+  if (!requestedAssistantId) {
+    return authenticatedUserId;
+  }
+
+  return requestedAssistantId === authenticatedUserId ? requestedAssistantId : null;
+}
+
+function summarizeKnowledgeForResponse(
+  knowledge: { mode: 'none' | 'direct' | 'context'; sourceTitle?: string; matches: unknown[] },
+  assistantId: string
+) {
+  return {
+    mode: knowledge.mode,
+    sourceTitle: knowledge.sourceTitle,
+    matches: knowledge.matches.length,
+    assistantId,
+    assistant_id: assistantId,
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const payload = (await request.json()) as ReplyPayload;
@@ -61,6 +87,16 @@ export async function POST(request: Request) {
 
     if (!user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    if (payload.takeoverMode === 'human') {
+      return NextResponse.json({ error: 'AI replies are paused while human takeover is active.' }, { status: 409 });
+    }
+
+    const assistantId = resolveAssistantId(payload, user.id);
+
+    if (!assistantId) {
+      return NextResponse.json({ error: 'Assistant ID does not match the authenticated account.' }, { status: 403 });
     }
 
     const metadata = user.user_metadata || {};
@@ -79,7 +115,7 @@ export async function POST(request: Request) {
     const knowledge = latestUserQuestion
       ? await searchKnowledgeSources({
           supabase: serviceSupabase,
-          userId: user.id,
+          userId: assistantId,
           question: latestUserQuestion,
         })
       : { mode: 'none' as const, matches: [], totalSources: 0 };
@@ -91,6 +127,7 @@ export async function POST(request: Request) {
         body: bookingFollowUpReply.slice(0, 120),
         url: '/conversations',
         metadata: {
+          assistantId,
           autoSend: integration.autoSend,
           knowledgeMode: knowledge.mode,
           sourceTitle: knowledge.sourceTitle || '',
@@ -100,13 +137,11 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json({
+        assistantId,
+        assistant_id: assistantId,
         reply: bookingFollowUpReply,
         autoSend: integration.autoSend,
-        knowledge: {
-          mode: knowledge.mode,
-          sourceTitle: knowledge.sourceTitle,
-          matches: knowledge.matches.length,
-        },
+        knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
       });
     }
 
@@ -119,6 +154,7 @@ export async function POST(request: Request) {
         body: reply.slice(0, 120),
         url: '/conversations',
         metadata: {
+          assistantId,
           autoSend: integration.autoSend,
           knowledgeMode: knowledge.mode,
           sourceTitle: knowledge.sourceTitle || '',
@@ -128,13 +164,11 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json({
+        assistantId,
+        assistant_id: assistantId,
         reply,
         autoSend: integration.autoSend,
-        knowledge: {
-          mode: knowledge.mode,
-          sourceTitle: knowledge.sourceTitle,
-          matches: knowledge.matches.length,
-        },
+        knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
       });
     }
 
@@ -211,6 +245,7 @@ Write the next best reply.`,
       body: reply.slice(0, 120),
       url: '/conversations',
       metadata: {
+        assistantId,
         autoSend: integration.autoSend,
         knowledgeMode: knowledge.mode,
         sourceTitle: knowledge.sourceTitle || '',
@@ -220,13 +255,11 @@ Write the next best reply.`,
     });
 
     return NextResponse.json({
+      assistantId,
+      assistant_id: assistantId,
       reply,
       autoSend: integration.autoSend,
-      knowledge: {
-        mode: knowledge.mode,
-        sourceTitle: knowledge.sourceTitle,
-        matches: knowledge.matches.length,
-      },
+      knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not generate AI reply';

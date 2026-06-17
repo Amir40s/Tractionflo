@@ -23,7 +23,19 @@ type KnowledgeSourcePatch = {
   category?: string;
   content?: string;
   deleteQaPairId?: string;
+  replaceCategory?: boolean;
+  sections?: {
+    category?: string;
+    content?: string;
+    title?: string;
+  }[];
   title?: string;
+};
+
+type NormalizedManualSection = {
+  category: KnowledgeCategoryOption;
+  content: string;
+  title: string;
 };
 
 function normalizeAssignment(value: unknown): KnowledgeAssignment | undefined {
@@ -49,6 +61,151 @@ function normalizeManualTitle(value: unknown, category: KnowledgeCategoryOption)
 
 function normalizeManualContent(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 80_000) : "";
+}
+
+function normalizeManualSections(value: unknown): NormalizedManualSection[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((section) => {
+      const item = section && typeof section === "object" ? section as { category?: unknown; content?: unknown; title?: unknown } : {};
+      const category = normalizeManualCategory(item.category);
+      const content = normalizeManualContent(item.content);
+
+      return {
+        category,
+        content,
+        title: normalizeManualTitle(item.title, category),
+      };
+    })
+    .filter((section) => section.content.length > 0);
+}
+
+function normalizeIndexedKnowledgeText(value: string) {
+  return value
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function escapeKnowledgeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getManualCategoryMarkerMatches(text: string) {
+  const categories = knowledgeCategoryOptions.map(escapeKnowledgeRegExp).join("|");
+  const markerPattern = new RegExp(`(?:^|\\n)(?:Manual update:[^\\n]*\\n)?Category:\\s*(${categories})\\s*(?:\\nTitle:[^\\n]*)?\\n*`, "gi");
+  const matches: { category: string; start: number; end: number }[] = [];
+  let match = markerPattern.exec(text);
+
+  while (match) {
+    matches.push({
+      category: match[1],
+      start: match.index,
+      end: markerPattern.lastIndex,
+    });
+    match = markerPattern.exec(text);
+  }
+
+  return matches;
+}
+
+function stripManualCategoryBlocksFromText(text: string, category: KnowledgeCategoryOption) {
+  const matches = getManualCategoryMarkerMatches(text);
+
+  if (matches.length === 0) {
+    return text;
+  }
+
+  let nextText = "";
+  let cursor = 0;
+
+  matches.forEach((match, index) => {
+    const blockEnd = matches[index + 1]?.start ?? text.length;
+
+    if (match.category !== category) {
+      return;
+    }
+
+    nextText += text.slice(cursor, match.start).trimEnd();
+    cursor = blockEnd;
+  });
+
+  nextText += text.slice(cursor);
+
+  return normalizeIndexedKnowledgeText(nextText);
+}
+
+function getAdjustedQaBlockStart(text: string, questionStart: number) {
+  const prefix = text.slice(0, questionStart);
+  const faqPrefix = prefix.match(/(?:^|\n)\s*FAQ\s*\d+[\s:.)-]*\s*$/i);
+
+  if (!faqPrefix) {
+    return questionStart;
+  }
+
+  return Math.max(0, questionStart - faqPrefix[0].length + (faqPrefix[0].startsWith("\n") ? 1 : 0));
+}
+
+function findQaBlockEnd(text: string, answerContentStart: number) {
+  const rest = text.slice(answerContentStart);
+  const boundaryIndex = rest.search(/\n\s*(?:FAQ\s*\d+[\s:.)-]*\s*)?(?:Question\s*:|Manual update:|Category\s*:)/i);
+
+  return boundaryIndex >= 0 ? answerContentStart + boundaryIndex : text.length;
+}
+
+function stripQaBlocksFromText(text: string) {
+  const markerPattern = /\b(Question|Answer)\s*:\s*/gi;
+  const markers: { type: "question" | "answer"; start: number; contentStart: number }[] = [];
+  const ranges: { start: number; end: number }[] = [];
+  let markerMatch = markerPattern.exec(text);
+
+  while (markerMatch) {
+    markers.push({
+      type: markerMatch[1].toLowerCase() === "question" ? "question" : "answer",
+      start: markerMatch.index,
+      contentStart: markerPattern.lastIndex,
+    });
+    markerMatch = markerPattern.exec(text);
+  }
+
+  for (let index = 0; index < markers.length; index += 1) {
+    const questionMarker = markers[index];
+    const answerMarker = markers[index + 1];
+
+    if (questionMarker.type !== "question" || answerMarker?.type !== "answer") {
+      continue;
+    }
+
+    ranges.push({
+      start: getAdjustedQaBlockStart(text, questionMarker.start),
+      end: findQaBlockEnd(text, answerMarker.contentStart),
+    });
+  }
+
+  if (ranges.length === 0) {
+    return text;
+  }
+
+  let nextText = "";
+  let cursor = 0;
+
+  ranges.forEach((range) => {
+    if (range.start < cursor) {
+      cursor = Math.max(cursor, range.end);
+      return;
+    }
+
+    nextText += text.slice(cursor, range.start).trimEnd();
+    cursor = range.end;
+  });
+
+  nextText += text.slice(cursor);
+
+  return normalizeIndexedKnowledgeText(nextText.replace(/^\s*FAQ\s*\d+[\s:.)-]*\s*$/gim, ""));
 }
 
 function rebuildTextFromSource(source: KnowledgeSourceIndex) {
@@ -172,18 +329,36 @@ export async function PATCH(request: Request, context: { params: { sourceId: str
     }
 
     const manualContent = normalizeManualContent(payload.content);
+    const manualSections = normalizeManualSections(payload.sections);
+    const sectionsToSave = manualSections.length > 0
+      ? manualSections
+      : manualContent
+        ? [
+            {
+              category: normalizeManualCategory(payload.category),
+              content: manualContent,
+              title: normalizeManualTitle(payload.title, normalizeManualCategory(payload.category)),
+            },
+          ]
+        : [];
 
-    if (manualContent) {
-      if (manualContent.length < 10) {
-        return NextResponse.json({ error: "Add at least 10 characters of manual knowledge." }, { status: 400 });
+    if (sectionsToSave.length > 0) {
+      if (sectionsToSave.some((section) => section.content.length < 10)) {
+        return NextResponse.json({ error: "Each saved knowledge section needs at least 10 characters." }, { status: 400 });
       }
 
-      const category = normalizeManualCategory(payload.category);
-      const manualTitle = normalizeManualTitle(payload.title, category);
-      const existingText = rebuildTextFromSource(nextSource);
-      const manualBlock = `Manual update: ${manualTitle}\nCategory: ${category}\n\n${manualContent}`;
-      const indexedText = [existingText, manualBlock].filter(Boolean).join("\n\n").trim();
-      const categories = Array.from(new Set([...nextSource.categories, category]));
+      const existingText = payload.replaceCategory === true
+        ? sectionsToSave.reduce((text, section) => {
+            if (section.category === "FAQs") {
+              return stripQaBlocksFromText(text);
+            }
+
+            return stripManualCategoryBlocksFromText(text, section.category);
+          }, rebuildTextFromSource(nextSource))
+        : rebuildTextFromSource(nextSource);
+      const manualBlocks = sectionsToSave.map((section) => `Manual update: ${section.title}\nCategory: ${section.category}\n\n${section.content}`);
+      const indexedText = [existingText, ...manualBlocks].filter(Boolean).join("\n\n").trim();
+      const categories = Array.from(new Set([...nextSource.categories, ...sectionsToSave.map((section) => section.category)]));
 
       nextSource = buildKnowledgeSourceIndex({
         userId: user.id,
@@ -204,7 +379,7 @@ export async function PATCH(request: Request, context: { params: { sourceId: str
       });
     }
 
-    if (!manualContent) {
+    if (sectionsToSave.length === 0) {
       nextSource.updatedAt = new Date().toISOString();
     }
 

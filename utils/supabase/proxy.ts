@@ -15,6 +15,14 @@ function isPublicPath(pathname: string) {
   )
 }
 
+function isApiPath(pathname: string) {
+  return pathname.startsWith('/api/')
+}
+
+function createApiAuthError(message: string, status: number) {
+  return NextResponse.json({ error: message }, { status })
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -25,6 +33,10 @@ export async function updateSession(request: NextRequest) {
   if (missingEnv.length > 0) {
     if (isPublicPath(request.nextUrl.pathname)) {
       return supabaseResponse
+    }
+
+    if (isApiPath(request.nextUrl.pathname)) {
+      return createApiAuthError(formatMissingSupabasePublicEnv(missingEnv), 500)
     }
 
     const url = request.nextUrl.clone()
@@ -57,6 +69,10 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   if (!user && !isPublicPath(request.nextUrl.pathname)) {
+    if (isApiPath(request.nextUrl.pathname)) {
+      return createApiAuthError('Not authenticated', 401)
+    }
+
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)

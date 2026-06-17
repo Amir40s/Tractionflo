@@ -126,9 +126,7 @@ const categoryKeywordMap: Record<string, string[]> = {
   Products: ["product", "kit", "equipment", "racket", "bat", "ball", "membership"],
   Services: ["service", "booking", "coaching", "practice", "corporate", "event"],
   Pricing: ["price", "pricing", "cost", "fee", "package", "pkr", "payment", "deposit"],
-  Courses: ["course", "academy", "training", "lesson", "class"],
   "Business Information": ["business", "company", "brand", "about us", "location", "hours", "contact", "address", "mission"],
-  "Lead Qualification": ["lead", "qualification", "qualify", "budget", "timeline", "decision", "intent", "requirement", "phone", "email"],
   Policies: ["policy", "cancel", "refund", "reschedule", "rain", "rules"],
   Website: ["website", "link", "online", "form"],
   PDFs: ["pdf"],
@@ -139,9 +137,7 @@ export const knowledgeCategoryOptions = [
   "Products",
   "Services",
   "Pricing",
-  "Courses",
   "Business Information",
-  "Lead Qualification",
 ] as const;
 
 export type KnowledgeCategoryOption = (typeof knowledgeCategoryOptions)[number];
@@ -321,15 +317,33 @@ function getSourceTitle(fileName: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Knowledge Source";
 }
 
+function escapeKnowledgeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getManualKnowledgeCategories(text: string) {
+  const categories = knowledgeCategoryOptions.map(escapeKnowledgeRegExp).join("|");
+  const markerPattern = new RegExp(`(?:^|\\n)(?:Manual update:[^\\n]*\\n)?Category:\\s*(${categories})\\s*(?:\\nTitle:[^\\n]*)?`, "gi");
+  const matches = new Set<string>();
+  let match = markerPattern.exec(text);
+
+  while (match) {
+    matches.add(match[1]);
+    match = markerPattern.exec(text);
+  }
+
+  return Array.from(matches);
+}
+
 function getCategories(text: string, fileName: string, kind: KnowledgeSourceKind) {
+  if (kind === "pdf") {
+    return Array.from(new Set([...getManualKnowledgeCategories(text), "PDFs"]));
+  }
+
   const searchable = `${fileName}\n${text.slice(0, 80_000)}`.toLowerCase();
   const categories = Object.entries(categoryKeywordMap)
     .filter(([, keywords]) => keywords.some((keyword) => searchable.includes(keyword)))
     .map(([category]) => category);
-
-  if (kind === "pdf" && !categories.includes("PDFs")) {
-    categories.push("PDFs");
-  }
 
   return categories.length > 0 ? categories : ["Services"];
 }
@@ -338,6 +352,14 @@ function mergeKnowledgeCategories(detectedCategories: string[], selectedCategori
   const validSelectedCategories = (selectedCategories || [])
     .map((category) => category.trim())
     .filter((category) => knowledgeCategoryOptions.includes(category as KnowledgeCategoryOption));
+
+  if (validSelectedCategories.length > 0) {
+    const detectedNonSectionCategories = detectedCategories.filter(
+      (category) => !knowledgeCategoryOptions.includes(category as KnowledgeCategoryOption)
+    );
+
+    return Array.from(new Set([...validSelectedCategories, ...detectedNonSectionCategories]));
+  }
 
   return Array.from(new Set([...validSelectedCategories, ...detectedCategories]));
 }
@@ -392,23 +414,104 @@ function chunkKnowledgeText(text: string) {
   return chunks.slice(0, 600);
 }
 
+function normalizeQaText(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/^\s*FAQ\s*\d+[\s:.)-]*/i, "")
+    .replace(/\s*FAQ\s*\d+[\s:.)-]*$/i, "")
+    .replace(/\s*Manual update:\s*[^:]{0,180}\s*Category:\s*[A-Za-z ]+\s*$/i, "")
+    .replace(/\s*Category:\s*[A-Za-z ]+\s*$/i, "")
+    .trim();
+}
+
+function getQaPairKey(pair: { question: string }) {
+  return pair.question
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function dedupeQaPairs(pairs: { question: string; answer: string }[]) {
+  const orderedKeys: string[] = [];
+  const pairByKey = new Map<string, { question: string; answer: string }>();
+
+  for (const pair of pairs) {
+    const key = getQaPairKey(pair);
+
+    if (!key) {
+      continue;
+    }
+
+    if (!pairByKey.has(key)) {
+      orderedKeys.push(key);
+    }
+
+    pairByKey.set(key, pair);
+  }
+
+  return orderedKeys
+    .map((key) => pairByKey.get(key))
+    .filter((pair): pair is { question: string; answer: string } => Boolean(pair));
+}
+
 function extractQaPairs(text: string) {
   const pairs: { question: string; answer: string }[] = [];
-  const pattern = /Question:\s*([\s\S]*?)\nAnswer:\s*([\s\S]*?)(?=\n\s*Question:|\n\s*[A-Z][A-Za-z ]+\n|$)/gi;
-  let match = pattern.exec(text);
+  const markerPattern = /\b(Question|Answer)\s*:\s*/gi;
+  const markers: { type: "question" | "answer"; start: number; contentStart: number }[] = [];
+  let markerMatch = markerPattern.exec(text);
 
-  while (match) {
-    const question = match[1]?.trim().replace(/\s+/g, " ");
-    const answer = match[2]?.trim().replace(/\s+/g, " ");
+  while (markerMatch) {
+    markers.push({
+      type: markerMatch[1].toLowerCase() === "question" ? "question" : "answer",
+      start: markerMatch.index,
+      contentStart: markerPattern.lastIndex,
+    });
+    markerMatch = markerPattern.exec(text);
+  }
+
+  for (let index = 0; index < markers.length; index += 1) {
+    const questionMarker = markers[index];
+    const answerMarker = markers[index + 1];
+
+    if (questionMarker.type !== "question" || answerMarker?.type !== "answer") {
+      continue;
+    }
+
+    const nextQuestionMarker = markers.slice(index + 2).find((marker) => marker.type === "question");
+    const question = normalizeQaText(text.slice(questionMarker.contentStart, answerMarker.start));
+    const answer = normalizeQaText(text.slice(answerMarker.contentStart, nextQuestionMarker?.start ?? text.length));
 
     if (question && answer) {
       pairs.push({ question, answer });
     }
-
-    match = pattern.exec(text);
   }
 
-  return pairs.slice(0, 200);
+  return dedupeQaPairs(pairs).slice(0, 200);
+}
+
+function hasDuplicateQaQuestions(pairs: Pick<KnowledgeQaPair, "question">[]) {
+  const seen = new Set<string>();
+
+  for (const pair of pairs) {
+    const key = getQaPairKey(pair);
+
+    if (key && seen.has(key)) {
+      return true;
+    }
+
+    seen.add(key);
+  }
+
+  return false;
+}
+
+function hasMalformedQaPairs(pairs: Pick<KnowledgeQaPair, "question" | "answer">[]) {
+  return pairs.some((pair) => {
+    const question = pair.question.toLowerCase();
+    const answer = pair.answer.toLowerCase();
+
+    return question.includes("question:") || question.includes("answer:") || answer.includes("question:");
+  });
 }
 
 export function buildKnowledgeSourceIndex({
@@ -546,6 +649,60 @@ export function normalizeKnowledgeSourceIndex(value: unknown): KnowledgeSourceIn
     return null;
   }
 
+  const sourceKind: KnowledgeSourceKind = source.kind === "pdf" || source.kind === "manual" ? source.kind : "txt";
+  const normalizedChunks = source.chunks
+    .filter((chunk): chunk is KnowledgeSourceChunk => Boolean(chunk && typeof chunk === "object" && typeof chunk.text === "string"))
+    .map((chunk, index) => ({
+      id: typeof chunk.id === "string" ? chunk.id : `${source.id}-chunk-${index + 1}`,
+      order: typeof chunk.order === "number" ? chunk.order : index + 1,
+      text: chunk.text,
+      terms: Array.isArray(chunk.terms)
+        ? chunk.terms.filter((item): item is string => typeof item === "string").slice(0, 120)
+        : tokenizeKnowledgeText(chunk.text).slice(0, 120),
+    }));
+  let normalizedQaPairs = Array.isArray(source.qaPairs)
+    ? source.qaPairs
+        .filter((pair): pair is KnowledgeQaPair => Boolean(pair && typeof pair === "object" && typeof pair.question === "string" && typeof pair.answer === "string"))
+        .map((pair, index) => {
+          const question = normalizeQaText(pair.question);
+          const answer = normalizeQaText(pair.answer);
+
+          return {
+            id: typeof pair.id === "string" ? pair.id : `${source.id}-qa-${index + 1}`,
+            question,
+            answer,
+            terms: tokenizeKnowledgeText(`${question} ${answer}`).slice(0, 120),
+          };
+        })
+        .filter((pair) => pair.question && pair.answer)
+    : [];
+  const normalizedText = [...normalizedChunks]
+    .sort((a, b) => a.order - b.order)
+    .map((chunk) => chunk.text)
+    .join("\n\n");
+  const storedCategories = Array.isArray(source.categories)
+    ? source.categories.filter((item): item is string => typeof item === "string")
+    : [];
+  const manualCategories = getManualKnowledgeCategories(normalizedText);
+  const normalizedCategories = sourceKind === "pdf"
+    ? Array.from(new Set([...manualCategories, "PDFs"]))
+    : sourceKind === "manual" && manualCategories.length > 0
+      ? manualCategories
+      : storedCategories;
+
+  if ((hasMalformedQaPairs(normalizedQaPairs) || hasDuplicateQaQuestions(normalizedQaPairs)) && normalizedChunks.length > 0) {
+    const rebuiltQaPairs = extractQaPairs(normalizedText);
+
+    if (rebuiltQaPairs.length > 0) {
+      normalizedQaPairs = rebuiltQaPairs.map((pair, index) => ({
+        id: `${source.id}-qa-${index + 1}`,
+        question: pair.question,
+        answer: pair.answer,
+        terms: tokenizeKnowledgeText(`${pair.question} ${pair.answer}`).slice(0, 120),
+      }));
+    }
+  }
+
   return {
     version: 1,
     id: String(source.id),
@@ -553,37 +710,21 @@ export function normalizeKnowledgeSourceIndex(value: unknown): KnowledgeSourceIn
     title: typeof source.title === "string" && source.title ? source.title : "Knowledge Source",
     fileName: typeof source.fileName === "string" && source.fileName ? source.fileName : "knowledge-source",
     mimeType: typeof source.mimeType === "string" ? source.mimeType : "application/octet-stream",
-    kind: source.kind === "pdf" || source.kind === "manual" ? source.kind : "txt",
+    kind: sourceKind,
     filePath: typeof source.filePath === "string" ? source.filePath : "",
     indexPath: String(source.indexPath),
     assignment: normalizeAssignment(source.assignment),
     active: typeof source.active === "boolean" ? source.active : true,
     status: source.status === "needs_review" ? "needs_review" : "ready",
-    categories: Array.isArray(source.categories) ? source.categories.filter((item): item is string => typeof item === "string") : [],
+    categories: normalizedCategories,
     wordCount: typeof source.wordCount === "number" ? source.wordCount : 0,
     characterCount: typeof source.characterCount === "number" ? source.characterCount : 0,
     chunkCount: typeof source.chunkCount === "number" ? source.chunkCount : source.chunks.length,
     fileSize: typeof source.fileSize === "number" ? source.fileSize : 0,
     createdAt: typeof source.createdAt === "string" ? source.createdAt : new Date().toISOString(),
     updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : new Date().toISOString(),
-    chunks: source.chunks
-      .filter((chunk): chunk is KnowledgeSourceChunk => Boolean(chunk && typeof chunk === "object" && typeof chunk.text === "string"))
-      .map((chunk, index) => ({
-        id: typeof chunk.id === "string" ? chunk.id : `${source.id}-chunk-${index + 1}`,
-        order: typeof chunk.order === "number" ? chunk.order : index + 1,
-        text: chunk.text,
-        terms: Array.isArray(chunk.terms) ? chunk.terms.filter((item): item is string => typeof item === "string") : tokenizeKnowledgeText(chunk.text),
-      })),
-    qaPairs: Array.isArray(source.qaPairs)
-      ? source.qaPairs
-          .filter((pair): pair is KnowledgeQaPair => Boolean(pair && typeof pair === "object" && typeof pair.question === "string" && typeof pair.answer === "string"))
-          .map((pair, index) => ({
-            id: typeof pair.id === "string" ? pair.id : `${source.id}-qa-${index + 1}`,
-            question: pair.question,
-            answer: pair.answer,
-            terms: Array.isArray(pair.terms) ? pair.terms.filter((item): item is string => typeof item === "string") : tokenizeKnowledgeText(`${pair.question} ${pair.answer}`),
-          }))
-      : [],
+    chunks: normalizedChunks,
+    qaPairs: normalizedQaPairs,
   };
 }
 

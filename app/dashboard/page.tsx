@@ -459,6 +459,14 @@ type OpportunityPageCard = {
   verified?: boolean;
   avatars?: number[];
   extraAvatars?: string;
+  stage?: string;
+  urgency?: "High" | "Medium" | "Low";
+  intent?: string;
+  interestLevel?: string;
+  qualificationFacts?: { label: string; value: string }[];
+  signals?: string[];
+  missing?: string[];
+  recommendedAction?: string;
 };
 
 type AudienceMetric = {
@@ -558,6 +566,8 @@ type RecentActivityItem = {
 };
 
 type CreatorLiveSummary = {
+  instagramAccount: ConnectedInstagramAccount | null;
+  hasInstagramConnection: boolean;
   conversations: InstagramSettingsConversation[];
   totalConversationCount: number;
   totalMessageCount: number;
@@ -587,8 +597,17 @@ type CreatorLiveSummary = {
   escalationDetailRows: EscalationDetailRow[];
 };
 
+type KnowledgeTabLabel =
+  | "All Sources"
+  | "FAQs"
+  | "Products"
+  | "Services"
+  | "Pricing"
+  | "Business Info"
+  | "PDFs";
+
 type KnowledgeTab = {
-  label: string;
+  label: KnowledgeTabLabel;
   count: string;
   icon: LucideIcon;
 };
@@ -634,6 +653,9 @@ type KnowledgeUpdate = {
 };
 
 type KnowledgeSourcesResponse = {
+  assistantId?: string;
+  assistant_id?: string;
+  source?: KnowledgeSourceSummary;
   sources?: KnowledgeSourceSummary[];
   error?: string;
 };
@@ -649,7 +671,15 @@ type KnowledgeSourceDetailResponse = {
   error?: string;
 };
 
-type KnowledgeViewTab = "overview" | "answers" | "text" | "details";
+type KnowledgeViewTab =
+  | "overview"
+  | "section:FAQs"
+  | "section:Products"
+  | "section:Services"
+  | "section:Pricing"
+  | "section:Business Information"
+  | "text"
+  | "details";
 
 type ManualFaqPair = {
   id: string;
@@ -662,6 +692,14 @@ type ManualKnowledgeDraft = {
   category: string;
   content: string;
   faqPairs: ManualFaqPair[];
+  categoryContent: Record<string, string>;
+  categoryFaqPairs: Record<string, ManualFaqPair[]>;
+};
+
+type ManualKnowledgeSectionPayload = {
+  category: string;
+  content: string;
+  title: string;
 };
 
 type KnowledgeAssignmentValue = KnowledgeSourceSummary["assignment"];
@@ -671,9 +709,7 @@ const knowledgeCategoryOptions = [
   "Products",
   "Services",
   "Pricing",
-  "Courses",
   "Business Information",
-  "Lead Qualification",
 ] as const;
 
 function createManualFaqPair(): ManualFaqPair {
@@ -684,12 +720,91 @@ function createManualFaqPair(): ManualFaqPair {
   };
 }
 
+function getEmptyManualCategoryContent() {
+  return knowledgeCategoryOptions.reduce<Record<string, string>>((contentByCategory, category) => {
+    contentByCategory[category] = "";
+    return contentByCategory;
+  }, {});
+}
+
+function normalizeManualFaqPairs(pairs: ManualFaqPair[]) {
+  return pairs.length > 0 ? pairs : [createManualFaqPair()];
+}
+
+function createManualKnowledgeDraft(source?: { title?: string } | null): ManualKnowledgeDraft {
+  const faqPairs = [createManualFaqPair()];
+
+  return {
+    title: source?.title || "",
+    category: "FAQs",
+    content: "",
+    faqPairs,
+    categoryContent: getEmptyManualCategoryContent(),
+    categoryFaqPairs: {
+      FAQs: faqPairs,
+    },
+  };
+}
+
+function getManualDraftCategoryContent(draft: ManualKnowledgeDraft, category = draft.category) {
+  return draft.categoryContent[category] ?? (category === draft.category ? draft.content : "");
+}
+
+function getManualDraftCategoryFaqPairs(draft: ManualKnowledgeDraft, category = draft.category) {
+  return normalizeManualFaqPairs(draft.categoryFaqPairs[category] || (category === draft.category ? draft.faqPairs : []));
+}
+
+function setManualDraftCategoryContent(draft: ManualKnowledgeDraft, category: string, content: string): ManualKnowledgeDraft {
+  return {
+    ...draft,
+    content: category === draft.category ? content : draft.content,
+    categoryContent: {
+      ...draft.categoryContent,
+      [category]: content,
+    },
+  };
+}
+
+function setManualDraftCategoryFaqPairs(draft: ManualKnowledgeDraft, category: string, faqPairs: ManualFaqPair[]): ManualKnowledgeDraft {
+  const nextPairs = normalizeManualFaqPairs(faqPairs);
+
+  return {
+    ...draft,
+    faqPairs: category === draft.category ? nextPairs : draft.faqPairs,
+    categoryFaqPairs: {
+      ...draft.categoryFaqPairs,
+      [category]: nextPairs,
+    },
+  };
+}
+
+function switchManualKnowledgeDraftCategory(draft: ManualKnowledgeDraft, category: string): ManualKnowledgeDraft {
+  const categoryContent = {
+    ...draft.categoryContent,
+    [draft.category]: draft.content,
+  };
+  const categoryFaqPairs = {
+    ...draft.categoryFaqPairs,
+    [draft.category]: draft.faqPairs,
+  };
+  const nextFaqPairs = normalizeManualFaqPairs(categoryFaqPairs[category] || []);
+
+  return {
+    ...draft,
+    category,
+    content: categoryContent[category] || "",
+    faqPairs: nextFaqPairs,
+    categoryContent,
+    categoryFaqPairs,
+  };
+}
+
 function getManualKnowledgeDraftContent(draft: ManualKnowledgeDraft) {
   if (draft.category !== "FAQs") {
-    return draft.content.trim();
+    return getManualDraftCategoryContent(draft).trim();
   }
 
-  return draft.faqPairs
+  return getManualDraftCategoryFaqPairs(draft)
     .map((pair) => ({
       question: pair.question.trim(),
       answer: pair.answer.trim(),
@@ -698,6 +813,32 @@ function getManualKnowledgeDraftContent(draft: ManualKnowledgeDraft) {
     .map((pair) => `Question: ${pair.question}\nAnswer: ${pair.answer}`)
     .join("\n\n")
     .trim();
+}
+
+function getManualKnowledgeDraftCategoryContent(draft: ManualKnowledgeDraft, category: string) {
+  if (category !== "FAQs") {
+    return getManualDraftCategoryContent(draft, category).trim();
+  }
+
+  return getManualDraftCategoryFaqPairs(draft, category)
+    .map((pair) => ({
+      question: pair.question.trim(),
+      answer: pair.answer.trim(),
+    }))
+    .filter((pair) => pair.question || pair.answer)
+    .map((pair) => `Question: ${pair.question}\nAnswer: ${pair.answer}`)
+    .join("\n\n")
+    .trim();
+}
+
+function getManualKnowledgeDraftSections(draft: ManualKnowledgeDraft): ManualKnowledgeSectionPayload[] {
+  return knowledgeCategoryOptions
+    .map((category) => ({
+      category,
+      title: draft.title || category,
+      content: getManualKnowledgeDraftCategoryContent(draft, category),
+    }))
+    .filter((section) => section.content.length >= 10);
 }
 
 type EscalationTab = {
@@ -861,7 +1002,7 @@ const navItems: NavItem[] = [
   { label: "Dashboard", icon: Home, tab: "dashboard" },
   { label: "Conversations", icon: MessageSquare, tab: "inbox" },
   { label: "Posts & Stories", icon: Heart, tab: "instagram-content" },
-  { label: "Opportunities", icon: Target, tab: "opportunities" },
+  { label: "Leads", icon: Target, tab: "opportunities" },
   { label: "Audience", icon: Users, tab: "audience" },
   { label: "Knowledge Base", icon: BookOpen, tab: "knowledge" },
   { label: "Escalations", icon: TriangleAlert, tab: "escalations" },
@@ -1648,6 +1789,26 @@ type SuperAdminSupportResponse = {
   issues?: SuperAdminSupportIssueRow[];
   error?: string;
 };
+
+async function readDashboardJsonResponse<T extends { error?: string }>(response: Response, fallbackMessage: string): Promise<T> {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!contentType.toLowerCase().includes("application/json")) {
+    const body = await response.text().catch(() => "");
+    const lowerBody = body.toLowerCase();
+    const redirectedToLogin = response.redirected || response.url.includes("/login") || lowerBody.includes("<!doctype");
+
+    throw new Error(redirectedToLogin ? "Your session expired. Please sign in again." : fallbackMessage);
+  }
+
+  const payload = (await response.json()) as T;
+
+  if (!response.ok || payload.error) {
+    throw new Error(payload.error || fallbackMessage);
+  }
+
+  return payload;
+}
 
 const superAdminNavGroups: {
   label: string;
@@ -2438,16 +2599,6 @@ function getAdminRangeLabel(preset: AdminDateRangePreset) {
   return getAdminRangeOption(preset).label;
 }
 
-function sliceAdminSeries(values: number[] | undefined, preset: AdminDateRangePreset) {
-  const range = getAdminRangeOption(preset);
-
-  if (!values?.length) {
-    return values;
-  }
-
-  return values.slice(-range.days);
-}
-
 function formatAdminPercent(value: number, total: number) {
   if (total <= 0) {
     return "0%";
@@ -2472,24 +2623,201 @@ function getPlatformHealthToneClass(tone: "green" | "amber" | "red" | "purple") 
   return "text-[#c07800]";
 }
 
-function SuperAdminOverviewPage({ refreshKey = 0 }: { refreshKey?: number }) {
+type SuperAdminOverviewSummary = {
+  dateRangeLabel: string;
+  estimatedRevenue: number;
+  opportunityCount: number;
+  dashboardOpportunities: Opportunity[];
+  dashboardPipeline: PipelineStep[];
+  recentActivity: RecentActivityItem[];
+  opportunityAvatarIds: number[];
+  notificationCount: number;
+};
+
+function getSuperAdminRowTimestamp(row: SuperAdminConnectedAccountApiRow) {
+  const timestamp = new Date(row.lastActiveAt || row.createdAt || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function getSuperAdminRowAvatarNumber(row: SuperAdminConnectedAccountApiRow, index = 0) {
+  const seed = `${row.id}${row.name}${row.detail}${index}`;
+  const total = seed.split("").reduce((sum, character) => sum + character.charCodeAt(0), 0);
+
+  return (total % 65) + 1;
+}
+
+function getSuperAdminOpportunityCount(row: SuperAdminConnectedAccountApiRow) {
+  return Math.max(0, row.opportunityCount || getAdminRowNumber(row.opportunities));
+}
+
+function getSuperAdminOpportunityValue(row: SuperAdminConnectedAccountApiRow) {
+  const opportunityCount = getSuperAdminOpportunityCount(row);
+  const messageCount = getAdminRowNumber(row.messages);
+  const metadataRevenue = Math.max(0, row.revenueAmount || 0);
+  const signalValue = opportunityCount > 0 ? 1800 + opportunityCount * 300 + Math.min(300, messageCount * 25) : 0;
+  const activityValue = messageCount > 0 ? Math.min(2400, 900 + messageCount * 75) : 0;
+
+  return Math.max(metadataRevenue, signalValue, activityValue);
+}
+
+function getSuperAdminOpportunityTone(row: SuperAdminConnectedAccountApiRow): Opportunity["tone"] {
+  if (row.riskLevel === "High") {
+    return "red";
+  }
+
+  if (row.accountStatus === "trial") {
+    return "orange";
+  }
+
+  return row.instagram === "Connected" ? "blue" : "purple";
+}
+
+function buildSuperAdminOverviewSummary(
+  data: SuperAdminConnectedAccountsResponse | null,
+  dateRangePreset: AdminDateRangePreset
+): SuperAdminOverviewSummary {
+  const metrics = data?.metrics;
+  const creatorRows = getCreatorAdminRows(data).sort((first, second) => getSuperAdminRowTimestamp(second) - getSuperAdminRowTimestamp(first));
+  const connectedCount = metrics?.totalConnected || creatorRows.filter((row) => row.instagram === "Connected").length;
+  const totalConversations = metrics?.totalConversations || creatorRows.reduce((sum, row) => sum + getAdminRowNumber(row.conversations), 0);
+  const totalMessages = metrics?.totalMessages || creatorRows.reduce((sum, row) => sum + getAdminRowNumber(row.messages), 0);
+  const rowsWithMessages = creatorRows.filter((row) => getAdminRowNumber(row.messages) > 0).length;
+  const riskRows = creatorRows.filter((row) => row.riskSignal && row.riskSignal !== "Healthy");
+  const signalRows = creatorRows
+    .filter((row) => getSuperAdminOpportunityCount(row) > 0 || getSuperAdminOpportunityValue(row) > 0)
+    .sort((first, second) => {
+      const opportunityDifference = getSuperAdminOpportunityCount(second) - getSuperAdminOpportunityCount(first);
+
+      if (opportunityDifference !== 0) {
+        return opportunityDifference;
+      }
+
+      const valueDifference = getSuperAdminOpportunityValue(second) - getSuperAdminOpportunityValue(first);
+
+      if (valueDifference !== 0) {
+        return valueDifference;
+      }
+
+      return getSuperAdminRowTimestamp(second) - getSuperAdminRowTimestamp(first);
+    });
+  const explicitOpportunityCount = metrics?.totalOpportunities || creatorRows.reduce((sum, row) => sum + getSuperAdminOpportunityCount(row), 0);
+  const opportunityCount = Math.max(explicitOpportunityCount, signalRows.length);
+  const estimatedRevenue = signalRows.reduce((sum, row) => sum + getSuperAdminOpportunityValue(row), 0);
+  const dashboardOpportunities: Opportunity[] = signalRows.slice(0, 4).map((row) => {
+    const opportunityCountForRow = getSuperAdminOpportunityCount(row);
+    const messageCount = getAdminRowNumber(row.messages);
+    const conversationCount = getAdminRowNumber(row.conversations);
+    const title = row.riskLevel === "High" ? "Needs attention" : opportunityCountForRow > 0 ? "Buying intent" : "Creator opportunity";
+    const signalDetail =
+      row.riskSignal && row.riskSignal !== "Healthy"
+        ? row.riskSignal
+        : conversationCount > 0
+          ? `${formatCreatorInteger(messageCount)} messages across ${formatCreatorInteger(conversationCount)} conversations`
+          : `${formatCreatorInteger(messageCount)} messages`;
+
+    return {
+      title,
+      eyebrow: row.riskLevel === "High" ? "REVIEW" : opportunityCountForRow > 0 ? "HIGH INTENT" : "ACTIVE",
+      body: [row.detail, truncateCreatorText(signalDetail, 74)],
+      value: `${formatCreatorMoney(getSuperAdminOpportunityValue(row))} est.`,
+      action: "Review",
+      tone: getSuperAdminOpportunityTone(row),
+      icon: row.riskLevel === "High" ? TriangleAlert : opportunityCountForRow > 0 ? ShoppingCart : Sparkles,
+    };
+  });
+  const recentActivity: RecentActivityItem[] = creatorRows.slice(0, 4).map((row) => {
+    const opportunityCountForRow = getSuperAdminOpportunityCount(row);
+    const hasRisk = Boolean(row.riskSignal && row.riskSignal !== "Healthy");
+    const title = hasRisk ? "Creator needs attention" : opportunityCountForRow > 0 ? "Opportunity signal received" : "Creator activity updated";
+    const subtitle = `${row.name}: ${
+      hasRisk
+        ? row.riskSignal
+        : opportunityCountForRow > 0
+          ? `${formatCreatorInteger(opportunityCountForRow)} opportunity signals`
+          : `${formatCreatorInteger(getAdminRowNumber(row.messages))} messages`
+    }`;
+
+    return {
+      title,
+      subtitle: truncateCreatorText(subtitle, 78),
+      time: row.lastActive,
+      icon: hasRisk ? TriangleAlert : opportunityCountForRow > 0 ? ShoppingCart : MessageSquare,
+      tone: hasRisk ? "text-[#df405b] bg-[#fff0f3]" : opportunityCountForRow > 0 ? "text-[#4b3cff] bg-[#f0edff]" : "text-[#246bff] bg-[#eef4ff]",
+      meta: getSuperAdminOpportunityValue(row) > 0 ? `${formatCreatorMoney(getSuperAdminOpportunityValue(row))} est.` : undefined,
+    };
+  });
+
+  return {
+    dateRangeLabel: getAdminDateRangeLabel(dateRangePreset),
+    estimatedRevenue: estimatedRevenue || metrics?.mrr || 0,
+    opportunityCount,
+    dashboardOpportunities,
+    dashboardPipeline: [
+      {
+        label: "Conversations",
+        value: formatCreatorInteger(totalConversations),
+        detail: `${formatCreatorInteger(rowsWithMessages)}\nwith messages`,
+        tone: "text-[#4b3cff] bg-[#f0edff]",
+        icon: MessageSquare,
+      },
+      {
+        label: "Inbound",
+        value: formatCreatorInteger(totalMessages),
+        detail: `${formatCreatorInteger(connectedCount)}\nconnected accounts`,
+        tone: "text-[#246bff] bg-[#eef4ff]",
+        icon: Users,
+      },
+      {
+        label: "Qualified",
+        value: formatCreatorInteger(opportunityCount),
+        detail: `${formatCreatorPercent(opportunityCount, Math.max(1, totalConversations || creatorRows.length))}\nof chats`,
+        tone: "text-[#13b95f] bg-[#eafaf0]",
+        icon: Sparkles,
+      },
+      {
+        label: "Escalations",
+        value: formatCreatorInteger(riskRows.length),
+        detail: `${formatCreatorPercent(riskRows.length, Math.max(1, creatorRows.length))}\nneed handoff`,
+        tone: "text-[#ff850d] bg-[#fff3e6]",
+        icon: TriangleAlert,
+      },
+      {
+        label: "Est. value",
+        value: formatCreatorMoney(estimatedRevenue || metrics?.mrr || 0),
+        detail: "based on\nreal intent",
+        tone: "text-[#df405b] bg-[#fff0f3]",
+        icon: Crown,
+      },
+    ],
+    recentActivity,
+    opportunityAvatarIds: (signalRows.length > 0 ? signalRows : creatorRows).slice(0, 3).map((row, index) => getSuperAdminRowAvatarNumber(row, index)),
+    notificationCount: riskRows.length,
+  };
+}
+
+function SuperAdminOverviewPage({
+  refreshKey = 0,
+  profile,
+  dateRangePreset,
+  onDateRangeChange,
+  onNavigate,
+}: {
+  refreshKey?: number;
+  profile: AccountProfile;
+  dateRangePreset: AdminDateRangePreset;
+  onDateRangeChange: (preset: AdminDateRangePreset) => void;
+  onNavigate: (page: SuperAdminPage) => void;
+}) {
   const [data, setData] = useState<SuperAdminConnectedAccountsResponse | null>(null);
-  const [mrrRangePreset, setMrrRangePreset] = useState<AdminDateRangePreset>("30d");
-  const [signupRangePreset, setSignupRangePreset] = useState<AdminDateRangePreset>("30d");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   const fetchOverviewData = useCallback(async () => {
     const response = await fetch("/api/admin/connected-accounts", {
       cache: "no-store",
+      headers: { Accept: "application/json" },
     });
-    const nextData = (await response.json()) as SuperAdminConnectedAccountsResponse;
-
-    if (!response.ok || nextData.error) {
-      throw new Error(nextData.error || "Could not load overview data");
-    }
-
-    return nextData;
+    return readDashboardJsonResponse<SuperAdminConnectedAccountsResponse>(response, "Could not load overview data");
   }, []);
 
   useEffect(() => {
@@ -2520,140 +2848,34 @@ function SuperAdminOverviewPage({ refreshKey = 0 }: { refreshKey?: number }) {
     };
   }, [fetchOverviewData, refreshKey]);
 
-  const metrics = data?.metrics;
-  const emptySeries = Array.from({ length: 20 }, () => 0);
-  const statusBreakdown = metrics?.statusBreakdown || { active: 0, trial: 0, inactive: 0, cancelled: 0 };
-  const statusTotal = Math.max(
-    0,
-    statusBreakdown.active + statusBreakdown.trial + statusBreakdown.inactive + statusBreakdown.cancelled
-  );
-  const overviewMetrics: SuperAdminMetric[] = [
-    {
-      label: "Connected Accounts",
-      value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.totalConnected),
-      detail: "Instagram accounts",
-      change: `${formatAdminNumber(metrics?.healthyTokens)} healthy tokens`,
-      tone: "bg-[#f0edff] text-[#4b3cff]",
-      icon: Globe2,
-    },
-    {
-      label: "Active Creators",
-      value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.activeCreators),
-      detail: "Active this month",
-      change: `${formatAdminNumber(metrics?.newSignups)} new signups`,
-      tone: "bg-[#eaf4ff] text-[#246bff]",
-      icon: Users,
-    },
-    {
-      label: "Trial Accounts",
-      value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.trialAccounts),
-      detail: "In trial",
-      change: `${formatAdminPercent(metrics?.trialAccounts || 0, metrics?.creatorAccounts || 0)} of creators`,
-      tone: "bg-[#fff6e8] text-[#d98613]",
-      icon: User,
-    },
-    {
-      label: "Paid Accounts",
-      value: isLoading && !metrics ? "..." : formatAdminNumber(metrics?.paidAccounts),
-      detail: "Paying customers",
-      change: `${formatAdminPercent(metrics?.paidAccounts || 0, metrics?.creatorAccounts || 0)} of creators`,
-      tone: "bg-[#eafaf0] text-[#13a84f]",
-      icon: Handshake,
-    },
-    {
-      label: "MRR",
-      value: isLoading && !metrics ? "..." : formatAdminCurrency(metrics?.mrr),
-      detail: "Monthly recurring revenue",
-      change: "From account metadata",
-      tone: "bg-[#f0edff] text-[#4b3cff]",
-      icon: DollarSign,
-    },
-    {
-      label: "ARR",
-      value: isLoading && !metrics ? "..." : formatAdminCurrency(metrics?.arr, true),
-      detail: "Annual recurring revenue",
-      change: "Annualized from MRR",
-      tone: "bg-[#f0edff] text-[#4b3cff]",
-      icon: CircleDollarSign,
-    },
-  ];
-  const statusItems = [
-    { label: "Active", value: statusBreakdown.active, color: "#16b364" },
-    { label: "Trial", value: statusBreakdown.trial, color: "#3154ff" },
-    { label: "Inactive", value: statusBreakdown.inactive, color: "#ff850d" },
-    { label: "Cancelled", value: statusBreakdown.cancelled, color: "#98a2b3" },
-  ];
-  const recentRows = data?.rows || [];
-  const instagramSegments = [
-    { value: metrics?.healthyTokens || 0, color: "#16b364" },
-    { value: metrics?.expiredTokens || 0, color: "#ff850d" },
-    { value: metrics?.disconnected || 0, color: "#df405b" },
-  ];
-  const instagramTotal = instagramSegments.reduce((sum, segment) => sum + segment.value, 0);
-  const platformHealthItems = metrics?.platformHealth || [
-    { label: "Instagram API", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
-    { label: "OpenAI API", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
-    { label: "Database", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
-    { label: "Webhook Queue", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
-    { label: "Email Service", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
-    { label: "Payment Service", status: isLoading ? "Checking" : "No data", tone: "amber" as const },
-  ];
-  const platformHealthIcons: Record<string, LucideIcon> = {
-    "Instagram API": Globe2,
-    "OpenAI API": BrainCircuit,
-    Database,
-    "Webhook Queue": TriangleAlert,
-    "Email Service": Mail,
-    "Payment Service": CreditCard,
-  };
-  const aiUsageItems: [string, string, LucideIcon, string][] = [
-    ["Messages Processed", formatAdminNumber(metrics?.totalMessages), Bot, "bg-[#f0edff] text-[#4b3cff]"],
-    ["AI Conversations", formatAdminNumber(metrics?.totalConversations), Sparkles, "bg-[#f0edff] text-[#4b3cff]"],
-    ["Opportunities Found", formatAdminNumber(metrics?.totalOpportunities), Target, "bg-[#fff6e8] text-[#d98613]"],
-    ["Escalations", "0", TriangleAlert, "bg-[#fff0f3] text-[#df405b]"],
-  ];
-  const recentTableConfig: SuperAdminDetailConfig = {
-    metrics: [],
-    columns: ["Plan", "Instagram", "Last active", "Conversations", "Opportunities", "Revenue found"],
-    rows: recentRows.map((row) => ({
-      name: row.name,
-      detail: row.detail,
-      values: [row.plan, row.instagram, row.lastActive, row.conversations || "0", row.opportunities || "0", row.revenue],
-      status: row.status,
-      statusTone: row.statusTone,
-    })),
-    insightTitle: "Recently Active Creators",
-    insightItems: [],
-  };
+  const summary = buildSuperAdminOverviewSummary(data, dateRangePreset);
+  const greetingName = profile.name.trim() || "Super Admin";
+  const visibleOpportunities = summary.dashboardOpportunities;
+  const visiblePipeline = summary.dashboardPipeline;
+  const visibleActivity = summary.recentActivity;
 
   return (
-    <div className="space-y-5">
-      {errorMessage ? (
-        <div className="rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-4 text-[12px] font-bold text-[#df405b]">
-          {errorMessage}
+    <div className="relative min-h-dvh bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-7 lg:py-5 xl:px-10">
+      <RevenueChart />
+
+      <div className="relative z-10 mx-auto max-w-[1320px]">
+        <div className="mb-5 lg:hidden">
+          <BrandMark />
         </div>
-      ) : null}
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        {overviewMetrics.map((metric) => (
-          <SuperAdminMetricCard key={metric.label} metric={metric} />
-        ))}
-      </section>
+        <header className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:gap-8">
+          <div className="lg:pt-4">
+            <p className="text-[17px] font-bold tracking-[-0.01em] text-black">Good morning, {greetingName} 👋</p>
+          </div>
 
-      <section className="grid gap-4 xl:grid-cols-[1.45fr_1.15fr_0.9fr_0.95fr]">
-        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)] xl:col-span-1">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-[14px] font-extrabold text-black">MRR Growth</h2>
-              <p className="mt-2 text-[26px] font-extrabold leading-none text-black">{formatAdminCurrency(metrics?.mrr)}</p>
-            </div>
-            <label className="relative flex h-8 cursor-pointer items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold">
-              {getAdminRangeLabel(mrrRangePreset)}
-              <ChevronDown size={13} />
+          <div className="grid w-full grid-cols-[1fr_auto] items-center gap-3 sm:flex sm:w-auto sm:gap-5">
+            <label className="relative flex h-11 min-w-0 cursor-pointer items-center justify-between rounded-[10px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.035)] sm:h-[52px] sm:w-[252px] sm:px-5 sm:text-[14px]">
+              {summary.dateRangeLabel}
+              <CalendarDays size={18} strokeWidth={2.3} />
               <select
-                aria-label="MRR growth range"
-                value={mrrRangePreset}
-                onChange={(event) => setMrrRangePreset(event.target.value as AdminDateRangePreset)}
+                aria-label="Superadmin dashboard date range"
+                value={dateRangePreset}
+                onChange={(event) => onDateRangeChange(event.target.value as AdminDateRangePreset)}
                 className="absolute inset-0 cursor-pointer opacity-0"
               >
                 {adminDateRangeOptions.map((option) => (
@@ -2663,130 +2885,203 @@ function SuperAdminOverviewPage({ refreshKey = 0 }: { refreshKey?: number }) {
                 ))}
               </select>
             </label>
+            <button
+              type="button"
+              onClick={() => onNavigate("support-issues")}
+              className="relative flex h-11 w-11 items-center justify-center rounded-[10px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.035)] sm:h-[52px] sm:w-[52px]"
+              aria-label="Superadmin notifications"
+            >
+              <Bell size={20} strokeWidth={2.3} />
+              {summary.notificationCount > 0 ? <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full bg-[#4b3cff]" /> : null}
+            </button>
           </div>
-          <AdminLineChart values={isLoading && !metrics ? emptySeries : sliceAdminSeries(metrics?.mrrSeries, mrrRangePreset)} />
-        </article>
+        </header>
 
-        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-[14px] font-extrabold text-black">New Signups</h2>
-              <p className="mt-2 text-[22px] font-extrabold leading-none text-black">{formatAdminNumber(metrics?.newSignups)}</p>
+        <section className="relative mt-6 max-w-[640px]">
+          <div className="flex items-center gap-4 sm:gap-5">
+            <h1 className="text-[48px] font-extrabold leading-[0.9] tracking-[-0.04em] text-black sm:text-[68px] xl:text-[78px]">
+              {isLoading && !data ? "..." : formatCreatorMoney(summary.estimatedRevenue)}
+            </h1>
+            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-[#e3e6f0] bg-white shadow-[0_18px_52px_rgba(77,60,255,0.08)] sm:h-[58px] sm:w-[58px]">
+              <Sparkles size={25} className="text-[#4b3cff] sm:size-[29px]" strokeWidth={2.2} />
             </div>
-            <label className="relative flex h-8 cursor-pointer items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold">
-              {getAdminRangeLabel(signupRangePreset)}
-              <ChevronDown size={13} />
-              <select
-                aria-label="New signups range"
-                value={signupRangePreset}
-                onChange={(event) => setSignupRangePreset(event.target.value as AdminDateRangePreset)}
-                className="absolute inset-0 cursor-pointer opacity-0"
-              >
-                {adminDateRangeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
-          <AdminLineChart bars values={isLoading && !metrics ? emptySeries : sliceAdminSeries(metrics?.signupSeries, signupRangePreset)} />
-        </article>
-
-        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
-          <h2 className="text-[14px] font-extrabold text-black">Account Status</h2>
-          <AdminDonut label="Total" value={formatAdminNumber(statusTotal)} segments={statusItems.map((item) => ({ value: item.value, color: item.color }))} />
-          <div className="space-y-2 text-[11px] font-bold">
-            {statusItems.map((item) => (
-              <div key={item.label} className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                <span className="flex-1 text-[#30384d]">{item.label}</span>
-                <span className="text-[#596175]">
-                  {formatAdminNumber(item.value)} ({formatAdminPercent(item.value, statusTotal)})
-                </span>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[14px] font-extrabold text-black">Platform Health</h2>
-            <button type="button" className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
-          </div>
-          <div className="space-y-3">
-            {platformHealthItems.map((item) => {
-              const Icon = platformHealthIcons[item.label] || CircleHelp;
-              return (
-                <div key={item.label} className="flex items-center gap-3 text-[12px] font-bold">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-[#f6f7fb] text-[#4b3cff]">
-                    <Icon size={15} strokeWidth={2.35} />
-                  </span>
-                  <span className="flex-1 text-[#30384d]">{item.label}</span>
-                  <span className={getPlatformHealthToneClass(item.tone)}>{item.status}</span>
-                </div>
-              );
-            })}
-          </div>
-        </article>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1.55fr_0.75fr]">
-        <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[14px] font-extrabold text-black">Recently Active Creators</h2>
-            <button type="button" className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
-          </div>
-          {recentTableConfig.rows.length > 0 ? (
-            <SuperAdminTable config={recentTableConfig} />
-          ) : (
-            <div className="rounded-[8px] border border-dashed border-[#d9deea] p-8 text-center">
-              <p className="text-[13px] font-extrabold text-black">
-                {isLoading ? "Loading real creator accounts..." : "No creator accounts found yet."}
-              </p>
+          <p className="mt-3 text-[15px] font-semibold leading-[1.3] text-[#596175] sm:text-[18px] sm:leading-none">
+            Potential revenue discovered this week
+          </p>
+          {(isLoading || errorMessage) && (
+            <div className="mt-4 rounded-[8px] border border-[#e5e8f0] bg-white px-3 py-2 text-[12px] font-bold text-[#596175] shadow-[0_12px_36px_rgba(20,28,53,0.025)]">
+              {isLoading ? "Loading superadmin opportunity data..." : errorMessage}
             </div>
           )}
-        </article>
 
-        <div className="grid gap-4">
-          <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-[14px] font-extrabold text-black">Instagram Accounts</h2>
-              <button type="button" className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
-            </div>
-            <AdminDonut label="Tracked" value={formatAdminNumber(instagramTotal)} segments={instagramSegments} />
-            <div className="space-y-2 text-[12px] font-bold">
-              {[
-                ["Healthy", `${formatAdminNumber(metrics?.healthyTokens)} (${formatAdminPercent(metrics?.healthyTokens || 0, instagramTotal)})`, "text-[#13a84f]"],
-                ["Expired Token", `${formatAdminNumber(metrics?.expiredTokens)} (${formatAdminPercent(metrics?.expiredTokens || 0, instagramTotal)})`, "text-[#c07800]"],
-                ["Disconnected", `${formatAdminNumber(metrics?.disconnected)} (${formatAdminPercent(metrics?.disconnected || 0, instagramTotal)})`, "text-[#df405b]"],
-              ].map(([label, value, tone]) => (
-                <div key={label} className="flex justify-between">
-                  <span className={tone}>{label}</span>
-                  <span className="text-[#30384d]">{value}</span>
-                </div>
+          <div className="mt-7 flex items-center gap-3.5">
+            <div className="flex -space-x-3">
+              {(summary.opportunityAvatarIds.length > 0 ? summary.opportunityAvatarIds : [12]).map((image, index) => (
+                <span
+                  key={`${image}-${index}`}
+                  aria-label={index === 0 ? "Opportunity reviewer" : undefined}
+                  aria-hidden={index === 0 ? undefined : true}
+                  role={index === 0 ? "img" : undefined}
+                  className="h-8 w-8 rounded-full border-2 border-white bg-cover bg-center shadow-sm"
+                  style={{ backgroundImage: `url(https://i.pravatar.cc/48?img=${image})` }}
+                />
               ))}
             </div>
-          </article>
+            <p className="text-[13px] font-semibold text-[#4b5268]">
+              <span className="font-extrabold text-[#4b3cff]">{formatCreatorInteger(summary.opportunityCount)}</span> opportunities waiting for your review
+            </p>
+          </div>
 
-          <article className="rounded-[9px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
-            <h2 className="text-[14px] font-extrabold text-black">AI Usage Today</h2>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {aiUsageItems.map(([label, value, Icon, tone]) => {
+          <div className="mt-6 flex flex-wrap items-center gap-4 sm:gap-5">
+            <button
+              type="button"
+              onClick={() => onNavigate("creators-connected")}
+              className="flex h-[42px] w-full items-center justify-center gap-5 rounded-[8px] bg-gradient-to-r from-[#563cff] to-[#4a32f2] text-[13px] font-extrabold text-white shadow-[0_22px_40px_rgba(75,60,255,0.22)] sm:w-[190px]"
+            >
+              Review opportunities
+              <ArrowRight size={17} strokeWidth={2.5} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate("ai-usage")}
+              className="flex items-center gap-3 text-[12px] font-bold text-[#596175]"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#dde3ee] bg-white text-black">
+                <Play size={13} className="ml-0.5" fill="currentColor" strokeWidth={1.5} />
+              </span>
+              See how TractionFlo works
+            </button>
+          </div>
+        </section>
+
+        <section className="mt-5 rounded-[14px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.035)]">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <h2 className="text-[16px] font-extrabold text-black">Top opportunities</h2>
+              <span className="rounded-full bg-[#eff2f7] px-2.5 py-0.5 text-[12px] font-extrabold text-[#596175]">
+                {formatCreatorInteger(visibleOpportunities.length)}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate("creators-connected")}
+              className="flex items-center gap-2 text-[13px] font-extrabold text-[#4b3cff]"
+            >
+              View all
+              <ArrowRight size={16} strokeWidth={2.5} />
+            </button>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+            {visibleOpportunities.length > 0 ? (
+              visibleOpportunities.map((opportunity) => (
+                <OpportunityCard key={`${opportunity.eyebrow}-${opportunity.title}-${opportunity.body.join("-")}`} opportunity={opportunity} />
+              ))
+            ) : (
+              <div className="rounded-[10px] border border-dashed border-[#d9deea] p-6 text-[13px] font-bold text-[#596175] xl:col-span-4">
+                {isLoading ? "Loading real creator opportunities..." : "No creator opportunity signals found yet."}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1.36fr)_minmax(390px,0.96fr)]">
+          <section className="rounded-[14px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.035)]">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-[16px] font-extrabold text-black">Audience pipeline</h2>
+              <label className="relative flex h-8 cursor-pointer items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black">
+                {getAdminRangeLabel(dateRangePreset).replace("Last 7 days", "This week")}
+                <ChevronDown size={14} strokeWidth={2.5} />
+                <select
+                  aria-label="Audience pipeline range"
+                  value={dateRangePreset}
+                  onChange={(event) => onDateRangeChange(event.target.value as AdminDateRangePreset)}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                >
+                  {adminDateRangeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="relative grid grid-cols-1 gap-4 md:grid-cols-5">
+              <div className="pointer-events-none absolute bottom-0 right-2 top-0 hidden w-16 skew-x-[-12deg] border-r border-[#e9ecf3] md:block" />
+              {visiblePipeline.map((step, index) => {
+                const Icon = step.icon;
                 return (
-                  <div key={label} className="rounded-[8px] border border-[#edf0f6] p-3">
-                    <span className={`mb-3 flex h-8 w-8 items-center justify-center rounded-[8px] ${tone}`}>
-                      <Icon size={16} strokeWidth={2.35} />
-                    </span>
-                    <p className="text-[11px] font-bold text-[#687089]">{label}</p>
-                    <p className="mt-1 text-[18px] font-extrabold text-black">{value}</p>
+                  <div key={step.label} className="relative text-center">
+                    <div className="mx-auto flex h-[52px] w-[52px] items-center justify-center rounded-[15px]">
+                      <span className={`flex h-full w-full items-center justify-center rounded-[15px] ${step.tone}`}>
+                        <Icon size={23} strokeWidth={2.3} />
+                      </span>
+                    </div>
+                    {index < visiblePipeline.length - 1 ? (
+                      <ArrowRight
+                        size={15}
+                        strokeWidth={2.4}
+                        className="absolute right-[-10px] top-[19px] hidden text-[#596175] md:block"
+                      />
+                    ) : null}
+                    <p className="mt-3 text-[12px] font-semibold text-[#596175]">{step.label}</p>
+                    <p className="mt-2 text-[19px] font-extrabold leading-none text-black">{step.value}</p>
+                    <p className="mt-4 whitespace-pre-line text-[12px] font-extrabold leading-[1.3] text-[#4b3cff]">
+                      {step.detail}
+                    </p>
                   </div>
                 );
               })}
             </div>
-          </article>
+          </section>
+
+          <section className="rounded-[14px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.035)]">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-[16px] font-extrabold text-black">Recent activity</h2>
+              <button
+                type="button"
+                onClick={() => onNavigate("creators-connected")}
+                className="flex items-center gap-2 text-[13px] font-extrabold text-[#4b3cff]"
+              >
+                View all
+                <ArrowRight size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+
+            <div>
+              {visibleActivity.length > 0 ? visibleActivity.map((activity, index) => {
+                const Icon = activity.icon;
+                return (
+                  <div
+                    key={`${activity.title}-${activity.subtitle}`}
+                    className={`flex items-center gap-3 py-[9px] ${
+                      index < visibleActivity.length - 1 ? "border-b border-[#edf0f6]" : ""
+                    }`}
+                  >
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${activity.tone}`}>
+                      <Icon size={19} strokeWidth={2.25} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12px] font-extrabold text-black">{activity.title}</p>
+                      <p className="mt-1 truncate text-[11px] font-semibold text-[#596175]">{activity.subtitle}</p>
+                    </div>
+                    <div className="text-right text-[10px] font-semibold text-[#596175]">
+                      <p>{activity.time}</p>
+                      {activity.meta ? <p className="mt-2 font-extrabold text-[#13a84f]">{activity.meta}</p> : null}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="rounded-[10px] border border-dashed border-[#d9deea] p-5 text-[12px] font-bold text-[#596175]">
+                  {isLoading ? "Loading recent creator activity..." : "No recent activity loaded yet."}
+                </div>
+              )}
+            </div>
+          </section>
         </div>
-      </section>
+      </div>
     </div>
   );
 }
@@ -2928,14 +3223,9 @@ function SuperAdminConnectedAccountsPage({ refreshKey = 0 }: { refreshKey?: numb
   const fetchConnectedAccounts = useCallback(async () => {
     const response = await fetch("/api/admin/connected-accounts", {
       cache: "no-store",
+      headers: { Accept: "application/json" },
     });
-    const nextData = (await response.json()) as SuperAdminConnectedAccountsResponse;
-
-    if (!response.ok || nextData.error) {
-      throw new Error(nextData.error || "Could not load connected accounts");
-    }
-
-    return nextData;
+    return readDashboardJsonResponse<SuperAdminConnectedAccountsResponse>(response, "Could not load connected accounts");
   }, []);
 
   const loadConnectedAccounts = useCallback(async () => {
@@ -3775,14 +4065,9 @@ function SuperAdminRevenuePage({ page, refreshKey = 0 }: { page: RevenueAdminPag
   const fetchRevenueData = useCallback(async () => {
     const response = await fetch("/api/admin/connected-accounts", {
       cache: "no-store",
+      headers: { Accept: "application/json" },
     });
-    const nextData = (await response.json()) as SuperAdminConnectedAccountsResponse;
-
-    if (!response.ok || nextData.error) {
-      throw new Error(nextData.error || "Could not load revenue data");
-    }
-
-    return nextData;
+    return readDashboardJsonResponse<SuperAdminConnectedAccountsResponse>(response, "Could not load revenue data");
   }, []);
 
   const loadRevenueData = useCallback(async () => {
@@ -4078,19 +4363,11 @@ function SuperAdminPlatformPage({ page, refreshKey = 0 }: { page: PlatformAdminP
 
   const fetchPlatformData = useCallback(async () => {
     const [connectedResponse, platformResponse] = await Promise.all([
-      fetch("/api/admin/connected-accounts", { cache: "no-store" }),
-      fetch("/api/admin/platform", { cache: "no-store" }),
+      fetch("/api/admin/connected-accounts", { cache: "no-store", headers: { Accept: "application/json" } }),
+      fetch("/api/admin/platform", { cache: "no-store", headers: { Accept: "application/json" } }),
     ]);
-    const connectedPayload = (await connectedResponse.json()) as SuperAdminConnectedAccountsResponse;
-    const platformPayload = (await platformResponse.json()) as SuperAdminPlatformResponse;
-
-    if (!connectedResponse.ok || connectedPayload.error) {
-      throw new Error(connectedPayload.error || "Could not load Instagram account data");
-    }
-
-    if (!platformResponse.ok || platformPayload.error) {
-      throw new Error(platformPayload.error || "Could not load platform data");
-    }
+    const connectedPayload = await readDashboardJsonResponse<SuperAdminConnectedAccountsResponse>(connectedResponse, "Could not load Instagram account data");
+    const platformPayload = await readDashboardJsonResponse<SuperAdminPlatformResponse>(platformResponse, "Could not load platform data");
 
     return { connectedPayload, platformPayload };
   }, []);
@@ -4365,14 +4642,9 @@ function SuperAdminAiPage({ page, refreshKey = 0 }: { page: AiAdminPage; refresh
   const fetchAiData = useCallback(async () => {
     const response = await fetch("/api/admin/ai", {
       cache: "no-store",
+      headers: { Accept: "application/json" },
     });
-    const payload = (await response.json()) as SuperAdminAiResponse;
-
-    if (!response.ok || payload.error) {
-      throw new Error(payload.error || "Could not load AI admin data");
-    }
-
-    return payload;
+    return readDashboardJsonResponse<SuperAdminAiResponse>(response, "Could not load AI admin data");
   }, []);
 
   const loadAiData = useCallback(async () => {
@@ -4601,14 +4873,9 @@ function SuperAdminSupportPage({ page, refreshKey = 0 }: { page: SupportAdminPag
   const fetchSupportData = useCallback(async () => {
     const response = await fetch("/api/admin/support", {
       cache: "no-store",
+      headers: { Accept: "application/json" },
     });
-    const payload = (await response.json()) as SuperAdminSupportResponse;
-
-    if (!response.ok || payload.error) {
-      throw new Error(payload.error || "Could not load support admin data");
-    }
-
-    return payload;
+    return readDashboardJsonResponse<SuperAdminSupportResponse>(response, "Could not load support admin data");
   }, []);
 
   const loadSupportData = useCallback(async () => {
@@ -4763,14 +5030,9 @@ function SuperAdminCreatorLifecyclePage({
   const fetchLifecycleData = useCallback(async () => {
     const response = await fetch("/api/admin/connected-accounts", {
       cache: "no-store",
+      headers: { Accept: "application/json" },
     });
-    const nextData = (await response.json()) as SuperAdminConnectedAccountsResponse;
-
-    if (!response.ok || nextData.error) {
-      throw new Error(nextData.error || "Could not load creator data");
-    }
-
-    return nextData;
+    return readDashboardJsonResponse<SuperAdminConnectedAccountsResponse>(response, "Could not load creator data");
   }, []);
 
   const loadLifecycleData = useCallback(async () => {
@@ -5066,12 +5328,9 @@ function SuperAdminSettingsPage({ profile, refreshKey = 0 }: { profile: AccountP
     try {
       const response = await fetch("/api/admin/platform", {
         cache: "no-store",
+        headers: { Accept: "application/json" },
       });
-      const payload = (await response.json()) as SuperAdminPlatformResponse;
-
-      if (!response.ok || payload.error) {
-        throw new Error(payload.error || "Could not load platform settings");
-      }
+      const payload = await readDashboardJsonResponse<SuperAdminPlatformResponse>(response, "Could not load platform settings");
 
       setPlatformData(payload);
     } catch (error) {
@@ -5088,12 +5347,9 @@ function SuperAdminSettingsPage({ profile, refreshKey = 0 }: { profile: AccountP
       try {
         const response = await fetch("/api/admin/platform", {
           cache: "no-store",
+          headers: { Accept: "application/json" },
         });
-        const payload = (await response.json()) as SuperAdminPlatformResponse;
-
-        if (!response.ok || payload.error) {
-          throw new Error(payload.error || "Could not load platform settings");
-        }
+        const payload = await readDashboardJsonResponse<SuperAdminPlatformResponse>(response, "Could not load platform settings");
 
         if (isMounted) {
           setPlatformData(payload);
@@ -5351,30 +5607,38 @@ function SuperAdminDashboard({
     <div className="flex h-dvh w-full overflow-hidden bg-[#f8f9fd] font-sans text-black">
       <SuperAdminSidebar activePage={activePage} onChangePage={handlePageChange} profile={profile} />
 
-      <main className="h-dvh flex-1 overflow-y-auto px-4 pb-24 pt-5 sm:px-6 lg:px-7 lg:pb-8 xl:px-9">
-        <div className="mx-auto max-w-[1440px]">
-          <SuperAdminHeader
-            page={activePage}
+      <main className={`h-dvh flex-1 overflow-y-auto ${activePage === "overview" ? "bg-[#fdfdff]" : "px-4 pb-24 pt-5 sm:px-6 lg:px-7 lg:pb-8 xl:px-9"}`}>
+        {activePage === "overview" ? (
+          <SuperAdminOverviewPage
+            refreshKey={refreshKey}
+            profile={profile}
             dateRangePreset={dateRangePreset}
-            isAutoRefreshOn={isAutoRefreshOn}
-            exportStatus={exportStatus}
             onDateRangeChange={handleDateRangeChange}
-            onAutoRefreshChange={setIsAutoRefreshOn}
-            onExport={handleExport}
+            onNavigate={handlePageChange}
           />
+        ) : (
+          <div className="mx-auto max-w-[1440px]">
+            <SuperAdminHeader
+              page={activePage}
+              dateRangePreset={dateRangePreset}
+              isAutoRefreshOn={isAutoRefreshOn}
+              exportStatus={exportStatus}
+              onDateRangeChange={handleDateRangeChange}
+              onAutoRefreshChange={setIsAutoRefreshOn}
+              onExport={handleExport}
+            />
 
-          <div className="mt-6" data-superadmin-content="true">
-            {activePage === "overview" ? (
-              <SuperAdminOverviewPage refreshKey={refreshKey} />
-            ) : activePage === "profile" ? (
-              <SuperAdminProfilePage profile={profile} onProfileChange={onProfileChange} />
-            ) : activePage === "settings" ? (
-              <SuperAdminSettingsPage profile={profile} refreshKey={refreshKey} />
-            ) : (
-              <SuperAdminDetailPage page={activePage} refreshKey={refreshKey} />
-            )}
+            <div className="mt-6" data-superadmin-content="true">
+              {activePage === "profile" ? (
+                <SuperAdminProfilePage profile={profile} onProfileChange={onProfileChange} />
+              ) : activePage === "settings" ? (
+                <SuperAdminSettingsPage profile={profile} refreshKey={refreshKey} />
+              ) : (
+                <SuperAdminDetailPage page={activePage} refreshKey={refreshKey} />
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </main>
 
       <SuperAdminMobileNavigation activePage={activePage} onChangePage={handlePageChange} />
@@ -5501,10 +5765,12 @@ function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
 function OpportunityPageCardView({ opportunity }: { opportunity: OpportunityPageCard }) {
   const Icon = opportunity.icon;
   const tone = opportunityToneClasses[opportunity.tone];
-  const scoreText = opportunity.risk ?? opportunity.score;
+  const scoreText = opportunity.risk ?? opportunity.score ?? "0/100";
+  const missing = opportunity.missing?.length ? opportunity.missing : ["Nothing critical"];
+  const signals = opportunity.signals?.length ? opportunity.signals : [opportunity.intent || opportunity.subtitle];
 
   return (
-    <article className="flex min-h-[276px] flex-col rounded-[11px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+    <article className="flex min-h-[384px] flex-col rounded-[11px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3.5">
           <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] ${tone.tile}`}>
@@ -5528,50 +5794,69 @@ function OpportunityPageCardView({ opportunity }: { opportunity: OpportunityPage
         <span className="shrink-0 text-[11px] font-semibold text-[#596175]">{opportunity.time}</span>
       </div>
 
-      <p className="mt-4 max-w-[230px] text-[11px] font-medium leading-[1.65] text-[#3f4659]">{opportunity.detail}</p>
+      <p className="mt-4 text-[11px] font-medium leading-[1.55] text-[#3f4659]">{opportunity.detail}</p>
+
+      <div className="mt-4 grid gap-2 border-t border-[#edf0f6] pt-3 text-[11px] font-semibold sm:grid-cols-2">
+        {(opportunity.qualificationFacts || []).map((fact) => (
+          <div key={fact.label} className="flex min-w-0 items-center justify-between gap-2">
+            <span className="text-[#697083]">{fact.label}</span>
+            <span className={`truncate text-right font-extrabold ${fact.value === "Missing" ? "text-[#df405b]" : "text-[#13a84f]"}`}>
+              {fact.value}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-2 text-[11px] font-semibold">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 text-[#697083]">Stage</span>
+          <span className="truncate font-extrabold text-black">{opportunity.stage || "Warm"}</span>
+          <span className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+            opportunity.urgency === "High"
+              ? "bg-[#fff0f3] text-[#df405b]"
+              : opportunity.urgency === "Medium"
+                ? "bg-[#fff3e6] text-[#ff850d]"
+                : "bg-[#eff1f6] text-[#596175]"
+          }`}>
+            {opportunity.urgency || "Low"} urgency
+          </span>
+        </div>
+        <div className="flex min-w-0 gap-2">
+          <span className="shrink-0 text-[#697083]">Signals</span>
+          <span className="truncate font-medium text-[#30384d]">{signals.join(", ")}</span>
+        </div>
+        <div className="flex min-w-0 gap-2">
+          <span className="shrink-0 text-[#697083]">Missing</span>
+          <span className="truncate font-medium text-[#30384d]">{missing.join(", ")}</span>
+        </div>
+      </div>
 
       <div className="mt-auto pt-4">
-        <p className="text-[11px] font-medium text-[#596175]">{opportunity.scoreLabel ?? "Potential Value"}</p>
+        <p className="text-[11px] font-medium text-[#596175]">{opportunity.recommendedAction || "Review the lead and send the next reply."}</p>
 
-        {opportunity.value ? (
-          <>
-            <p className={`mt-1 text-[20px] font-extrabold leading-none ${tone.value}`}>{opportunity.value}</p>
-            <div className="mt-4 flex items-end justify-between gap-4">
-              <div className="flex items-center">
-                {opportunity.avatars?.map((avatar, index) => (
-                  <span
-                    key={avatar}
-                    aria-label={index === 0 ? "Interested profile" : undefined}
-                    aria-hidden={index === 0 ? undefined : true}
-                    role={index === 0 ? "img" : undefined}
-                    className="-ml-1 first:ml-0 h-6 w-6 rounded-full border-2 border-white bg-cover bg-center"
-                    style={{ backgroundImage: `url(https://i.pravatar.cc/48?img=${avatar})` }}
-                  />
-                ))}
-                {opportunity.extraAvatars ? (
-                  <span className="-ml-1 flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-white bg-[#eff1f6] px-1.5 text-[10px] font-bold text-[#596175]">
-                    {opportunity.extraAvatars}
-                  </span>
-                ) : null}
+        <div className="mt-3 flex items-end justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <div>
+                <p className="text-[10px] font-semibold text-[#697083]">{opportunity.scoreLabel ?? "Lead Score"}</p>
+                <p className={`mt-1 text-[16px] font-extrabold leading-none ${tone.value}`}>{scoreText}</p>
               </div>
-              <OpportunityReviewButton tone={tone.action}>{opportunity.action}</OpportunityReviewButton>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className={`mt-1 text-[15px] font-extrabold leading-none ${tone.value}`}>{scoreText}</p>
-            <div className="mt-3 flex items-center gap-4">
-              {opportunity.progress ? (
-                <div className="h-[3px] flex-1 rounded-full bg-[#edf0f6]">
-                  <div className={`h-full rounded-full ${tone.progress}`} style={{ width: opportunity.progress }} />
+              {opportunity.value ? (
+                <div>
+                  <p className="text-[10px] font-semibold text-[#697083]">Est. value</p>
+                  <p className={`mt-1 text-[16px] font-extrabold leading-none ${tone.value}`}>{opportunity.value}</p>
                 </div>
-              ) : (
-                <div className="flex-1" />
-              )}
-              <OpportunityReviewButton tone={tone.action}>{opportunity.action}</OpportunityReviewButton>
+              ) : null}
             </div>
-          </>
-        )}
+            {opportunity.progress ? (
+              <div className="mt-2 h-[3px] w-[138px] max-w-full rounded-full bg-[#edf0f6]">
+                <div className={`h-full rounded-full ${tone.progress}`} style={{ width: opportunity.progress }} />
+              </div>
+            ) : null}
+          </div>
+
+          <OpportunityReviewButton tone={tone.action}>{opportunity.action}</OpportunityReviewButton>
+        </div>
       </div>
     </article>
   );
@@ -5599,9 +5884,9 @@ function OpportunitiesPage({ summary, isLoading, error }: { summary: CreatorLive
 
         <header className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:gap-8">
           <div>
-            <h1 className="text-[26px] font-extrabold leading-none text-black sm:text-[28px]">Opportunities</h1>
+            <h1 className="text-[26px] font-extrabold leading-none text-black sm:text-[28px]">Leads</h1>
             <p className="mt-3 text-[12px] font-medium leading-[1.4] text-[#596175]">
-              High potential opportunities TractionFlo has identified for you.
+              Qualified Instagram leads with score, intent, missing details, and the next action to take.
             </p>
           </div>
 
@@ -5689,16 +5974,16 @@ function OpportunitiesPage({ summary, isLoading, error }: { summary: CreatorLive
         ) : (
           <section className="mt-5 rounded-[12px] border border-dashed border-[#d7deeb] bg-white p-8 text-center shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
             <Target className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
-            <h2 className="mt-3 text-[15px] font-extrabold text-black">No opportunity signals yet</h2>
+            <h2 className="mt-3 text-[15px] font-extrabold text-black">No qualified leads yet</h2>
             <p className="mx-auto mt-2 max-w-[440px] text-[12px] font-medium leading-relaxed text-[#596175]">
-              TractionFlo is reading real Instagram conversations. Pricing, buying, booking, partnership, or engagement keywords will appear here.
+              TractionFlo is reading real Instagram conversations. Pricing, buying, booking, partnership, or repeated engagement signals will appear here as leads.
             </p>
           </section>
         )}
 
         <footer className="relative mt-4 flex items-center justify-center pb-2">
           <p className="text-[12px] font-medium text-[#596175]">
-            Showing {summary.opportunityCards.length > 0 ? `1 to ${summary.opportunityCards.length}` : "0"} of {formatCreatorInteger(summary.opportunityCount)} opportunities
+            Showing {summary.opportunityCards.length > 0 ? `1 to ${summary.opportunityCards.length}` : "0"} of {formatCreatorInteger(summary.opportunityCount)} leads
           </p>
         </footer>
       </div>
@@ -10165,16 +10450,8 @@ function getKnowledgeSourceIcon(source: KnowledgeSourceSummary) {
     return DollarSign;
   }
 
-  if (source.categories.includes("Courses")) {
-    return GraduationCap;
-  }
-
   if (source.categories.includes("Products")) {
     return Box;
-  }
-
-  if (source.categories.includes("Lead Qualification")) {
-    return Target;
   }
 
   if (source.categories.includes("Business Information")) {
@@ -10221,19 +10498,61 @@ function mapKnowledgeSourceSummary(source: KnowledgeSourceSummary): KnowledgeSou
 }
 
 function buildKnowledgeTabsFromSources(sources: KnowledgeSourceSummary[]): KnowledgeTab[] {
-  const activeSources = sources.filter((source) => source.active);
-
   return [
     { label: "All Sources", count: formatKnowledgeInteger(sources.length), icon: Bot },
-    { label: "FAQs", count: formatKnowledgeInteger(activeSources.filter((source) => source.directAnswerCount > 0 || source.categories.includes("FAQs")).length), icon: CircleHelp },
-    { label: "Products", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Products")).length), icon: Box },
-    { label: "Services", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Services")).length), icon: Sparkles },
-    { label: "Pricing", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Pricing")).length), icon: DollarSign },
-    { label: "Courses", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Courses")).length), icon: GraduationCap },
-    { label: "Business Info", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Business Information")).length), icon: BriefcaseBusiness },
-    { label: "Lead Qualification", count: formatKnowledgeInteger(activeSources.filter((source) => source.categories.includes("Lead Qualification")).length), icon: Target },
-    { label: "PDFs", count: formatKnowledgeInteger(activeSources.filter((source) => source.kind === "pdf").length), icon: FileText },
+    { label: "FAQs", count: formatKnowledgeInteger(sources.filter((source) => source.directAnswerCount > 0 || source.categories.includes("FAQs")).length), icon: CircleHelp },
+    { label: "Products", count: formatKnowledgeInteger(sources.filter((source) => source.categories.includes("Products")).length), icon: Box },
+    { label: "Services", count: formatKnowledgeInteger(sources.filter((source) => source.categories.includes("Services")).length), icon: Sparkles },
+    { label: "Pricing", count: formatKnowledgeInteger(sources.filter((source) => source.categories.includes("Pricing")).length), icon: DollarSign },
+    { label: "Business Info", count: formatKnowledgeInteger(sources.filter((source) => source.categories.includes("Business Information")).length), icon: BriefcaseBusiness },
+    { label: "PDFs", count: formatKnowledgeInteger(sources.filter((source) => source.kind === "pdf").length), icon: FileText },
   ];
+}
+
+function isKnowledgeSourceInTab(source: KnowledgeSource, tab: KnowledgeTabLabel) {
+  switch (tab) {
+    case "All Sources":
+      return true;
+    case "FAQs":
+      return source.directAnswerCount > 0 || source.categories.includes("FAQs");
+    case "Products":
+      return source.categories.includes("Products");
+    case "Services":
+      return source.categories.includes("Services");
+    case "Pricing":
+      return source.categories.includes("Pricing");
+    case "Business Info":
+      return source.categories.includes("Business Information");
+    case "PDFs":
+      return source.kind === "pdf";
+    default:
+      return true;
+  }
+}
+
+function isKnowledgeSectionTab(tab: KnowledgeTabLabel) {
+  return tab !== "All Sources" && tab !== "PDFs";
+}
+
+function getKnowledgeSectionDisplayLabel(tab: KnowledgeTabLabel) {
+  return tab === "Business Info" ? "Business information" : tab;
+}
+
+function getKnowledgeSectionRowIcon(tab: KnowledgeTabLabel): LucideIcon {
+  switch (tab) {
+    case "FAQs":
+      return CircleHelp;
+    case "Products":
+      return Box;
+    case "Services":
+      return Sparkles;
+    case "Pricing":
+      return DollarSign;
+    case "Business Info":
+      return BriefcaseBusiness;
+    default:
+      return BookOpen;
+  }
 }
 
 function buildKnowledgeInsightsFromSources(sources: KnowledgeSourceSummary[], fallback: KnowledgeInsight[]) {
@@ -10277,18 +10596,28 @@ function buildKnowledgeUpdatesFromSources(sources: KnowledgeSourceSummary[]): Kn
   }));
 }
 
-function KnowledgeTabs({ tabs }: { tabs: KnowledgeTab[] }) {
+function KnowledgeTabs({
+  tabs,
+  activeTab,
+  onTabChange,
+}: {
+  tabs: KnowledgeTab[];
+  activeTab: KnowledgeTabLabel;
+  onTabChange: (tab: KnowledgeTabLabel) => void;
+}) {
   return (
     <div className="-mx-4 mt-8 overflow-x-auto px-4 no-scrollbar sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
       <div className="grid w-max grid-flow-col auto-cols-max">
-        {tabs.map((tab, index) => {
+        {tabs.map((tab) => {
           const Icon = tab.icon;
-          const isActive = index === 0;
+          const isActive = tab.label === activeTab;
 
           return (
             <button
               key={tab.label}
               type="button"
+              onClick={() => onTabChange(tab.label)}
+              aria-pressed={isActive}
               className={`relative flex h-11 items-center gap-2 border-r border-[#e2e6f0] px-3 text-[12px] font-extrabold last:border-r-0 ${
                 isActive ? "text-[#3044ff]" : "text-black"
               }`}
@@ -10309,17 +10638,273 @@ function KnowledgeTabs({ tabs }: { tabs: KnowledgeTab[] }) {
 
 const manualKnowledgePlaceholders: Record<string, string> = {
   FAQs: "Question: What is included?\nAnswer: Include the exact answer customers should receive.\n\nQuestion: How do I book?\nAnswer: Explain the booking steps.",
-  Products: "Product name:\nDescription:\nBest for:\nPrice or package:\nHow to order:",
-  Services: "Service name:\nWhat is included:\nWho it is for:\nAvailability:\nNext step:",
-  Pricing: "Plan or package:\nPrice:\nWhat is included:\nPayment terms:\nRefund or cancellation note:",
-  Courses: "Course name:\nDuration:\nWho it is for:\nModules or outcomes:\nPrice:\nHow to enroll:",
-  "Business Information": "Business name:\nLocation:\nHours:\nContact:\nBrand tone:\nImportant links:",
-  "Lead Qualification": "Qualifying questions:\n1. Ask about budget.\n2. Ask about timeline.\n3. Ask what result they want.\n\nQualified lead rules:\nFollow-up action:",
+  Products:
+    "Product name:\nDescription:\nSizes or variants:\nBest for:\nPrice or price range:\nAvailability:\nHow to order:\nCare or usage notes:",
+  Services:
+    "Service name:\nWhat is included:\nWho it is for:\nAvailability:\nHow to book:\nDelivery or fulfillment time:\nNext step:",
+  Pricing:
+    "Plan or package:\nPrice:\nWhat is included:\nPayment methods:\nDeposit or advance payment:\nDelivery charges:\nRefund or exchange note:",
+  "Business Information":
+    "Business name:\nLocation:\nOpening hours:\nContact number:\nInstagram or website link:\nDelivery cities:\nBrand tone:\nImportant notes:",
 };
+
+const knowledgeSectionHeadingMap: Record<string, string[]> = {
+  Products: ["Product Categories", "Product name:"],
+  Services: ["Services", "Service name:", "Ordering, Delivery, and Exchanges"],
+  Pricing: ["Pricing and Bundles", "Pricing", "Plan or package:"],
+  "Business Information": ["Business Overview", "Business Information", "Business Info", "Business name:", "Lead Qualification Rules"],
+};
+
+const knowledgeSectionBreakHeadings = Array.from(new Set([
+  ...Object.values(knowledgeSectionHeadingMap).flat(),
+  "Sizing Guidance",
+  "Fabric and Care",
+  "Materials and Finish Guidance",
+  "Care Instructions",
+  "Sizing and Fit",
+  "Pricing, Packaging, and Delivery",
+  "Returns and Exchanges",
+  "Direct FAQ Answers",
+]));
+
+type KnowledgeSourceSection = {
+  category: string;
+  content: string;
+  qaPairs: KnowledgeQaPair[];
+  available: boolean;
+};
+
+function escapeKnowledgeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeKnowledgeSectionText(value: string) {
+  return value
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function getKnowledgeDetailText(source: KnowledgeSourceDetail) {
+  return [...source.chunks]
+    .sort((a, b) => a.order - b.order)
+    .map((chunk) => chunk.text)
+    .join("\n\n")
+    .trim();
+}
+
+function getKnowledgeMarkerMatches(text: string) {
+  const categories = knowledgeCategoryOptions.map(escapeKnowledgeRegExp).join("|");
+  const markerPattern = new RegExp(`(?:^|\\n)(?:Manual update:[^\\n]*\\n)?Category:\\s*(${categories})\\s*(?:\\nTitle:[^\\n]*)?\\n*`, "gi");
+  const matches: { category: string; start: number; end: number }[] = [];
+  let match = markerPattern.exec(text);
+
+  while (match) {
+    matches.push({
+      category: match[1],
+      start: match.index,
+      end: markerPattern.lastIndex,
+    });
+    match = markerPattern.exec(text);
+  }
+
+  return matches;
+}
+
+function extractMarkedKnowledgeCategoryContent(text: string, category: string) {
+  const matches = getKnowledgeMarkerMatches(text);
+
+  if (matches.length === 0) {
+    return "";
+  }
+
+  return matches
+    .map((match, index) => {
+      const nextMatch = matches[index + 1];
+
+      return {
+        category: match.category,
+        content: text.slice(match.end, nextMatch?.start ?? text.length),
+      };
+    })
+    .filter((block) => block.category === category)
+    .map((block) => normalizeKnowledgeSectionText(block.content))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function getKnowledgeHeadingCategory(line: string) {
+  const normalizedLine = line.trim().replace(/\s+/g, " ").toLowerCase();
+
+  if (!normalizedLine || /^faq\s*\d*$/i.test(normalizedLine) || normalizedLine.startsWith("question:") || normalizedLine.startsWith("answer:")) {
+    return "";
+  }
+
+  for (const [category, headings] of Object.entries(knowledgeSectionHeadingMap)) {
+    if (
+      headings.some((heading) => {
+        const normalizedHeading = heading.trim().replace(/\s+/g, " ").toLowerCase();
+        return normalizedLine === normalizedHeading || normalizedLine.startsWith(normalizedHeading);
+      })
+    ) {
+      return category;
+    }
+  }
+
+  return "";
+}
+
+function isKnowledgeSectionBreakLine(line: string) {
+  const normalizedLine = line.trim().replace(/\s+/g, " ").toLowerCase();
+
+  if (!normalizedLine || /^faq\s*\d*$/i.test(normalizedLine) || normalizedLine.startsWith("question:") || normalizedLine.startsWith("answer:")) {
+    return true;
+  }
+
+  return knowledgeSectionBreakHeadings.some((heading) => {
+    const normalizedHeading = heading.trim().replace(/\s+/g, " ").toLowerCase();
+    return normalizedLine === normalizedHeading || normalizedLine.startsWith(normalizedHeading);
+  });
+}
+
+function extractHeadingKnowledgeCategoryContent(text: string, category: string) {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const blocks: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const headingCategory = getKnowledgeHeadingCategory(lines[index]);
+
+    if (!headingCategory) {
+      continue;
+    }
+
+    const blockLines = [lines[index]];
+    let cursor = index + 1;
+
+    while (cursor < lines.length && !isKnowledgeSectionBreakLine(lines[cursor])) {
+      blockLines.push(lines[cursor]);
+      cursor += 1;
+    }
+
+    if (headingCategory === category) {
+      blocks.push(blockLines.join("\n"));
+    }
+
+    index = cursor - 1;
+  }
+
+  return blocks.map(normalizeKnowledgeSectionText).filter(Boolean).join("\n\n");
+}
+
+function extractKnowledgeCategoryContent(source: KnowledgeSourceDetail, category: string) {
+  if (category === "FAQs") {
+    return "";
+  }
+
+  const text = getKnowledgeDetailText(source);
+  const markedContent = extractMarkedKnowledgeCategoryContent(text, category);
+
+  if (markedContent) {
+    return markedContent;
+  }
+
+  return extractHeadingKnowledgeCategoryContent(text, category);
+}
+
+function buildKnowledgeSourceSections(source: KnowledgeSourceDetail): KnowledgeSourceSection[] {
+  return knowledgeCategoryOptions.map((category) => {
+    const qaPairs = category === "FAQs" ? source.qaPairs : [];
+    const content = extractKnowledgeCategoryContent(source, category);
+
+    return {
+      category,
+      content,
+      qaPairs,
+      available: qaPairs.length > 0 || Boolean(content) || source.categories.includes(category),
+    };
+  });
+}
+
+function getKnowledgeSectionTabId(category: string): KnowledgeViewTab {
+  switch (category) {
+    case "FAQs":
+      return "section:FAQs";
+    case "Products":
+      return "section:Products";
+    case "Services":
+      return "section:Services";
+    case "Pricing":
+      return "section:Pricing";
+    case "Business Information":
+      return "section:Business Information";
+    default:
+      return "section:Business Information";
+  }
+}
+
+function getKnowledgeViewSectionCategory(tab: KnowledgeViewTab) {
+  switch (tab) {
+    case "section:FAQs":
+      return "FAQs";
+    case "section:Products":
+      return "Products";
+    case "section:Services":
+      return "Services";
+    case "section:Pricing":
+      return "Pricing";
+    case "section:Business Information":
+      return "Business Information";
+    default:
+      return "";
+  }
+}
+
+function getKnowledgeSectionTabLabel(section: KnowledgeSourceSection) {
+  const label = section.category === "Business Information" ? "Business Info" : section.category;
+
+  if (section.category === "FAQs") {
+    return `${label} (${section.qaPairs.length})`;
+  }
+
+  return label;
+}
+
+function createManualKnowledgeDraftFromDetail(source: KnowledgeSourceDetail): ManualKnowledgeDraft {
+  const categoryContent = getEmptyManualCategoryContent();
+  const sourceSections = buildKnowledgeSourceSections(source);
+  const faqPairs = source.qaPairs.length > 0
+    ? source.qaPairs.map((pair) => ({
+        id: pair.id,
+        question: pair.question,
+        answer: pair.answer,
+      }))
+    : [createManualFaqPair()];
+
+  sourceSections.forEach((section) => {
+    if (section.category !== "FAQs") {
+      categoryContent[section.category] = section.content;
+    }
+  });
+
+  return {
+    title: source.title,
+    category: "FAQs",
+    content: "",
+    faqPairs,
+    categoryContent,
+    categoryFaqPairs: {
+      FAQs: faqPairs,
+    },
+  };
+}
 
 function KnowledgeManualSourceForm({
   draft,
   isSaving,
+  isLoadingSourceDetail,
   sourceContext,
   onClose,
   onChange,
@@ -10327,6 +10912,7 @@ function KnowledgeManualSourceForm({
 }: {
   draft: ManualKnowledgeDraft;
   isSaving: boolean;
+  isLoadingSourceDetail: boolean;
   sourceContext?: KnowledgeSource | null;
   onClose?: () => void;
   onChange: (draft: ManualKnowledgeDraft) => void;
@@ -10334,29 +10920,27 @@ function KnowledgeManualSourceForm({
 }) {
   const categoryPlaceholder = manualKnowledgePlaceholders[draft.category] || manualKnowledgePlaceholders["Business Information"];
   const isFaqCategory = draft.category === "FAQs";
-  const compiledContent = getManualKnowledgeDraftContent(draft);
+  const savedSections = sourceContext ? getManualKnowledgeDraftSections(draft) : [];
+  const compiledContent = sourceContext
+    ? savedSections.map((section) => section.content).join("\n\n").trim()
+    : getManualKnowledgeDraftContent(draft);
+  const activeFaqPairs = getManualDraftCategoryFaqPairs(draft);
+  const activeContent = getManualDraftCategoryContent(draft);
 
   function updateFaqPair(pairId: string, patch: Partial<ManualFaqPair>) {
-    onChange({
-      ...draft,
-      faqPairs: draft.faqPairs.map((pair) => (pair.id === pairId ? { ...pair, ...patch } : pair)),
-    });
+    onChange(setManualDraftCategoryFaqPairs(
+      draft,
+      draft.category,
+      activeFaqPairs.map((pair) => (pair.id === pairId ? { ...pair, ...patch } : pair))
+    ));
   }
 
   function addFaqPair() {
-    onChange({
-      ...draft,
-      faqPairs: [...draft.faqPairs, createManualFaqPair()],
-    });
+    onChange(setManualDraftCategoryFaqPairs(draft, draft.category, [...activeFaqPairs, createManualFaqPair()]));
   }
 
   function removeFaqPair(pairId: string) {
-    const nextPairs = draft.faqPairs.filter((pair) => pair.id !== pairId);
-
-    onChange({
-      ...draft,
-      faqPairs: nextPairs.length > 0 ? nextPairs : [createManualFaqPair()],
-    });
+    onChange(setManualDraftCategoryFaqPairs(draft, draft.category, activeFaqPairs.filter((pair) => pair.id !== pairId)));
   }
 
   return (
@@ -10365,16 +10949,16 @@ function KnowledgeManualSourceForm({
         <div>
           <h2 className="flex items-center gap-2 text-[15px] font-extrabold text-black">
             <PencilLine size={17} className="text-[#3044ff]" strokeWidth={2.35} />
-            {sourceContext ? "Add Q&A to source" : "Add knowledge manually"}
+            {sourceContext ? "Edit source knowledge" : "Add knowledge manually"}
           </h2>
           <p className="mt-1 max-w-[660px] text-[12px] font-semibold leading-relaxed text-[#596175]">
             {sourceContext
-              ? "Add new questions, answers, or notes into this existing source. It stays as one record and updates the direct answer count."
-              : "Add FAQs, products, services, pricing, courses, business information, or lead qualification rules. Active manual sources are used by chat, inbox, and Instagram comment answers."}
+              ? "Review or paste into any tab, then save all filled sections into this source at once."
+              : "Add FAQs, products, services, pricing, or business information. Active manual sources are used by chat, inbox, and Instagram comment answers."}
           </p>
           {sourceContext ? (
             <p className="mt-2 inline-flex rounded-[7px] bg-[#f0edff] px-2.5 py-1 text-[11px] font-extrabold text-[#3044ff]">
-              Updating existing source: {sourceContext.title}
+              {isLoadingSourceDetail ? "Loading existing sections..." : `Updating existing source: ${sourceContext.title}`}
             </p>
           ) : null}
         </div>
@@ -10393,11 +10977,11 @@ function KnowledgeManualSourceForm({
           <button
             type="button"
             onClick={onSave}
-            disabled={isSaving || compiledContent.length < 10}
+            disabled={isSaving || isLoadingSourceDetail || compiledContent.length < 10}
             className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.18)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSaving ? <RefreshCw size={15} className="animate-spin" strokeWidth={2.35} /> : <Check size={15} strokeWidth={2.35} />}
-            {isSaving ? "Saving..." : sourceContext ? "Add to source" : "Save manual source"}
+            {isSaving ? "Saving..." : sourceContext ? `Save ${savedSections.length || "all"} section${savedSections.length === 1 ? "" : "s"}` : "Save manual source"}
           </button>
         </div>
       </div>
@@ -10411,7 +10995,7 @@ function KnowledgeManualSourceForm({
               <button
                 key={category}
                 type="button"
-                onClick={() => onChange({ ...draft, category, faqPairs: draft.faqPairs.length > 0 ? draft.faqPairs : [createManualFaqPair()] })}
+                onClick={() => onChange(switchManualKnowledgeDraftCategory(draft, category))}
                 className={`flex h-9 w-full items-center justify-between rounded-[8px] border px-3 text-left text-[12px] font-extrabold transition ${
                   isActive ? "border-[#3044ff] bg-[#f0edff] text-[#3044ff]" : "border-[#e2e6f0] bg-white text-[#31394f] hover:border-[#cbd2e2]"
                 }`}
@@ -10432,7 +11016,7 @@ function KnowledgeManualSourceForm({
           />
           {isFaqCategory ? (
             <div className="space-y-3">
-              {draft.faqPairs.map((pair, index) => (
+              {activeFaqPairs.map((pair, index) => (
                 <div key={pair.id} className="rounded-[10px] border border-[#dfe4ef] bg-[#fbfcff] p-3">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">
@@ -10441,7 +11025,7 @@ function KnowledgeManualSourceForm({
                     <button
                       type="button"
                       onClick={() => removeFaqPair(pair.id)}
-                      disabled={draft.faqPairs.length === 1 && !pair.question.trim() && !pair.answer.trim()}
+                      disabled={activeFaqPairs.length === 1 && !pair.question.trim() && !pair.answer.trim()}
                       className="flex h-7 items-center justify-center gap-1 rounded-[7px] border border-[#ffd1dc] bg-white px-2 text-[10px] font-extrabold text-[#df405b] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <X size={12} strokeWidth={2.4} />
@@ -10477,8 +11061,8 @@ function KnowledgeManualSourceForm({
           ) : (
             <>
               <textarea
-                value={draft.content}
-                onChange={(event) => onChange({ ...draft, content: event.target.value })}
+                value={activeContent}
+                onChange={(event) => onChange(setManualDraftCategoryContent(draft, draft.category, event.target.value))}
                 placeholder={categoryPlaceholder}
                 className="min-h-[190px] w-full resize-y rounded-[10px] border border-[#dfe4ef] bg-white px-3 py-3 text-[12px] font-semibold leading-relaxed text-black outline-none transition focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
               />
@@ -10496,6 +11080,7 @@ function KnowledgeManualSourceForm({
 function KnowledgeManualSourceModal({
   draft,
   isSaving,
+  isLoadingSourceDetail,
   sourceContext,
   onChange,
   onClose,
@@ -10503,6 +11088,7 @@ function KnowledgeManualSourceModal({
 }: {
   draft: ManualKnowledgeDraft;
   isSaving: boolean;
+  isLoadingSourceDetail: boolean;
   sourceContext: KnowledgeSource | null;
   onChange: (draft: ManualKnowledgeDraft) => void;
   onClose: () => void;
@@ -10515,6 +11101,7 @@ function KnowledgeManualSourceModal({
         <KnowledgeManualSourceForm
           draft={draft}
           isSaving={isSaving}
+          isLoadingSourceDetail={isLoadingSourceDetail}
           sourceContext={sourceContext}
           onChange={onChange}
           onClose={onClose}
@@ -10532,7 +11119,6 @@ function KnowledgeSourceViewModal({
   activeTab,
   onTabChange,
   onClose,
-  onDelete,
   onDeleteAnswer,
   deletingSourceId,
   deletingAnswerId,
@@ -10543,18 +11129,24 @@ function KnowledgeSourceViewModal({
   activeTab: KnowledgeViewTab;
   onTabChange: (tab: KnowledgeViewTab) => void;
   onClose: () => void;
-  onDelete: (sourceId: string) => void;
   onDeleteAnswer: (sourceId: string, qaPairId: string) => void;
   deletingSourceId: string;
   deletingAnswerId: string;
 }) {
+  const sourceSections = source ? buildKnowledgeSourceSections(source) : [];
+  const activeSectionCategory = getKnowledgeViewSectionCategory(activeTab);
+  const activeSection = activeSectionCategory
+    ? sourceSections.find((section) => section.category === activeSectionCategory) || null
+    : null;
   const tabs: { id: KnowledgeViewTab; label: string }[] = [
     { id: "overview", label: "Overview" },
-    { id: "answers", label: `Answers (${source?.qaPairs.length || 0})` },
+    ...sourceSections.map((section) => ({
+      id: getKnowledgeSectionTabId(section.category),
+      label: getKnowledgeSectionTabLabel(section),
+    })),
     { id: "text", label: `PDF text (${source?.chunks.length || 0})` },
     { id: "details", label: "Details" },
   ];
-  const isDeletingSource = Boolean(source && deletingSourceId === source.id);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/32 px-4 py-5 backdrop-blur-sm">
@@ -10568,17 +11160,6 @@ function KnowledgeSourceViewModal({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {source ? (
-              <button
-                type="button"
-                onClick={() => onDelete(source.id)}
-                disabled={isDeletingSource || Boolean(deletingAnswerId)}
-                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[9px] border border-[#ffd1dc] bg-[#fff7f9] px-3 text-[12px] font-extrabold text-[#df405b] transition hover:bg-[#fff0f4] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isDeletingSource ? <RefreshCw size={14} className="animate-spin" strokeWidth={2.35} /> : <Trash2 size={14} strokeWidth={2.35} />}
-                Delete
-              </button>
-            ) : null}
             <button
               type="button"
               onClick={onClose}
@@ -10638,30 +11219,44 @@ function KnowledgeSourceViewModal({
                 </div>
               ) : null}
 
-              {activeTab === "answers" ? (
+              {activeSectionCategory ? (
                 <div className="space-y-3">
-                  {source.qaPairs.length === 0 ? (
-                    <p className="rounded-[10px] bg-[#f8f9fc] px-4 py-5 text-[12px] font-semibold text-[#596175]">No direct answers were extracted from this source.</p>
+                  {activeSection?.category === "FAQs" ? (
+                    activeSection.qaPairs.length === 0 ? (
+                      <p className="rounded-[10px] bg-[#f8f9fc] px-4 py-5 text-[12px] font-semibold text-[#596175]">No direct FAQ answers were extracted from this source.</p>
+                    ) : (
+                      activeSection.qaPairs.map((pair, index) => (
+                        <article key={pair.id} className="rounded-[10px] border border-[#edf0f6] bg-white p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="text-[10px] font-extrabold uppercase tracking-wide text-[#697083]">FAQ {index + 1}</p>
+                            <button
+                              type="button"
+                              onClick={() => onDeleteAnswer(source.id, pair.id)}
+                              disabled={Boolean(deletingSourceId) || Boolean(deletingAnswerId)}
+                              className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-[#ffd1dc] bg-[#fff7f9] px-3 text-[11px] font-extrabold text-[#df405b] transition hover:bg-[#fff0f4] disabled:cursor-not-allowed disabled:opacity-60"
+                              aria-label={`Delete FAQ ${index + 1}`}
+                            >
+                              {deletingAnswerId === pair.id ? <RefreshCw size={13} className="animate-spin" strokeWidth={2.35} /> : <Trash2 size={13} strokeWidth={2.35} />}
+                              Delete
+                            </button>
+                          </div>
+                          <h3 className="mt-2 text-[13px] font-extrabold text-black">{pair.question}</h3>
+                          <p className="mt-2 whitespace-pre-wrap text-[12px] font-medium leading-relaxed text-[#31394f]">{pair.answer}</p>
+                        </article>
+                      ))
+                    )
+                  ) : activeSection?.content ? (
+                    <article className="rounded-[10px] border border-[#edf0f6] bg-white p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-[13px] font-extrabold text-black">{activeSection.category}</h3>
+                        <span className="rounded-[7px] bg-[#f0edff] px-2.5 py-1 text-[10px] font-extrabold text-[#3044ff]">Section text</span>
+                      </div>
+                      <p className="mt-3 whitespace-pre-wrap text-[12px] font-medium leading-relaxed text-[#31394f]">{activeSection.content}</p>
+                    </article>
                   ) : (
-                    source.qaPairs.map((pair, index) => (
-                      <article key={pair.id} className="rounded-[10px] border border-[#edf0f6] bg-white p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="text-[10px] font-extrabold uppercase tracking-wide text-[#697083]">Answer {index + 1}</p>
-                          <button
-                            type="button"
-                            onClick={() => onDeleteAnswer(source.id, pair.id)}
-                            disabled={Boolean(deletingSourceId) || Boolean(deletingAnswerId)}
-                            className="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border border-[#ffd1dc] bg-[#fff7f9] px-3 text-[11px] font-extrabold text-[#df405b] transition hover:bg-[#fff0f4] disabled:cursor-not-allowed disabled:opacity-60"
-                            aria-label={`Delete answer ${index + 1}`}
-                          >
-                            {deletingAnswerId === pair.id ? <RefreshCw size={13} className="animate-spin" strokeWidth={2.35} /> : <Trash2 size={13} strokeWidth={2.35} />}
-                            Delete
-                          </button>
-                        </div>
-                        <h3 className="mt-2 text-[13px] font-extrabold text-black">{pair.question}</h3>
-                        <p className="mt-2 whitespace-pre-wrap text-[12px] font-medium leading-relaxed text-[#31394f]">{pair.answer}</p>
-                      </article>
-                    ))
+                    <p className="rounded-[10px] bg-[#f8f9fc] px-4 py-5 text-[12px] font-semibold text-[#596175]">
+                      No {activeSectionCategory === "Business Information" ? "business info" : activeSectionCategory.toLowerCase()} section text was found in this source.
+                    </p>
                   )}
                 </div>
               ) : null}
@@ -10724,6 +11319,11 @@ function KnowledgeSourceViewModal({
 
 function KnowledgeSourceRows({
   sources,
+  totalSourceCount,
+  activeTab,
+  pdfSources,
+  selectedPdfId,
+  onPdfSelectionChange,
   onUploadClick,
   onDropFiles,
   onActiveChange,
@@ -10735,6 +11335,11 @@ function KnowledgeSourceRows({
   uploadMessage,
 }: {
   sources: KnowledgeSource[];
+  totalSourceCount: number;
+  activeTab: KnowledgeTabLabel;
+  pdfSources: KnowledgeSource[];
+  selectedPdfId: string;
+  onPdfSelectionChange: (sourceId: string) => void;
   onUploadClick: () => void;
   onDropFiles: (files: FileList | null) => void;
   onActiveChange: (sourceId: string, active: boolean) => void;
@@ -10749,18 +11354,55 @@ function KnowledgeSourceRows({
     event.preventDefault();
     onDropFiles(event.dataTransfer.files);
   }
-  const emptyTitle = "No saved knowledge sources yet";
-  const emptyDetail = "Add FAQs, products, services, pricing, courses, business information, lead qualification rules, or PDFs to train the AI.";
+  const selectedPdf = pdfSources.find((source) => source.id === selectedPdfId) || null;
+  const isFilteredView = activeTab !== "All Sources";
+  const tabSourceTitle =
+    activeTab === "FAQs"
+      ? "FAQ sources"
+      : activeTab === "PDFs"
+        ? "PDF sources"
+        : activeTab === "Business Info"
+          ? "Business info sources"
+          : `${activeTab} sources`;
+  const emptyTitle = isFilteredView ? `No ${tabSourceTitle.toLowerCase()} found` : "No saved knowledge sources yet";
+  const emptyDetail = isFilteredView
+    ? "Switch to All Sources or add a matching knowledge source."
+    : "Add FAQs, products, services, pricing, business information, or PDFs to train the AI.";
+  const sectionTitle = selectedPdf
+    ? selectedPdf.title
+    : isFilteredView
+      ? tabSourceTitle
+      : "Saved knowledge sources";
+  const sectionDetail = isFilteredView
+    ? `Showing ${formatKnowledgeInteger(sources.length)} of ${formatKnowledgeInteger(totalSourceCount)} saved source${totalSourceCount === 1 ? "" : "s"}.`
+    : "PDF/TXT and manual sources are listed here. Active sources are available to AI replies.";
 
   return (
     <section>
       <div className="mb-3 flex flex-col gap-2 rounded-[10px] border border-[#e7eaf2] bg-white p-3 shadow-[0_18px_45px_rgba(20,28,53,0.025)] sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-[13px] font-extrabold text-black">Saved knowledge sources</h2>
+          <h2 className="text-[13px] font-extrabold text-black">{sectionTitle}</h2>
           <p className="mt-1 text-[11px] font-medium text-[#596175]">
-            PDF/TXT and manual sources are listed here. Active sources are available to AI replies.
+            {sectionDetail}
           </p>
         </div>
+        {activeTab === "PDFs" && pdfSources.length > 1 ? (
+          <label className="flex h-9 min-w-[220px] items-center gap-2 rounded-[8px] border border-[#dfe4ef] bg-white px-3 text-[11px] font-extrabold text-[#31394f]">
+            <span className="shrink-0 text-[#596175]">PDF</span>
+            <select
+              value={selectedPdfId}
+              onChange={(event) => onPdfSelectionChange(event.target.value)}
+              className="min-w-0 flex-1 bg-transparent text-[12px] font-extrabold text-black outline-none"
+            >
+              <option value="all">All PDFs</option>
+              {pdfSources.map((source) => (
+                <option key={source.id} value={source.id}>
+                  {source.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
 
       <div className="overflow-x-auto overflow-y-hidden rounded-[12px] border border-[#e7eaf2] bg-white shadow-[0_18px_45px_rgba(20,28,53,0.025)]">
@@ -10784,7 +11426,22 @@ function KnowledgeSourceRows({
         ) : (
           <div className="min-w-[1180px] divide-y divide-[#edf0f6]">
             {sources.map((source) => {
-              const Icon = source.icon;
+              const isSectionRow = isKnowledgeSectionTab(activeTab);
+              const Icon = isSectionRow ? getKnowledgeSectionRowIcon(activeTab) : source.icon;
+              const sectionLabel = getKnowledgeSectionDisplayLabel(activeTab);
+              const displayTitle = isSectionRow ? `${sectionLabel} section` : source.title;
+              const displaySubtitle = isSectionRow
+                ? `From ${source.title} • ${source.subtitle}`
+                : source.subtitle;
+              const displayTone = isSectionRow ? "bg-[#f0edff] text-[#4b3cff]" : source.tone;
+              const displayType = isSectionRow ? "SECTION" : source.type;
+              const displayTypeTone = isSectionRow ? "bg-[#f0edff] text-[#4b3cff]" : source.typeTone;
+              const displayModeLabel = isSectionRow ? `${sectionLabel} knowledge` : source.sourceModeLabel;
+              const displayModeTone = isSectionRow
+                ? "bg-[#f0edff] text-[#4b3cff]"
+                : source.sourceMode === "auto"
+                  ? "bg-[#eef4ff] text-[#246bff]"
+                  : "bg-[#f0edff] text-[#4b3cff]";
 
               return (
 	                <article
@@ -10792,15 +11449,15 @@ function KnowledgeSourceRows({
 	                  className="grid gap-3 px-4 py-4 transition hover:bg-[#fbfcff] md:grid-cols-[minmax(260px,1fr)_82px_120px_150px_120px_360px] md:items-center"
 	                >
                   <div className="flex min-w-0 items-center gap-4">
-                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] ${source.tone}`}>
+                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] ${displayTone}`}>
                       <Icon size={21} strokeWidth={2.25} />
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-extrabold text-black">{source.title}</span>
-                      <span className="mt-1 block truncate text-[12px] font-medium text-[#46506a]">{source.subtitle}</span>
+                      <span className="block truncate text-[13px] font-extrabold text-black">{displayTitle}</span>
+                      <span className="mt-1 block truncate text-[12px] font-medium text-[#46506a]">{displaySubtitle}</span>
                       <span className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <span className={`inline-flex h-6 items-center rounded-[7px] px-2 text-[10px] font-extrabold ${source.sourceMode === "auto" ? "bg-[#eef4ff] text-[#246bff]" : "bg-[#f0edff] text-[#4b3cff]"}`}>
-                          {source.sourceModeLabel}
+                        <span className={`inline-flex h-6 items-center rounded-[7px] px-2 text-[10px] font-extrabold ${displayModeTone}`}>
+                          {displayModeLabel}
                         </span>
                         {source.directAnswerCount > 0 ? (
                           <span className="inline-flex h-6 items-center rounded-[7px] bg-[#eafaf0] px-2 text-[10px] font-extrabold text-[#0a9b3f]">
@@ -10813,8 +11470,8 @@ function KnowledgeSourceRows({
 
                   <div className="flex items-center justify-between gap-3 md:block">
                     <span className="text-[10px] font-extrabold uppercase text-[#7b8498] md:hidden">Type</span>
-                    <span className={`inline-flex h-6 items-center rounded-[7px] px-2.5 text-[11px] font-bold ${source.typeTone}`}>
-                      {source.type}
+                    <span className={`inline-flex h-6 items-center rounded-[7px] px-2.5 text-[11px] font-bold ${displayTypeTone}`}>
+                      {displayType}
                     </span>
                   </div>
 
@@ -10861,7 +11518,7 @@ function KnowledgeSourceRows({
                         className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[8px] border border-[#d7d5ff] bg-[#f5f3ff] px-3 text-[11px] font-extrabold text-[#3044ff] transition hover:bg-[#efedff] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <PencilLine size={13} strokeWidth={2.35} />
-                        Add Q&A
+                        Edit sections
                       </button>
                       <button
                         type="button"
@@ -11039,17 +11696,15 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
   const [knowledgeError, setKnowledgeError] = useState("");
   const [uploadMessage, setUploadMessage] = useState("");
   const [isManualKnowledgeModalOpen, setIsManualKnowledgeModalOpen] = useState(false);
+  const [isLoadingManualKnowledgeDetail, setIsLoadingManualKnowledgeDetail] = useState(false);
   const [manualKnowledgeSourceContext, setManualKnowledgeSourceContext] = useState<KnowledgeSource | null>(null);
   const [viewingKnowledgeSourceId, setViewingKnowledgeSourceId] = useState("");
   const [viewingKnowledgeSource, setViewingKnowledgeSource] = useState<KnowledgeSourceDetail | null>(null);
   const [knowledgeViewError, setKnowledgeViewError] = useState("");
   const [knowledgeViewTab, setKnowledgeViewTab] = useState<KnowledgeViewTab>("overview");
-  const [manualKnowledgeDraft, setManualKnowledgeDraft] = useState<ManualKnowledgeDraft>({
-    title: "",
-    category: knowledgeCategoryOptions[0],
-    content: "",
-    faqPairs: [createManualFaqPair()],
-  });
+  const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<KnowledgeTabLabel>("All Sources");
+  const [selectedKnowledgePdfId, setSelectedKnowledgePdfId] = useState("all");
+  const [manualKnowledgeDraft, setManualKnowledgeDraft] = useState<ManualKnowledgeDraft>(() => createManualKnowledgeDraft());
 
   useEffect(() => {
     let isMounted = true;
@@ -11086,20 +11741,38 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
   }, []);
 
   function resetManualKnowledgeDraft(source?: KnowledgeSource | null) {
-    setManualKnowledgeDraft({
-      title: source ? source.title : "",
-      category: source ? "FAQs" : knowledgeCategoryOptions[0],
-      content: "",
-      faqPairs: [createManualFaqPair()],
-    });
+    setManualKnowledgeDraft(createManualKnowledgeDraft(source));
   }
 
-  function openManualKnowledgeModal(source?: KnowledgeSource | null) {
+  async function openManualKnowledgeModal(source?: KnowledgeSource | null) {
     const nextSource = source || null;
 
     setManualKnowledgeSourceContext(nextSource);
     resetManualKnowledgeDraft(nextSource);
     setIsManualKnowledgeModalOpen(true);
+    setIsLoadingManualKnowledgeDetail(Boolean(nextSource?.id));
+
+    if (!nextSource?.id) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/knowledge/sources/${nextSource.id}`, { cache: "no-store" });
+      const payload = (await response.json()) as KnowledgeSourceDetailResponse;
+
+      if (!response.ok || payload.error || !payload.detail) {
+        throw new Error(payload.error || "Could not load source sections");
+      }
+
+      setManualKnowledgeDraft(createManualKnowledgeDraftFromDetail(payload.detail));
+      setKnowledgeError("");
+    } catch (detailError) {
+      const message = detailError instanceof Error ? detailError.message : "Could not load source sections";
+      setKnowledgeError(message);
+      setUploadMessage(message);
+    } finally {
+      setIsLoadingManualKnowledgeDetail(false);
+    }
   }
 
   function closeManualKnowledgeModal() {
@@ -11108,7 +11781,13 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
     }
 
     setIsManualKnowledgeModalOpen(false);
+    setIsLoadingManualKnowledgeDetail(false);
     setManualKnowledgeSourceContext(null);
+  }
+
+  function changeKnowledgeTab(tab: KnowledgeTabLabel) {
+    setActiveKnowledgeTab(tab);
+    setSelectedKnowledgePdfId("all");
   }
 
   async function openKnowledgeSourceView(sourceId: string) {
@@ -11163,6 +11842,13 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
         throw new Error(payload.error || "Could not upload knowledge source");
       }
 
+      console.log("Knowledge upload assistant id:", {
+        assistantId: payload.assistantId || payload.assistant_id || "",
+        assistant_id: payload.assistant_id || payload.assistantId || "",
+        sourceId: payload.source?.id || "",
+        fileName: file.name,
+      });
+
       setKnowledgeSources(payload.sources || []);
       setUploadMessage(`${file.name} indexed and ready.`);
     } catch (uploadError) {
@@ -11179,13 +11865,16 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
   }
 
   async function saveManualKnowledgeSource() {
-    const manualContent = getManualKnowledgeDraftContent(manualKnowledgeDraft);
+    const isAppendingToSource = Boolean(manualKnowledgeSourceContext?.id);
+    const manualSections = isAppendingToSource ? getManualKnowledgeDraftSections(manualKnowledgeDraft) : [];
+    const manualContent = isAppendingToSource
+      ? manualSections.map((section) => section.content).join("\n\n").trim()
+      : getManualKnowledgeDraftContent(manualKnowledgeDraft);
 
-    if (isSavingManualKnowledge || manualContent.length < 10) {
+    if (isSavingManualKnowledge || isLoadingManualKnowledgeDetail || manualContent.length < 10) {
       return;
     }
 
-    const isAppendingToSource = Boolean(manualKnowledgeSourceContext?.id);
     const endpoint = isAppendingToSource
       ? `/api/knowledge/sources/${manualKnowledgeSourceContext?.id}`
       : "/api/knowledge/sources";
@@ -11194,7 +11883,7 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
     setKnowledgeError("");
     setUploadMessage(
       isAppendingToSource
-        ? `Adding ${manualKnowledgeDraft.category} knowledge to ${manualKnowledgeSourceContext?.title}...`
+        ? `Saving ${manualSections.length} section${manualSections.length === 1 ? "" : "s"} to ${manualKnowledgeSourceContext?.title}...`
         : `Saving ${manualKnowledgeDraft.category} knowledge...`
     );
 
@@ -11208,7 +11897,9 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
         body: JSON.stringify({
           title: manualKnowledgeDraft.title,
           category: manualKnowledgeDraft.category,
-          content: manualContent,
+          content: isAppendingToSource ? undefined : manualContent,
+          sections: isAppendingToSource ? manualSections : undefined,
+          replaceCategory: isAppendingToSource,
           assignment: knowledgeSources.length === 0 ? "default" : "auto",
         }),
       });
@@ -11223,16 +11914,15 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
       setKnowledgeSources(payload.sources || []);
       setUploadMessage(
         isAppendingToSource
-          ? `${manualKnowledgeDraft.category} knowledge added to ${manualKnowledgeSourceContext?.title}.`
+          ? `${manualSections.length} section${manualSections.length === 1 ? "" : "s"} saved to ${manualKnowledgeSourceContext?.title}.`
           : `${manualKnowledgeDraft.title || manualKnowledgeDraft.category} saved and ready for AI replies.`
       );
       setManualKnowledgeDraft((current) => ({
-        ...current,
-        title: "",
-        content: "",
-        faqPairs: [createManualFaqPair()],
+        ...createManualKnowledgeDraft(),
+        title: current.title && isAppendingToSource ? current.title : "",
       }));
       setIsManualKnowledgeModalOpen(false);
+      setIsLoadingManualKnowledgeDetail(false);
       setManualKnowledgeSourceContext(null);
     } catch (saveError) {
       const message = saveError instanceof Error
@@ -11376,6 +12066,16 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
   }
 
   const sourceRows = knowledgeSources.map(mapKnowledgeSourceSummary);
+  const pdfSourceRows = sourceRows.filter((source) => source.kind === "pdf");
+  const effectiveSelectedKnowledgePdfId =
+    selectedKnowledgePdfId !== "all" && pdfSourceRows.some((source) => source.id === selectedKnowledgePdfId)
+      ? selectedKnowledgePdfId
+      : "all";
+  const tabFilteredSourceRows = sourceRows.filter((source) => isKnowledgeSourceInTab(source, activeKnowledgeTab));
+  const filteredSourceRows =
+    activeKnowledgeTab === "PDFs" && effectiveSelectedKnowledgePdfId !== "all"
+      ? tabFilteredSourceRows.filter((source) => source.id === effectiveSelectedKnowledgePdfId)
+      : tabFilteredSourceRows;
   const knowledgeTabs = isKnowledgeLoading && knowledgeSources.length === 0 ? summary.knowledgeTabs : buildKnowledgeTabsFromSources(knowledgeSources);
   const knowledgeInsights = buildKnowledgeInsightsFromSources(knowledgeSources, summary.knowledgeInsights);
   const knowledgeUpdates = buildKnowledgeUpdatesFromSources(knowledgeSources);
@@ -11410,7 +12110,7 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
             </div>
             <button
               type="button"
-              onClick={() => openManualKnowledgeModal()}
+              onClick={() => void openManualKnowledgeModal()}
               disabled={isUploadingKnowledge || isSavingManualKnowledge}
               className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.2)] sm:w-[124px]"
             >
@@ -11436,7 +12136,7 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
           onChange={(event) => void uploadKnowledgeFiles(event.target.files)}
         />
 
-        <KnowledgeTabs tabs={knowledgeTabs} />
+        <KnowledgeTabs tabs={knowledgeTabs} activeTab={activeKnowledgeTab} onTabChange={changeKnowledgeTab} />
 
         {visibleStatusMessage && (
           <div className="mt-4 rounded-[10px] border border-[#edf0f6] bg-white px-4 py-3 text-[12px] font-semibold text-[#46506a] shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
@@ -11447,12 +12147,17 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
         <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_344px]">
           <div>
             <KnowledgeSourceRows
-              sources={sourceRows}
+              sources={filteredSourceRows}
+              totalSourceCount={sourceRows.length}
+              activeTab={activeKnowledgeTab}
+              pdfSources={pdfSourceRows}
+              selectedPdfId={effectiveSelectedKnowledgePdfId}
+              onPdfSelectionChange={setSelectedKnowledgePdfId}
               onUploadClick={() => fileInputRef.current?.click()}
               onDropFiles={(files) => void uploadKnowledgeFiles(files)}
               onActiveChange={(sourceId, active) => void updateKnowledgeSource(sourceId, { active })}
               onView={(sourceId) => void openKnowledgeSourceView(sourceId)}
-              onAddManual={(source) => openManualKnowledgeModal(source)}
+              onAddManual={(source) => void openManualKnowledgeModal(source)}
               onDelete={(sourceId) => void deleteKnowledgeSource(sourceId)}
               deletingSourceId={deletingKnowledgeSourceId}
               isUploading={isUploadingKnowledge}
@@ -11471,6 +12176,7 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
           <KnowledgeManualSourceModal
             draft={manualKnowledgeDraft}
             isSaving={isSavingManualKnowledge}
+            isLoadingSourceDetail={isLoadingManualKnowledgeDetail}
             sourceContext={manualKnowledgeSourceContext}
             onChange={setManualKnowledgeDraft}
             onClose={closeManualKnowledgeModal}
@@ -11486,7 +12192,6 @@ function KnowledgeBasePage({ summary, isLoading, error }: { summary: CreatorLive
             activeTab={knowledgeViewTab}
             onTabChange={setKnowledgeViewTab}
             onClose={closeKnowledgeSourceView}
-            onDelete={(sourceId) => void deleteKnowledgeSource(sourceId)}
             onDeleteAnswer={(sourceId, qaPairId) => void deleteKnowledgeAnswer(sourceId, qaPairId)}
             deletingSourceId={deletingKnowledgeSourceId}
             deletingAnswerId={deletingKnowledgeAnswerId}
@@ -11857,6 +12562,10 @@ const creatorBuyerKeywords = ["price", "pricing", "cost", "package", "payment", 
 const creatorPartnershipKeywords = ["partner", "partnership", "collab", "collaboration", "sponsor", "sponsored", "brand", "affiliate"];
 const creatorCommunityKeywords = ["community", "share", "recommend", "refer", "follower", "audience"];
 const creatorEscalationKeywords = ["refund", "cancel", "complaint", "issue", "problem", "support", "angry", "human", "agent", "not working", "failed", "chargeback"];
+const creatorGoalKeywords = ["need", "want", "looking", "suggest", "recommend", "help", "fit", "size", "wide", "comfortable", "wedding", "birthday", "event", "service", "coaching", "course", "outfit"];
+const creatorBudgetKeywords = ["budget", "price", "pricing", "cost", "rate", "package", "payment", "pay", "expensive", "cheap", "$", "rs", "pkr"];
+const creatorTimelineKeywords = ["today", "tomorrow", "tonight", "urgent", "asap", "soon", "this week", "weekend", "date", "when", "event", "wedding", "birthday", "book", "appointment", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const creatorBuyingIntentKeywords = ["buy", "purchase", "order", "book", "checkout", "available", "availability", "interested", "send", "confirm", "reserve"];
 
 function formatCreatorInteger(value: number) {
   return new Intl.NumberFormat("en-US").format(Math.max(0, value || 0));
@@ -11905,6 +12614,105 @@ function countCreatorKeywordHits(text: string, keywords: string[]) {
 
 function hasCreatorKeyword(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword));
+}
+
+function hasCreatorTimelineSignal(text: string) {
+  return hasCreatorKeyword(text, creatorTimelineKeywords) || /\b\d{1,2}(?::\d{2})?\s?(am|pm)?\b/i.test(text);
+}
+
+function getCreatorLeadStage(score: number, missingCount: number) {
+  if (score >= 82 && missingCount <= 1) {
+    return "Ready for CTA";
+  }
+
+  if (score >= 70) {
+    return "Qualified";
+  }
+
+  if (score >= 55) {
+    return "Warm";
+  }
+
+  return "New";
+}
+
+function getCreatorLeadUrgency(score: number, text: string): "High" | "Medium" | "Low" {
+  if (score >= 82 || hasCreatorKeyword(text, ["urgent", "asap", "today", "tomorrow", "tonight", "confirm", "available"])) {
+    return "High";
+  }
+
+  if (score >= 65 || hasCreatorTimelineSignal(text)) {
+    return "Medium";
+  }
+
+  return "Low";
+}
+
+function getCreatorLeadQualification({
+  text,
+  badge,
+  subtitle,
+  score,
+  buyerHits,
+  partnershipHits,
+  communityHits,
+  inboundCount,
+}: {
+  text: string;
+  badge: string;
+  subtitle: string;
+  score: number;
+  buyerHits: number;
+  partnershipHits: number;
+  communityHits: number;
+  inboundCount: number;
+}) {
+  const hasGoal = hasCreatorKeyword(text, creatorGoalKeywords);
+  const hasBudget = hasCreatorKeyword(text, creatorBudgetKeywords);
+  const hasTimeline = hasCreatorTimelineSignal(text);
+  const hasBuyingIntent = buyerHits > 0 || hasCreatorKeyword(text, creatorBuyingIntentKeywords);
+  const missing = [
+    !hasGoal ? "goal or product need" : "",
+    !hasBudget ? "budget or price range" : "",
+    !hasTimeline ? "purchase timeline" : "",
+    !hasBuyingIntent && badge !== "PARTNERSHIP" ? "buying intent" : "",
+  ].filter(Boolean);
+  const stage = getCreatorLeadStage(score, missing.length);
+  const urgency = getCreatorLeadUrgency(score, text);
+  const signals = [
+    buyerHits > 0 ? "Buying or booking language" : "",
+    partnershipHits > 0 ? "Partnership/collaboration language" : "",
+    communityHits > 0 ? "Community or referral signal" : "",
+    hasGoal ? "Goal or need mentioned" : "",
+    hasBudget ? "Budget/pricing mentioned" : "",
+    hasTimeline ? "Timeline/date mentioned" : "",
+    inboundCount >= 3 ? "Multiple inbound messages" : "",
+  ].filter(Boolean).slice(0, 5);
+  const recommendedAction =
+    badge === "PARTNERSHIP"
+      ? "Ask for campaign scope, budget, deliverables, and timeline."
+      : missing.length > 0
+        ? `Ask for ${missing.slice(0, 2).join(" and ")}.`
+        : stage === "Ready for CTA"
+          ? "Send the booking, checkout, or pricing next step."
+          : "Answer the latest question and move the lead toward a clear CTA.";
+
+  return {
+    stage,
+    urgency,
+    intent: subtitle,
+    interestLevel: score >= 82 ? "Very high" : score >= 70 ? "High" : score >= 55 ? "Medium" : "Low",
+    qualificationFacts: [
+      { label: "Interest", value: score >= 70 ? "Strong" : "Warming" },
+      { label: "Goal", value: hasGoal ? "Captured" : "Missing" },
+      { label: "Budget", value: hasBudget ? "Mentioned" : "Missing" },
+      { label: "Timeline", value: hasTimeline ? "Mentioned" : "Missing" },
+      { label: "Buying intent", value: hasBuyingIntent ? "Detected" : badge === "PARTNERSHIP" ? "Partner lead" : "Missing" },
+    ],
+    signals,
+    missing,
+    recommendedAction,
+  };
 }
 
 function getCreatorMessageTime(message: InstagramSettingsMessage) {
@@ -11976,46 +12784,66 @@ function classifyCreatorOpportunity(conversation: InstagramSettingsConversation)
   }
 
   if (partnershipHits > 0) {
+    const badge = "PARTNERSHIP";
+    const subtitle = "Partnership inquiry";
+    const score = clampCreatorScore(72 + partnershipHits * 8 + inboundCount * 2);
+
     return {
-      badge: "PARTNERSHIP",
-      subtitle: "Partnership inquiry",
+      badge,
+      subtitle,
       tone: "purple" as const,
       icon: Handshake,
       value: 5000 + partnershipHits * 250,
-      score: clampCreatorScore(72 + partnershipHits * 8 + inboundCount * 2),
+      score,
+      ...getCreatorLeadQualification({ text, badge, subtitle, score, buyerHits, partnershipHits, communityHits, inboundCount }),
     };
   }
 
   if (buyerHits > 0) {
+    const badge = "HIGH INTENT";
+    const subtitle = "Buying intent";
+    const score = clampCreatorScore(64 + buyerHits * 7 + inboundCount * 3);
+
     return {
-      badge: "HIGH INTENT",
-      subtitle: "Buying intent",
+      badge,
+      subtitle,
       tone: "green" as const,
       icon: ShoppingCart,
       value: 1800 + buyerHits * 300,
-      score: clampCreatorScore(64 + buyerHits * 7 + inboundCount * 3),
+      score,
+      ...getCreatorLeadQualification({ text, badge, subtitle, score, buyerHits, partnershipHits, communityHits, inboundCount }),
     };
   }
 
   if (communityHits > 0) {
+    const badge = "COMMUNITY";
+    const subtitle = "Community signal";
+    const score = clampCreatorScore(58 + communityHits * 6 + inboundCount * 3);
+
     return {
-      badge: "COMMUNITY",
-      subtitle: "Community signal",
+      badge,
+      subtitle,
       tone: "orange" as const,
       icon: Users,
       value: 900 + communityHits * 150,
-      score: clampCreatorScore(58 + communityHits * 6 + inboundCount * 3),
+      score,
+      ...getCreatorLeadQualification({ text, badge, subtitle, score, buyerHits, partnershipHits, communityHits, inboundCount }),
     };
   }
 
   if (inboundCount >= 3) {
+    const badge = "ENGAGED";
+    const subtitle = "Engaged conversation";
+    const score = clampCreatorScore(54 + inboundCount * 5);
+
     return {
-      badge: "ENGAGED",
-      subtitle: "Engaged conversation",
+      badge,
+      subtitle,
       tone: "blue" as const,
       icon: Sparkles,
       value: 750 + inboundCount * 100,
-      score: clampCreatorScore(54 + inboundCount * 5),
+      score,
+      ...getCreatorLeadQualification({ text, badge, subtitle, score, buyerHits, partnershipHits, communityHits, inboundCount }),
     };
   }
 
@@ -12067,6 +12895,7 @@ function classifyCreatorEscalation(conversation: InstagramSettingsConversation) 
 function buildCreatorLiveSummary(
   conversations: InstagramSettingsConversation[],
   totalConversationCount?: number,
+  instagramAccount?: ConnectedInstagramAccount | null,
 ): CreatorLiveSummary {
   const totalCount = typeof totalConversationCount === "number" ? totalConversationCount : conversations.length;
   const sortedConversations = [...conversations].sort((a, b) => getCreatorConversationTime(b) - getCreatorConversationTime(a));
@@ -12106,6 +12935,14 @@ function buildCreatorLiveSummary(
       action: "Review",
       verified: Boolean(conversation.participant.username),
       avatars: [getCreatorAvatarNumber(conversation), getCreatorAvatarNumber(conversation, 1), getCreatorAvatarNumber(conversation, 2)],
+      stage: opportunity.stage,
+      urgency: opportunity.urgency,
+      intent: opportunity.intent,
+      interestLevel: opportunity.interestLevel,
+      qualificationFacts: opportunity.qualificationFacts,
+      signals: opportunity.signals,
+      missing: opportunity.missing,
+      recommendedAction: opportunity.recommendedAction,
     };
   });
 
@@ -12207,7 +13044,7 @@ function buildCreatorLiveSummary(
     const preview = getCreatorConversationPreview(conversation);
 
     return {
-      title: escalation ? "Escalation signal received" : opportunity ? "Opportunity signal received" : "Conversation updated",
+      title: escalation ? "Escalation signal received" : opportunity ? "Lead signal received" : "Conversation updated",
       subtitle: `${getCreatorParticipantName(conversation)}: ${truncateCreatorText(preview, 72)}`,
       time: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
       icon: escalation ? TriangleAlert : opportunity ? opportunity.icon : MessageSquare,
@@ -12219,7 +13056,7 @@ function buildCreatorLiveSummary(
   const audienceMetrics: AudienceMetric[] = [
     { label: "Total Audience", value: formatCreatorInteger(totalCount), change: "from Instagram", tone: "purple", icon: Users },
     { label: "Engaged Audience", value: formatCreatorInteger(engagedConversations.length), change: "messaged you", tone: "green", icon: Sparkles },
-    { label: "Leads", value: formatCreatorInteger(opportunityRecords.length), change: "intent detected", tone: "blue", icon: User },
+      { label: "Leads", value: formatCreatorInteger(opportunityRecords.length), change: "intent detected", tone: "blue", icon: User },
     { label: "Customers", value: formatCreatorInteger(buyerCount), change: "buying keywords", tone: "violet", icon: ShoppingCart },
     { label: "Partners", value: formatCreatorInteger(partnershipCount), change: "partnership keywords", tone: "orange", icon: Handshake },
   ];
@@ -12283,9 +13120,7 @@ function buildCreatorLiveSummary(
     { label: "Products", count: "0", icon: Box },
     { label: "Services", count: "0", icon: Sparkles },
     { label: "Pricing", count: "0", icon: DollarSign },
-    { label: "Courses", count: "0", icon: GraduationCap },
     { label: "Business Info", count: "0", icon: BriefcaseBusiness },
-    { label: "Lead Qualification", count: "0", icon: Target },
     { label: "PDFs", count: "0", icon: FileText },
   ];
 
@@ -12331,6 +13166,8 @@ function buildCreatorLiveSummary(
     : [];
 
   return {
+    instagramAccount: instagramAccount || null,
+    hasInstagramConnection: Boolean(instagramAccount) || conversations.length > 0,
     conversations: sortedConversations,
     totalConversationCount: totalCount,
     totalMessageCount: allMessages.length,
@@ -12344,17 +13181,17 @@ function buildCreatorLiveSummary(
     dashboardPipeline,
     recentActivity,
     opportunityTabs: [
-      { label: "Buyers", count: formatCreatorInteger(buyerCount), icon: Users },
-      { label: "Partnerships", count: formatCreatorInteger(partnershipCount), icon: Handshake },
-      { label: "Superfans", count: formatCreatorInteger(superfanCount), icon: Crown },
-      { label: "Community Leaders", count: formatCreatorInteger(communityCount), icon: User },
-      { label: "All Opportunities", count: formatCreatorInteger(opportunityRecords.length), icon: Users },
+      { label: "Qualified Leads", count: formatCreatorInteger(opportunityRecords.length), icon: Users },
+      { label: "High Intent", count: formatCreatorInteger(buyerCount), icon: ShoppingCart },
+      { label: "Warm Leads", count: formatCreatorInteger(superfanCount), icon: Flame },
+      { label: "Partner Leads", count: formatCreatorInteger(partnershipCount), icon: Handshake },
+      { label: "Community Leads", count: formatCreatorInteger(communityCount), icon: User },
     ],
     opportunityMetrics: [
+      { label: "Leads Generated", value: formatCreatorInteger(opportunityRecords.length), change: "from Instagram DMs", icon: Users },
+      { label: "High Intent Leads", value: formatCreatorInteger(buyerCount), change: "buying or booking intent", icon: ShoppingCart },
       { label: "Estimated Revenue", value: formatCreatorMoney(estimatedRevenue), change: "from detected intent", icon: CircleDollarSign },
-      { label: "Opportunities", value: formatCreatorInteger(opportunityRecords.length), change: "real signals", icon: BriefcaseBusiness },
-      { label: "Avg. Deal Value", value: opportunityRecords.length > 0 ? formatCreatorMoney(estimatedRevenue / opportunityRecords.length) : "$0", change: "estimated", icon: TrendingUp },
-      { label: "Conversion Rate", value: formatCreatorPercent(opportunityRecords.length, Math.max(1, totalCount)), change: "of conversations", icon: ChartPie },
+      { label: "Lead Rate", value: formatCreatorPercent(opportunityRecords.length, Math.max(1, totalCount)), change: "of conversations", icon: ChartPie },
     ],
     opportunityCards,
     audienceMetrics,
@@ -12545,7 +13382,7 @@ function buildAnalyticsSummary(conversations: InstagramSettingsConversation[], t
 
   const automationMetrics: AnalyticsAutomationMetric[] = [
     {
-      label: "Opportunity signals",
+      label: "Lead signals",
       value: formatAnalyticsInteger(opportunitySignals),
       detail: "Pricing, booking, buying, or program intent",
       tone: "bg-[#eef4ff] text-[#246bff]",
@@ -12619,7 +13456,7 @@ function buildAnalyticsSummary(conversations: InstagramSettingsConversation[], t
         icon: Clock,
       },
       {
-        label: "Opportunity signals",
+        label: "Lead signals",
         value: formatAnalyticsInteger(opportunitySignals),
         change: `${formatAnalyticsInteger(activeToday)} active today`,
         detail: "buying intent",
@@ -12974,224 +13811,503 @@ function AnalyticsPage() {
   );
 }
 
+function buildCreatorGrowthSeries(total: number, points = 10) {
+  if (total <= 0) {
+    return Array.from({ length: points }, () => 0);
+  }
+
+  const series = Array.from({ length: points }, (_, index) => {
+    const progress = points === 1 ? 1 : index / (points - 1);
+    const wobble = index % 3 === 0 ? 0.03 : index % 3 === 1 ? -0.015 : 0.015;
+    return Math.max(0, Math.round(total * (0.42 + progress * 0.58 + wobble)));
+  });
+
+  series[series.length - 1] = total;
+  return series;
+}
+
+function buildCreatorDailyActivitySeries(conversations: InstagramSettingsConversation[], days = 20) {
+  const buckets = Array.from({ length: days }, () => 0);
+  const dayMs = 86_400_000;
+  const now = Date.now();
+
+  conversations.forEach((conversation) => {
+    const messages = conversation.messages.length > 0 ? conversation.messages : [{ time: conversation.updated_time || "" } as InstagramSettingsMessage];
+
+    messages.forEach((message) => {
+      const timestamp = new Date(message.time).getTime();
+
+      if (!Number.isFinite(timestamp)) {
+        return;
+      }
+
+      const dayOffset = Math.floor((now - timestamp) / dayMs);
+
+      if (dayOffset >= 0 && dayOffset < days) {
+        buckets[days - 1 - dayOffset] += 1;
+      }
+    });
+  });
+
+  return buckets;
+}
+
+function getCreatorDashboardStatus(conversation: InstagramSettingsConversation): Pick<SuperAdminTableRow, "status" | "statusTone"> {
+  const opportunity = classifyCreatorOpportunity(conversation);
+  const escalation = classifyCreatorEscalation(conversation);
+  const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
+
+  if (escalation) {
+    return { status: "Needs attention", statusTone: "red" };
+  }
+
+  if (opportunity) {
+    return { status: "Lead", statusTone: "green" };
+  }
+
+  if (inboundCount > 0) {
+    return { status: "Active", statusTone: "purple" };
+  }
+
+  return { status: "Quiet", statusTone: "amber" };
+}
+
+function buildCreatorConversationTableConfig(summary: CreatorLiveSummary): SuperAdminDetailConfig {
+  return {
+    metrics: [],
+    columns: ["Instagram", "Last active", "Messages", "Leads", "Revenue found"],
+    rows: summary.conversations.slice(0, 8).map((conversation) => {
+      const opportunity = classifyCreatorOpportunity(conversation);
+      const status = getCreatorDashboardStatus(conversation);
+      const lastMessage = getCreatorLastMessage(conversation);
+
+      return {
+        name: getCreatorParticipantName(conversation),
+        detail: truncateCreatorText(getCreatorConversationPreview(conversation), 64),
+        values: [
+          getCreatorParticipantHandle(conversation),
+          formatInstagramRelativeTime(lastMessage?.time || conversation.updated_time),
+          formatCreatorInteger(conversation.messages.length),
+          opportunity ? "1" : "0",
+          opportunity ? formatCreatorMoney(opportunity.value) : "$0",
+        ],
+        status: status.status,
+        statusTone: status.statusTone,
+      };
+    }),
+    insightTitle: "Recently Active Contacts",
+    insightItems: [],
+  };
+}
+
+function formatCreatorCsvCell(value: string) {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function downloadCreatorDashboardExport(profile: AccountProfile, summary: CreatorLiveSummary) {
+  const rows = [
+    ["Metric", "Value"],
+    ["Workspace", profile.name || "TractionFlo workspace"],
+    ["Instagram account", summary.instagramAccount ? formatInstagramDisplayName(summary.instagramAccount) : "Not connected"],
+    ["Conversations", formatCreatorInteger(summary.totalConversationCount)],
+    ["Messages processed", formatCreatorInteger(summary.totalMessageCount)],
+    ["Inbound messages", formatCreatorInteger(summary.inboundMessageCount)],
+    ["AI replies", formatCreatorInteger(summary.outboundMessageCount)],
+    ["Leads", formatCreatorInteger(summary.opportunityCount)],
+    ["Estimated revenue", formatCreatorMoney(summary.estimatedRevenue)],
+    ["Escalations", formatCreatorInteger(summary.escalationCount)],
+  ];
+  const csv = rows.map((row) => row.map(formatCreatorCsvCell).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = `tractionflo-dashboard-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function DashboardOverview({
   profile,
   summary,
   isLoading,
   error,
+  onChangeTab,
 }: {
   profile: AccountProfile;
   summary: CreatorLiveSummary;
   isLoading: boolean;
   error: string;
+  onChangeTab: (tab: DashboardTab) => void;
 }) {
-  const greetingName = profile.name.trim() || "there";
-  const visibleOpportunities = summary.dashboardOpportunities.slice(0, 4);
-  const visiblePipeline = summary.dashboardPipeline;
-  const visibleActivity = summary.recentActivity;
-  const avatarCards = summary.opportunityCards.slice(0, 3);
+  const activeContacts = summary.conversations.filter((conversation) => conversation.messages.some((message) => message.from === "user")).length;
+  const replyRate = formatCreatorPercent(summary.outboundMessageCount, Math.max(1, summary.inboundMessageCount));
+  const isInstagramSetupMissing = error.toLowerCase().includes("no instagram account connected");
+  const connectedAccountCount = summary.hasInstagramConnection ? 1 : 0;
+  const tableConfig = buildCreatorConversationTableConfig(summary);
+  const revenueSeries = buildCreatorGrowthSeries(summary.estimatedRevenue || summary.opportunityCount * 1000);
+  const activitySeries = buildCreatorDailyActivitySeries(summary.conversations);
+  const quietContacts = Math.max(0, summary.totalConversationCount - activeContacts);
+  const statusItems = [
+    { label: "Active", value: activeContacts, color: "#16b364" },
+    { label: "Lead", value: summary.opportunityCount, color: "#3154ff" },
+    { label: "Escalated", value: summary.escalationCount, color: "#ff850d" },
+    { label: "Quiet", value: quietContacts, color: "#98a2b3" },
+  ];
+  const instagramSegments = [
+    { value: connectedAccountCount, color: "#16b364" },
+    { value: summary.hasInstagramConnection ? 0 : 1, color: "#df405b" },
+  ];
+  const overviewMetrics: SuperAdminMetric[] = [
+    {
+      label: "Connected Accounts",
+      value: isLoading ? "..." : formatCreatorInteger(connectedAccountCount),
+      detail: summary.instagramAccount ? formatInstagramDisplayName(summary.instagramAccount) : "Instagram account",
+      change: summary.hasInstagramConnection ? "Ready for automation" : "Connect Instagram",
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: Globe2,
+    },
+    {
+      label: "Active Contacts",
+      value: isLoading ? "..." : formatCreatorInteger(activeContacts),
+      detail: "Active conversations",
+      change: `${formatCreatorPercent(activeContacts, Math.max(1, summary.totalConversationCount))} of inbox`,
+      tone: "bg-[#eaf4ff] text-[#246bff]",
+      icon: Users,
+    },
+    {
+      label: "Inbound Messages",
+      value: isLoading ? "..." : formatCreatorInteger(summary.inboundMessageCount),
+      detail: "From Instagram",
+      change: `${formatCreatorInteger(summary.totalMessageCount)} total messages`,
+      tone: "bg-[#fff6e8] text-[#d98613]",
+      icon: MessageSquare,
+    },
+    {
+      label: "Leads",
+      value: isLoading ? "..." : formatCreatorInteger(summary.opportunityCount),
+      detail: "Qualified signals",
+      change: `${formatCreatorPercent(summary.opportunityCount, Math.max(1, summary.totalConversationCount))} of contacts`,
+      tone: "bg-[#eafaf0] text-[#13a84f]",
+      icon: Target,
+    },
+    {
+      label: "Revenue Found",
+      value: isLoading ? "..." : formatCreatorMoney(summary.estimatedRevenue),
+      detail: "Estimated value",
+      change: "From detected intent",
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: DollarSign,
+    },
+    {
+      label: "AI Replies",
+      value: isLoading ? "..." : formatCreatorInteger(summary.outboundMessageCount),
+      detail: `${replyRate} reply coverage`,
+      change: "Creator responses",
+      tone: "bg-[#f0edff] text-[#4b3cff]",
+      icon: Sparkles,
+    },
+  ];
+  const platformHealthItems = [
+    {
+      label: "Instagram Sync",
+      status: summary.hasInstagramConnection ? "Healthy" : isLoading ? "Checking" : "Setup needed",
+      tone: summary.hasInstagramConnection ? "green" : "amber",
+      icon: Globe2,
+    },
+    {
+      label: "Inbox Webhook",
+      status: error && !isInstagramSetupMissing ? "Warning" : "Healthy",
+      tone: error && !isInstagramSetupMissing ? "amber" : "green",
+      icon: Code2,
+    },
+    {
+      label: "AI Replies",
+      status: summary.outboundMessageCount > 0 ? "Active" : "Ready",
+      tone: summary.outboundMessageCount > 0 ? "green" : "purple",
+      icon: BrainCircuit,
+    },
+    {
+      label: "Leads",
+      status: summary.opportunityCount > 0 ? "Detected" : "Watching",
+      tone: summary.opportunityCount > 0 ? "green" : "purple",
+      icon: Target,
+    },
+    {
+      label: "Escalations",
+      status: summary.escalationCount > 0 ? "Review" : "Clear",
+      tone: summary.escalationCount > 0 ? "amber" : "green",
+      icon: TriangleAlert,
+    },
+  ] satisfies { label: string; status: string; tone: "green" | "amber" | "red" | "purple"; icon: LucideIcon }[];
+  const aiUsageItems: [string, string, LucideIcon, string][] = [
+    ["Messages Processed", formatCreatorInteger(summary.totalMessageCount), Bot, "bg-[#f0edff] text-[#4b3cff]"],
+    ["AI Conversations", formatCreatorInteger(summary.totalConversationCount), Sparkles, "bg-[#eef4ff] text-[#246bff]"],
+    ["Leads Found", formatCreatorInteger(summary.opportunityCount), Target, "bg-[#fff6e8] text-[#d98613]"],
+    ["Escalations", formatCreatorInteger(summary.escalationCount), TriangleAlert, "bg-[#fff0f3] text-[#df405b]"],
+  ];
+  const supportItems = [
+    ["Open Handoffs", formatCreatorInteger(summary.escalationCount), TriangleAlert, "bg-[#fff0f3] text-[#df405b]"],
+    ["Leads In Review", formatCreatorInteger(summary.opportunityCount), Clock, "bg-[#fff4df] text-[#c07800]"],
+    ["Replied", formatCreatorInteger(summary.outboundMessageCount), Check, "bg-[#eafaf0] text-[#13a84f]"],
+  ] satisfies [string, string, LucideIcon, string][];
 
   return (
-    <div className="relative h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-7 lg:py-5 xl:px-10">
-      <RevenueChart />
-
-      <div className="relative z-10 mx-auto max-w-[1320px]">
+    <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-7 lg:py-5 xl:px-10">
+      <div className="mx-auto max-w-[1480px]">
         <div className="mb-5 lg:hidden">
           <BrandMark />
         </div>
 
-        <header className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:gap-8">
-          <div className="lg:pt-4">
-            <p className="text-[17px] font-bold tracking-[-0.01em] text-black">Good morning, {greetingName} 👋</p>
+        <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h1 className="text-[28px] font-extrabold leading-none text-black sm:text-[32px]">Overview</h1>
+            <p className="mt-3 text-[12px] font-semibold leading-relaxed text-[#596175]">
+              Real-time overview of {profile.name.trim() || "your TractionFlo workspace"}
+            </p>
           </div>
 
-          <div className="grid w-full grid-cols-[1fr_auto] items-center gap-3 sm:flex sm:w-auto sm:gap-5">
+          <div className="grid w-full gap-3 sm:grid-cols-[minmax(0,1fr)_180px_140px] xl:w-auto xl:grid-cols-[260px_190px_140px]">
             <button
               type="button"
-              className="flex h-11 min-w-0 items-center justify-between rounded-[10px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.035)] sm:h-[52px] sm:w-[252px] sm:px-5 sm:text-[14px]"
+              className="flex h-12 min-w-0 items-center justify-between rounded-[8px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)]"
             >
-              {summary.dateRangeLabel}
-              <CalendarDays size={18} strokeWidth={2.3} />
+              <span className="min-w-0 truncate">{summary.dateRangeLabel}</span>
+              <CalendarDays size={16} strokeWidth={2.4} />
             </button>
+            <label className="relative flex h-12 cursor-pointer items-center justify-between rounded-[8px] border border-[#e0e4ef] bg-white px-4 text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)]">
+              <span className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#13a84f]" />
+                Auto refresh: On
+              </span>
+              <ChevronDown size={14} strokeWidth={2.4} />
+              <select aria-label="Auto refresh status" defaultValue="on" className="absolute inset-0 cursor-pointer opacity-0">
+                <option value="on">Auto refresh on</option>
+                <option value="off">Auto refresh off</option>
+              </select>
+            </label>
             <button
               type="button"
-              className="relative flex h-11 w-11 items-center justify-center rounded-[10px] border border-[#e0e4ef] bg-white shadow-[0_12px_36px_rgba(20,28,53,0.035)] sm:h-[52px] sm:w-[52px]"
-              aria-label="Notifications"
+              onClick={() => downloadCreatorDashboardExport(profile, summary)}
+              className="flex h-12 items-center justify-center gap-2 rounded-[8px] bg-[#5b38ff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_35px_rgba(91,56,255,0.22)]"
             >
-              <Bell size={20} strokeWidth={2.3} />
-              <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full bg-[#4b3cff]" />
+              <Download size={15} strokeWidth={2.4} />
+              Export
             </button>
           </div>
         </header>
 
-        <section className="relative mt-6 max-w-[640px]">
-          <div className="flex items-center gap-4 sm:gap-5">
-            <h1 className="text-[48px] font-extrabold leading-[0.9] tracking-[-0.04em] text-black sm:text-[68px] xl:text-[78px]">
-              {isLoading ? "..." : formatCreatorMoney(summary.estimatedRevenue)}
-            </h1>
-            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-[#e3e6f0] bg-white shadow-[0_18px_52px_rgba(77,60,255,0.08)] sm:h-[58px] sm:w-[58px]">
-              <Sparkles size={25} className="text-[#4b3cff] sm:size-[29px]" strokeWidth={2.2} />
-            </div>
+        {error ? (
+          <div className="mt-5 rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] p-4 text-[12px] font-bold text-[#df405b]">
+            {error}
           </div>
-          <p className="mt-3 text-[15px] font-semibold leading-[1.3] text-[#596175] sm:text-[18px] sm:leading-none">
-            Potential revenue discovered this week
-          </p>
-          {error ? (
-            <div className="mt-4 rounded-[8px] border border-[#ffd2da] bg-[#fff6f8] px-3 py-2 text-[12px] font-bold text-[#df405b]">
-              {error}
-            </div>
-          ) : null}
+        ) : null}
 
-          <div className="mt-7 flex items-center gap-3.5">
-            <div className="flex -space-x-3">
-              {(avatarCards.length > 0 ? avatarCards : [{ name: "Opportunity reviewer", avatars: [12] }]).map((card, index) => {
-                const image = card.avatars?.[0] || 12;
+        <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          {overviewMetrics.map((metric) => (
+            <SuperAdminMetricCard key={metric.label} metric={metric} />
+          ))}
+        </section>
+
+        <section className="mt-4 grid gap-4 xl:grid-cols-[1.45fr_1.15fr_0.9fr_0.95fr]">
+          <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-[14px] font-extrabold text-black">Revenue Found</h2>
+                <p className="mt-2 text-[26px] font-extrabold leading-none text-black">{formatCreatorMoney(summary.estimatedRevenue)}</p>
+              </div>
+              <button type="button" onClick={() => onChangeTab("opportunities")} className="flex h-8 items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold text-black">
+                Last 30 days
+                <ChevronDown size={13} />
+              </button>
+            </div>
+            <AdminLineChart values={isLoading ? Array.from({ length: 10 }, () => 0) : revenueSeries} />
+          </article>
+
+          <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-[14px] font-extrabold text-black">New Messages</h2>
+                <p className="mt-2 text-[22px] font-extrabold leading-none text-black">{formatCreatorInteger(summary.inboundMessageCount)}</p>
+              </div>
+              <button type="button" onClick={() => onChangeTab("inbox")} className="flex h-8 items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold text-black">
+                Last 30 days
+                <ChevronDown size={13} />
+              </button>
+            </div>
+            <AdminLineChart bars values={isLoading ? Array.from({ length: 20 }, () => 0) : activitySeries} />
+          </article>
+
+          <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+            <h2 className="text-[14px] font-extrabold text-black">Conversation Status</h2>
+            <AdminDonut label="Total" value={formatCreatorInteger(summary.totalConversationCount)} segments={statusItems.map((item) => ({ value: item.value, color: item.color }))} />
+            <div className="space-y-2 text-[11px] font-bold">
+              {statusItems.map((item) => (
+                <div key={item.label} className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="flex-1 text-[#30384d]">{item.label}</span>
+                  <span className="text-[#596175]">{formatCreatorInteger(item.value)}</span>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-extrabold text-black">Platform Health</h2>
+              <button type="button" onClick={() => onChangeTab("settings")} className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
+            </div>
+            <div className="space-y-3">
+              {platformHealthItems.map((item) => {
+                const Icon = item.icon;
 
                 return (
-                <span
-                  key={`${card.name}-${image}`}
-                  aria-label={index === 0 ? "Opportunity reviewer" : undefined}
-                  aria-hidden={index === 0 ? undefined : true}
-                  role={index === 0 ? "img" : undefined}
-                  className="h-8 w-8 rounded-full border-2 border-white bg-cover bg-center shadow-sm"
-                  style={{ backgroundImage: `url(https://i.pravatar.cc/48?img=${image})` }}
-                />
+                  <div key={item.label} className="flex items-center gap-3 text-[12px] font-bold">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-[#f6f7fb] text-[#4b3cff]">
+                      <Icon size={15} strokeWidth={2.35} />
+                    </span>
+                    <span className="flex-1 text-[#30384d]">{item.label}</span>
+                    <span className={getPlatformHealthToneClass(item.tone)}>{item.status}</span>
+                  </div>
                 );
               })}
             </div>
-            <p className="text-[13px] font-semibold text-[#4b5268]">
-              <span className="font-extrabold text-[#4b3cff]">{formatCreatorInteger(summary.opportunityCount)}</span> opportunities waiting for your review
-            </p>
-          </div>
-
-          <div className="mt-6 flex flex-wrap items-center gap-4 sm:gap-5">
-            <button
-              type="button"
-              className="flex h-[42px] w-full items-center justify-center gap-5 rounded-[8px] bg-gradient-to-r from-[#563cff] to-[#4a32f2] text-[13px] font-extrabold text-white shadow-[0_22px_40px_rgba(75,60,255,0.22)] sm:w-[190px]"
-            >
-              Review opportunities
-              <ArrowRight size={17} strokeWidth={2.5} />
-            </button>
-            <button type="button" className="flex items-center gap-3 text-[12px] font-bold text-[#596175]">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[#dde3ee] bg-white text-black">
-                <Play size={13} className="ml-0.5" fill="currentColor" strokeWidth={1.5} />
-              </span>
-              See how TractionFlo works
-            </button>
-          </div>
+          </article>
         </section>
 
-        <section className="mt-5 rounded-[14px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.035)]">
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <h2 className="text-[16px] font-extrabold text-black">Top opportunities</h2>
-              <span className="rounded-full bg-[#eff2f7] px-2.5 py-0.5 text-[12px] font-extrabold text-[#596175]">
-                {formatCreatorInteger(visibleOpportunities.length)}
-              </span>
+        <section className="mt-4 grid gap-4 xl:grid-cols-[1.55fr_0.75fr]">
+          <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-extrabold text-black">Recently Active Contacts</h2>
+              <button type="button" onClick={() => onChangeTab("inbox")} className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
             </div>
-            <button type="button" className="flex items-center gap-2 text-[13px] font-extrabold text-[#4b3cff]">
-              View all
-              <ArrowRight size={16} strokeWidth={2.5} />
-            </button>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-            {visibleOpportunities.length > 0 ? (
-              visibleOpportunities.map((opportunity) => (
-                <OpportunityCard key={`${opportunity.eyebrow}-${opportunity.title}`} opportunity={opportunity} />
-              ))
+            {tableConfig.rows.length > 0 ? (
+              <SuperAdminTable config={tableConfig} />
             ) : (
-              <div className="rounded-[10px] border border-dashed border-[#d9deea] p-6 text-[13px] font-bold text-[#596175] xl:col-span-4">
-                {isLoading ? "Loading real Instagram opportunities..." : "No opportunity signals found in your Instagram conversations yet."}
+              <div className="rounded-[8px] border border-dashed border-[#d9deea] p-8 text-center">
+                <p className="text-[13px] font-extrabold text-black">
+                  {isLoading ? "Loading real Instagram conversations..." : "No Instagram conversations found yet."}
+                </p>
               </div>
             )}
+          </article>
+
+          <div className="grid gap-4">
+            <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-[14px] font-extrabold text-black">Instagram Account</h2>
+                <button type="button" onClick={() => onChangeTab("settings")} className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
+              </div>
+              <AdminDonut label="Tracked" value={formatCreatorInteger(connectedAccountCount)} segments={instagramSegments} />
+              <div className="space-y-2 text-[12px] font-bold">
+                {[
+                  ["Healthy", formatCreatorInteger(connectedAccountCount), "text-[#13a84f]"],
+                  ["Needs setup", formatCreatorInteger(summary.hasInstagramConnection ? 0 : 1), "text-[#df405b]"],
+                  ["Synced contacts", formatCreatorInteger(summary.totalConversationCount), "text-[#30384d]"],
+                ].map(([label, value, tone]) => (
+                  <div key={label} className="flex justify-between gap-4">
+                    <span className={tone}>{label}</span>
+                    <span className="text-[#30384d]">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+              <div className="flex items-center justify-between">
+                <h2 className="text-[14px] font-extrabold text-black">AI Usage Today</h2>
+                <button type="button" onClick={() => onChangeTab("analytics")} className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {aiUsageItems.map(([label, value, Icon, tone]) => (
+                  <div key={label} className="rounded-[8px] border border-[#edf0f6] p-3">
+                    <span className={`mb-3 flex h-8 w-8 items-center justify-center rounded-[8px] ${tone}`}>
+                      <Icon size={16} strokeWidth={2.35} />
+                    </span>
+                    <p className="text-[11px] font-bold text-[#687089]">{label}</p>
+                    <p className="mt-1 text-[18px] font-extrabold text-black">{value}</p>
+                  </div>
+                ))}
+              </div>
+            </article>
           </div>
         </section>
 
-        <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1.36fr)_minmax(390px,0.96fr)]">
-          <section className="rounded-[14px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.035)]">
+        <section className="mt-4 grid gap-4 xl:grid-cols-[1.05fr_0.95fr_0.9fr]">
+          <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-[16px] font-extrabold text-black">Audience pipeline</h2>
-              <button
-                type="button"
-                className="flex h-8 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black"
-              >
+              <h2 className="text-[14px] font-extrabold text-black">Revenue Overview</h2>
+              <button type="button" onClick={() => onChangeTab("opportunities")} className="flex h-8 items-center gap-2 rounded-[7px] border border-[#e0e4ef] px-3 text-[11px] font-bold text-black">
                 This week
-                <ChevronDown size={14} strokeWidth={2.5} />
+                <ChevronDown size={13} />
               </button>
             </div>
-
-            <div className="relative grid grid-cols-1 gap-4 md:grid-cols-5">
-              <div className="pointer-events-none absolute bottom-0 right-2 top-0 hidden w-16 skew-x-[-12deg] border-r border-[#e9ecf3] md:block" />
-              {visiblePipeline.map((step, index) => {
-                const Icon = step.icon;
-                return (
-                  <div key={step.label} className="relative text-center">
-                    <div className="mx-auto flex h-[52px] w-[52px] items-center justify-center rounded-[15px]">
-                      <span className={`flex h-full w-full items-center justify-center rounded-[15px] ${step.tone}`}>
-                        <Icon size={23} strokeWidth={2.3} />
-                      </span>
-                    </div>
-                    {index < visiblePipeline.length - 1 ? (
-                      <ArrowRight
-                        size={15}
-                        strokeWidth={2.4}
-                        className="absolute right-[-10px] top-[19px] hidden text-[#596175] md:block"
-                      />
-                    ) : null}
-                    <p className="mt-3 text-[12px] font-semibold text-[#596175]">{step.label}</p>
-                    <p className="mt-2 text-[19px] font-extrabold leading-none text-black">{step.value}</p>
-                    <p className="mt-4 whitespace-pre-line text-[12px] font-extrabold leading-[1.3] text-[#4b3cff]">
-                      {step.detail}
-                    </p>
+            <div className="grid gap-4 md:grid-cols-[190px_minmax(0,1fr)]">
+              <div className="space-y-4 text-[12px]">
+                {[
+                  ["Revenue found", formatCreatorMoney(summary.estimatedRevenue), "text-[#13a84f]"],
+                  ["Avg. value", summary.opportunityCount > 0 ? formatCreatorMoney(summary.estimatedRevenue / summary.opportunityCount) : "$0", "text-[#13a84f]"],
+                  ["Reply rate", replyRate, "text-[#13a84f]"],
+                  ["Escalations", formatCreatorInteger(summary.escalationCount), summary.escalationCount > 0 ? "text-[#df405b]" : "text-[#13a84f]"],
+                ].map(([label, value, tone]) => (
+                  <div key={label} className="flex items-center justify-between gap-3">
+                    <span className="font-semibold text-[#596175]">{label}</span>
+                    <span className={`font-extrabold ${tone}`}>{value}</span>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+              <AdminLineChart values={revenueSeries} />
             </div>
-          </section>
+          </article>
 
-          <section className="rounded-[14px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.035)]">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-[16px] font-extrabold text-black">Recent activity</h2>
-              <button type="button" className="flex items-center gap-2 text-[13px] font-extrabold text-[#4b3cff]">
-                View all
-                <ArrowRight size={16} strokeWidth={2.5} />
-              </button>
+          <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-extrabold text-black">Lead Breakdown</h2>
+              <button type="button" onClick={() => onChangeTab("opportunities")} className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
             </div>
-
-            <div>
-              {visibleActivity.length > 0 ? visibleActivity.map((activity, index) => {
-                const Icon = activity.icon;
-                return (
-                  <div
-                    key={activity.title}
-                    className={`flex items-center gap-3 py-[9px] ${
-                      index < visibleActivity.length - 1 ? "border-b border-[#edf0f6]" : ""
-                    }`}
-                  >
-                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${activity.tone}`}>
-                      <Icon size={19} strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[12px] font-extrabold text-black">{activity.title}</p>
-                      <p className="mt-1 truncate text-[11px] font-semibold text-[#596175]">{activity.subtitle}</p>
-                    </div>
-                    <div className="text-right text-[10px] font-semibold text-[#596175]">
-                      <p>{activity.time}</p>
-                      {activity.meta ? <p className="mt-2 font-extrabold text-[#13a84f]">{activity.meta}</p> : null}
-                    </div>
-                  </div>
-                );
-              }) : (
-                <div className="rounded-[10px] border border-dashed border-[#d9deea] p-5 text-[12px] font-bold text-[#596175]">
-                  {isLoading ? "Loading recent Instagram activity..." : "No recent activity loaded yet."}
+            <AdminDonut
+              label="Total"
+              value={formatCreatorInteger(summary.opportunityCount)}
+              segments={[
+                { value: summary.opportunityCount, color: "#5b38ff" },
+                { value: Math.max(0, activeContacts - summary.opportunityCount), color: "#2f80ed" },
+              ]}
+            />
+            <div className="space-y-2 text-[12px] font-bold">
+              {summary.opportunityTabs.slice(0, 4).map((tab, index) => (
+                <div key={tab.label} className="flex justify-between gap-4">
+                  <span className={index === 0 ? "text-[#4b3cff]" : "text-[#30384d]"}>{tab.label}</span>
+                  <span className="text-[#30384d]">{tab.count}</span>
                 </div>
-              )}
+              ))}
             </div>
-          </section>
-        </div>
+          </article>
+
+          <article className="rounded-[8px] border border-[#e7eaf2] bg-white p-4 shadow-[0_16px_44px_rgba(20,28,53,0.035)]">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[14px] font-extrabold text-black">Support Summary</h2>
+              <button type="button" onClick={() => onChangeTab("escalations")} className="text-[11px] font-extrabold text-[#4b3cff]">View all</button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+              {supportItems.map(([label, value, Icon, tone]) => (
+                <div key={label} className="flex items-center gap-3 rounded-[8px] border border-[#edf0f6] p-3">
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] ${tone}`}>
+                    <Icon size={17} strokeWidth={2.35} />
+                  </span>
+                  <div>
+                    <p className="text-[11px] font-bold text-[#687089]">{label}</p>
+                    <p className="mt-1 text-[18px] font-extrabold text-black">{value}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -13224,6 +14340,7 @@ function DashboardContent() {
   const creatorSummary = buildCreatorLiveSummary(
     creatorConversationResponse.conversations || [],
     creatorConversationResponse.conversation_count,
+    creatorConversationResponse.account,
   );
 
   useEffect(() => {
@@ -13398,6 +14515,7 @@ function DashboardContent() {
           summary={creatorSummary}
           isLoading={isLoadingCreatorData}
           error={creatorDataError}
+          onChangeTab={handleTabChange}
         />
       ) : activeTab === "opportunities" ? (
         <OpportunitiesPage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />

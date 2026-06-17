@@ -131,12 +131,20 @@ export async function GET(request: Request) {
       });
     }
 
+    const assistantId = user.id;
+
     // 1. Get the stored Instagram access token from Supabase
     const supabase = createSupabaseServiceClient();
     const storedAccount = await getFreshInstagramAccount(supabase);
 
     if (!storedAccount) {
-      return NextResponse.json({ error: 'No Instagram account connected', conversations: [], conversation_count: 0 }, { status: 200 });
+      return NextResponse.json({
+        error: 'No Instagram account connected',
+        conversations: [],
+        conversation_count: 0,
+        assistant_id: assistantId,
+        assistantId,
+      }, { status: 200 });
     }
 
     const { ig_user_id, access_token } = storedAccount;
@@ -153,6 +161,8 @@ export async function GET(request: Request) {
       id: real_ig_user_id,
       username: meData.username,
       name: meData.name,
+      assistant_id: assistantId,
+      assistantId,
     };
 
     // 3. Fetch conversations from Instagram Graph API
@@ -177,6 +187,8 @@ export async function GET(request: Request) {
         conversation_count: visibleConversations.length,
         ig_user_id: real_ig_user_id,
         account,
+        assistant_id: assistantId,
+        assistantId,
       });
     }
 
@@ -223,7 +235,14 @@ export async function GET(request: Request) {
       })
     );
 
-    return NextResponse.json({ conversations, conversation_count: visibleConversations.length, ig_user_id: real_ig_user_id, account });
+    return NextResponse.json({
+      conversations,
+      conversation_count: visibleConversations.length,
+      ig_user_id: real_ig_user_id,
+      account,
+      assistant_id: assistantId,
+      assistantId,
+    });
   } catch (err) {
     console.error('Instagram conversations fetch error:', err);
     return NextResponse.json({ error: 'Failed to fetch conversations', conversations: [], conversation_count: 0 }, { status: 200 });

@@ -155,7 +155,18 @@ export async function POST(request: Request) {
 
       const nextSources = [sourceIndex, ...existingSources].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 
+      console.info("Knowledge manual source saved with assistant id:", {
+        assistantId: user.id,
+        assistant_id: user.id,
+        sourceId,
+        title,
+        category,
+        assignment,
+      });
+
       return NextResponse.json({
+        assistantId: user.id,
+        assistant_id: user.id,
         source: summarizeKnowledgeSource(sourceIndex),
         sources: nextSources.map(summarizeKnowledgeSource),
       });
@@ -223,7 +234,20 @@ export async function POST(request: Request) {
 
     const nextSources = [sourceIndex, ...existingSources].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 
+    console.info("Knowledge file uploaded with assistant id:", {
+      assistantId: user.id,
+      assistant_id: user.id,
+      sourceId,
+      fileName: file.name,
+      mimeType,
+      assignment,
+      filePath,
+      indexPath,
+    });
+
     return NextResponse.json({
+      assistantId: user.id,
+      assistant_id: user.id,
       source: summarizeKnowledgeSource(sourceIndex),
       sources: nextSources.map(summarizeKnowledgeSource),
     });

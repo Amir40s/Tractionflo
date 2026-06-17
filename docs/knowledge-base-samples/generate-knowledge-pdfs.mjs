@@ -181,6 +181,100 @@ const docs = [
       ["Can I return earrings?", "For hygiene reasons, earrings and pierced jewellery may not be returnable unless defective. If there is a defect, please share your order number, clear photos or unboxing video, and delivery date for review."],
     ],
   },
+  {
+    slug: "womens-shoes-store-knowledge-base",
+    title: "Sole & Sage Women's Shoes Knowledge Base",
+    subtitle: "Detailed AI training source for a women's shoes selling business",
+    sections: [
+      {
+        heading: "Business Overview",
+        paragraphs: [
+          "Sole & Sage sells women's shoes for everyday wear, office outfits, parties, weddings, travel, modest styling, and seasonal wardrobes. The store carries flats, sandals, heels, block heels, wedges, pumps, loafers, sneakers, boots, slides, mules, and bridal or occasion shoes.",
+          "The brand voice should be stylish, practical, supportive, and honest about comfort and fit. Replies should help customers choose shoes by size, foot shape, occasion, heel height, color, outfit, comfort need, budget, and delivery date. Do not promise exact stock, delivery time, or leather quality unless the specific product confirms it.",
+        ],
+      },
+      {
+        heading: "Product Categories",
+        bullets: [
+          "Everyday comfort: ballet flats, cushioned slides, soft sandals, low wedges, walking sneakers, and lightweight loafers.",
+          "Office and formal wear: pumps, pointed flats, loafers, kitten heels, block heels, neutral sandals, and closed-toe shoes.",
+          "Party and event shoes: metallic heels, embellished sandals, stilettos, platform heels, ankle-strap heels, and dressy mules.",
+          "Wedding and bridal shoes: ivory heels, pearl details, crystal straps, block heels, bridal flats, and comfortable reception sandals.",
+          "Seasonal shoes: summer sandals, breathable flats, monsoon-friendly soles, winter boots, ankle boots, and closed sneakers.",
+        ],
+      },
+      {
+        heading: "Sizing And Fit Guidance",
+        paragraphs: [
+          "Always ask for the customer's usual shoe size, foot length in centimeters, preferred fit, and whether the foot is narrow, regular, or wide. If the customer is between sizes, recommend checking the product's size chart and sizing up for pointed shoes, closed shoes, or narrow styles.",
+          "Common size guide: EU 36 is around US 5.5 to 6, EU 37 is around US 6.5 to 7, EU 38 is around US 7.5 to 8, EU 39 is around US 8.5 to 9, EU 40 is around US 9.5 to 10, and EU 41 is around US 10.5 to 11. Fit varies by shoe shape, so final confirmation should follow the exact product measurements.",
+        ],
+      },
+      {
+        heading: "Comfort Guidance",
+        bullets: [
+          "For long wear, suggest cushioned insoles, block heels, wedges, low heels, padded straps, or sneakers.",
+          "For wide feet, avoid very pointed toes and narrow straps unless the product is marked wide-friendly.",
+          "For weddings or long events, recommend block heels, platform heels, wedges, or embellished flats instead of thin stilettos.",
+          "For office wear, recommend closed-toe pumps, loafers, kitten heels, or comfortable flats in neutral colors.",
+          "For customers with foot pain, suggest lower heel heights, soft lining, flexible soles, and ankle support. Escalate medical or injury-related questions to a human.",
+        ],
+      },
+      {
+        heading: "Materials And Care",
+        paragraphs: [
+          "Common materials can include faux leather, genuine leather, suede, satin, mesh, canvas, synthetic upper, rubber sole, PU sole, foam insole, and embellished straps. Confirm exact material from the product detail before answering material-specific questions.",
+          "For care, wipe faux leather and synthetic shoes with a soft damp cloth, keep suede away from water, store embellished shoes in a dust bag, and avoid direct heat. For wet shoes, dry naturally in shade and do not use a heater or hair dryer.",
+        ],
+      },
+      {
+        heading: "Pricing, Ordering, And Delivery",
+        bullets: [
+          "Everyday flats and sandals are usually entry-level priced, while bridal shoes, embellished heels, genuine leather styles, and premium sneakers cost more.",
+          "Exact price depends on product code, size, material, heel height, embellishment, and current stock.",
+          "To order, the customer should share the product name or screenshot, size, color, delivery city, phone number, and required date.",
+          "For urgent events, ask for city and event date before confirming delivery.",
+          "If an item is out of stock, suggest similar colors, nearby sizes, lower or higher heel options, or a different comfort style.",
+        ],
+      },
+      {
+        heading: "Returns And Exchanges",
+        paragraphs: [
+          "Size exchange is usually possible for unworn shoes in original condition with box and packaging, subject to stock availability and store policy. Shoes with outdoor wear marks, damaged soles, missing tags, customized details, or sale restrictions may not be exchangeable.",
+          "If a customer reports damage or wrong size, ask for order number, clear photos, unboxing video if available, product code, and delivery date. Escalate refund, replacement, or defect decisions to a human team member.",
+        ],
+      },
+      {
+        heading: "Lead Qualification Rules",
+        bullets: [
+          "Ask occasion first: daily wear, office, wedding, party, travel, gift, or bridal.",
+          "Ask size, foot width, and comfort preference before recommending shoes.",
+          "Ask heel preference: flat, low heel, block heel, wedge, platform, or high heel.",
+          "Ask outfit color and budget range before suggesting premium or event shoes.",
+          "Escalate bulk orders, bridal customization, damaged item claims, refund requests, and medical foot concerns to a human.",
+        ],
+      },
+      {
+        heading: "Direct FAQ Answers",
+        qa: [
+          ["How do I choose the right shoe size?", "Please share your usual shoe size, foot length in centimeters, and whether your foot is narrow, regular, or wide. If you are between sizes, we usually suggest checking the product size chart and sizing up for pointed or closed styles."],
+          ["Which shoes are best for long events?", "For long events, block heels, wedges, platform heels, cushioned flats, or padded sandals are usually more comfortable than thin stilettos. Share your outfit and preferred heel height so we can suggest options."],
+          ["Do you have shoes for wide feet?", "Some styles are more comfortable for wide feet, especially round-toe flats, soft sandals, block heels, loafers, and sneakers. Please share your size and the style you like so we can confirm if it is wide-friendly."],
+          ["Can I exchange the size if it does not fit?", "Size exchange is usually possible for unworn shoes in original condition with the box and packaging, subject to stock availability and store policy. Sale, customized, worn, or damaged items may not be eligible."],
+          ["What shoes should I wear with a wedding outfit?", "Share your outfit color, event type, heel comfort level, and budget. We can suggest embellished heels, bridal flats, block heels, wedges, or metallic sandals depending on your look and how long you need to wear them."],
+          ["How should I care for embellished or suede shoes?", "Keep embellished and suede shoes away from water, perfume, and rough surfaces. Store them in a dust bag or box, wipe gently after use, and let wet shoes dry naturally in shade."],
+        ],
+      },
+    ],
+    faqText: [
+      ["How do I choose the right shoe size?", "Please share your usual shoe size, foot length in centimeters, and whether your foot is narrow, regular, or wide. If you are between sizes, we usually suggest checking the product size chart and sizing up for pointed or closed styles."],
+      ["Which shoes are best for long events?", "For long events, block heels, wedges, platform heels, cushioned flats, or padded sandals are usually more comfortable than thin stilettos. Share your outfit and preferred heel height so we can suggest options."],
+      ["Do you have shoes for wide feet?", "Some styles are more comfortable for wide feet, especially round-toe flats, soft sandals, block heels, loafers, and sneakers. Please share your size and the style you like so we can confirm if it is wide-friendly."],
+      ["Can I exchange the size if it does not fit?", "Size exchange is usually possible for unworn shoes in original condition with the box and packaging, subject to stock availability and store policy. Sale, customized, worn, or damaged items may not be eligible."],
+      ["What shoes should I wear with a wedding outfit?", "Share your outfit color, event type, heel comfort level, and budget. We can suggest embellished heels, bridal flats, block heels, wedges, or metallic sandals depending on your look and how long you need to wear them."],
+      ["How should I care for embellished or suede shoes?", "Keep embellished and suede shoes away from water, perfume, and rough surfaces. Store them in a dust bag or box, wipe gently after use, and let wet shoes dry naturally in shade."],
+    ],
+  },
 ];
 
 function escapePdfText(value) {
