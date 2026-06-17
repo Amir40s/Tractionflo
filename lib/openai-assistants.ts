@@ -28,7 +28,7 @@ export async function getOrCreateAssistant({
         return await openai.beta.assistants.update(assistantId, { instructions, model });
       }
       return assistant;
-    } catch (e) {
+    } catch {
       logger.info('Assistant not found or failed to retrieve. Creating new one.', { assistantId });
     }
   }
@@ -51,7 +51,7 @@ export async function getOrCreateVectorStore({
   if (vectorStoreId) {
     try {
       return await openai.vectorStores.retrieve(vectorStoreId);
-    } catch (e) {
+    } catch {
       logger.info('Vector store not found. Creating new one.', { vectorStoreId });
     }
   }
@@ -148,7 +148,7 @@ export async function runAssistantThread({
     messages: messages.map(m => ({ role: m.role, content: m.content })),
   });
 
-  let run = await openai.beta.threads.runs.createAndPoll(thread.id, {
+  const run = await openai.beta.threads.runs.createAndPoll(thread.id, {
     assistant_id: assistantId,
     additional_instructions: additionalInstructions,
     response_format: responseFormat === "json_object" ? { type: "json_object" } : "auto",
@@ -211,7 +211,7 @@ export async function syncVectorStoreWithStorage({
       } else {
         try {
           await openai.files.retrieve(source.openAiFileId);
-        } catch (e) {
+        } catch {
           logger.warn('File ID in index not found on OpenAI, re-uploading', { fileId: source.openAiFileId });
           shouldUpload = true;
         }
@@ -266,4 +266,3 @@ export async function syncVectorStoreWithStorage({
     logger.error('Error during syncVectorStoreWithStorage:', { error });
   }
 }
-

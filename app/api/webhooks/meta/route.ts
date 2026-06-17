@@ -7,15 +7,13 @@ import {
   getStoredOpenAiKey,
   normalizeAiIntegrationMetadata,
 } from '@/lib/ai-integration';
-import { getFreshInstagramAccount, getFreshInstagramAccountByIgUserId } from '@/lib/instagram-token';
+import { getFreshInstagramAccountByIgUserId } from '@/lib/instagram-token';
 import {
   instagramWelcomeAutomationMetadataKey,
   normalizeInstagramWelcomeAutomation,
   renderInstagramWelcomeMessage,
 } from '@/lib/instagram-welcome-automation';
 import { runAssistantThread } from '@/lib/openai-assistants';
-
-import { recordOpenAiUsage } from '@/lib/openai-usage';
 import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
@@ -90,48 +88,6 @@ async function getSenderMessageCount(supabase: SupabaseServiceClient, senderId: 
   return count || 0;
 }
 
-async function findAutomationUser(supabase: SupabaseServiceClient) {
-  const { data, error } = await supabase.auth.admin.listUsers({
-    page: 1,
-    perPage: 100,
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  const candidates = (data.users || [])
-    .map((user) => {
-      const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-      const integration = normalizeAiIntegrationMetadata(metadata);
-      const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
-
-      return {
-        user,
-        integration,
-        welcome,
-        hasAssistantId: Boolean(metadata.openai_assistant_id),
-      };
-    })
-    .filter((candidate) => candidate.integration.autoSend);
-
-  logger.info("findAutomationUser debug list:", {
-    totalUsersChecked: data.users?.length || 0,
-    userStatuses: (data.users || []).map(u => {
-      const meta = (u.user_metadata || {}) as Record<string, unknown>;
-      return {
-        email: u.email,
-        autoSend: normalizeAiIntegrationMetadata(meta).autoSend,
-        hasAssistantId: Boolean(meta.openai_assistant_id)
-      };
-    })
-  });
-
-  logger.info("findAutomationUser: Found candidates with autoSend enabled", { candidateCount: candidates.length });
-
-  return candidates.find((candidate) => candidate.hasAssistantId) || candidates[0] || null;
-}
-
 async function fetchParticipantProfile(accessToken: string, participantId: string) {
   try {
     const profileUrl = new URL(`https://graph.instagram.com/v21.0/${participantId}`);
@@ -192,12 +148,10 @@ function formatWebhookConversationLine(message: { from?: 'me' | 'user' | 'note';
 }
 
 async function generateWebhookAiReply({
-  supabase,
   user,
   latestText,
   participant,
 }: {
-  supabase: SupabaseServiceClient;
   user: User;
   latestText: string;
   participant: InstagramParticipantProfile;
@@ -273,6 +227,7 @@ async function processInstagramAutomations(
   }
 
   for (const event of events) {
+    logger.info("processInstagramAutomations: Processing event", { senderId: event.senderId, mid: event.mid, text: event.text });
     try {
       if (!event.recipientId) {
         continue;
@@ -280,13 +235,16 @@ async function processInstagramAutomations(
 
       const account = await getFreshInstagramAccountByIgUserId(supabase, event.recipientId);
 
-      if (!account || !account.access_token || !account.user_id) {
+      if (!account?.access_token || !account.user_id) {
         logger.info("processInstagramAutomations: No connected Instagram account or user found for recipientId", { recipientId: event.recipientId });
         continue;
       }
 
-      // Fetch user to check settings and metadata
-      const { data: { user }, error: userError } = await supabase.auth.admin.getUserById(account.user_id);
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.admin.getUserById(account.user_id);
+
       if (userError || !user) {
         logger.error("processInstagramAutomations: Failed to load user metadata by user_id", { userId: account.user_id, error: userError });
         continue;
@@ -301,7 +259,6 @@ async function processInstagramAutomations(
         continue;
       }
 
-      logger.info("processInstagramAutomations: Processing event", { senderId: event.senderId, mid: event.mid, text: event.text });
       const participant = await fetchParticipantProfile(account.access_token, event.senderId);
       logger.info("processInstagramAutomations: Fetched participant profile", { username: participant.username });
 
@@ -319,7 +276,6 @@ async function processInstagramAutomations(
       } else {
         logger.info("processInstagramAutomations: Triggering generateWebhookAiReply.");
         reply = await generateWebhookAiReply({
-          supabase,
           user,
           latestText: event.text,
           participant,
@@ -336,7 +292,7 @@ async function processInstagramAutomations(
       logger.info("processInstagramAutomations: Instagram text message sent successfully", { message_id: sent.message_id });
 
       logger.info("processInstagramAutomations: Triggering realtime pusher notification for sent reply...");
-      await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+      await triggerRealtimeNotification([getUserChannel(user.id), getGlobalChannel(), getSuperAdminChannel()], {
         type: 'ai',
         title: isFirstInboundDm ? 'Welcome DM sent' : 'Instagram AI reply sent',
         body: reply.slice(0, 120),
