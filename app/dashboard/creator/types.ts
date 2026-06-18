@@ -125,6 +125,7 @@ export type OpportunityPageCard = {
   avatars?: number[];
   extraAvatars?: string;
   stage?: string;
+  classification?: "Cold" | "Warm" | "Hot";
   urgency?: "High" | "Medium" | "Low";
   intent?: string;
   interestLevel?: string;
@@ -152,7 +153,7 @@ export type AudienceSource = {
 export type AudienceProfile = {
   name: string;
   handle: string;
-  avatar: number;
+  avatarUrl: string;
   engagement: string;
   active: string;
   tag: string;
@@ -169,7 +170,7 @@ export type AudienceSegment = {
   negative?: boolean;
 };
 
-export type LeadCategoryFilter = "all" | "high-intent" | "warm" | "partner" | "community";
+export type LeadCategoryFilter = "all" | "hot" | "warm" | "cold" | "partner" | "community";
 export type LeadUrgencyFilter = "all" | "High" | "Medium" | "Low";
 export type AudienceSegmentFilter = "all" | "high-intent" | "engaged" | "needs-attention" | "contacts";
 
