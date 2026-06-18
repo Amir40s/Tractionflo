@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Pusher, { type Channel } from "pusher-js";
-import { Bell, Bot, CheckCircle2, CreditCard, MessageCircle, PlugZap, UserRound, X } from "lucide-react";
+import { Bell, Bot, CheckCircle2, CreditCard, MessageCircle, PlugZap, TriangleAlert, UserRound, X } from "lucide-react";
 import { requestBrowserNotificationPermission, showBrowserOsNotification } from "@/lib/browser-os-notifications";
 import {
   notificationPreferencesChangedEvent,
@@ -49,6 +49,8 @@ function getNotificationIcon(type: RealtimeNotificationType) {
       return PlugZap;
     case "ai":
       return Bot;
+    case "escalation":
+      return TriangleAlert;
     case "billing":
       return CreditCard;
     case "agent":

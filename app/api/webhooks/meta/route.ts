@@ -1,6 +1,7 @@
 import { NextResponse, after } from 'next/server';
 import logger from '@/lib/logger';
 import type { User } from '@supabase/supabase-js';
+import { detectConversationEscalation, escalationRulesMetadataKey } from '@/lib/conversation-escalation';
 import {
   getAiBehaviorPrompt,
   getEnabledWorkflowMap,
@@ -301,6 +302,36 @@ async function processInstagramAutomations(
       const metadata = (user.user_metadata || {}) as Record<string, unknown>;
       const integration = normalizeAiIntegrationMetadata(metadata);
       const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
+      const escalation = detectConversationEscalation([{ from: 'user', text: event.text }], {
+        rules: metadata[escalationRulesMetadataKey],
+      });
+
+      if (escalation) {
+        await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
+          type: 'escalation',
+          title: `${escalation.label} detected`,
+          body: escalation.summary,
+          url: '/conversations',
+          metadata: {
+            source: 'instagram-webhook',
+            userId: user.id,
+            senderId: event.senderId,
+            messageId: event.mid,
+            category: escalation.intent,
+            urgency: escalation.urgency,
+            urgent: escalation.urgency === 'High',
+          },
+        }).catch((notificationError) => {
+          logger.error('Realtime Instagram escalation notification error:', { error: notificationError });
+        });
+
+        logger.info("processInstagramAutomations: Escalation detected, pausing webhook auto-reply.", {
+          userId: user.id,
+          intent: escalation.intent,
+          senderId: event.senderId,
+        });
+        continue;
+      }
 
       if (!integration.autoSend) {
         logger.info("processInstagramAutomations: Auto-Send AI Replies is DISABLED for user.", { userId: user.id });

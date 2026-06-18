@@ -1,3 +1,3 @@
-import DashboardHome from "../dashboard/page";
+import DashboardHome from "../dashboard/DashboardHome";
 
 export default DashboardHome;

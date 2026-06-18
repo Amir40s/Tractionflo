@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
 import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
-import { detectConversationEscalation } from '@/lib/conversation-escalation';
+import { detectConversationEscalation, escalationRulesMetadataKey } from '@/lib/conversation-escalation';
 import { buildBookingFollowUpReply, buildBookingMemoryPrompt, shouldUseConversationAwareReply } from '@/lib/conversation-context';
 import { runAssistantThread } from '@/lib/openai-assistants';
 import { recordOpenAiUsage } from '@/lib/openai-usage';
@@ -111,18 +111,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'AI Answers Questions is turned off.' }, { status: 400 });
     }
 
-    const escalation = detectConversationEscalation(payload.messages);
+    const escalation = detectConversationEscalation(payload.messages, {
+      rules: metadata[escalationRulesMetadataKey],
+    });
 
     if (escalation) {
       await triggerRealtimeNotification(getUserChannel(user.id), {
-        type: 'agent',
-        title: 'Human handoff needed',
+        type: 'escalation',
+        title: `${escalation.label} detected`,
         body: escalation.summary,
         url: '/conversations',
         metadata: {
           assistantId,
           category: escalation.intent,
           urgency: escalation.urgency,
+          urgent: escalation.urgency === 'High',
         },
       }).catch((notificationError) => {
         logger.error('Realtime handoff reply notification error:', { error: notificationError });
