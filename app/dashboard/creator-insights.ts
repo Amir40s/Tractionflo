@@ -103,6 +103,7 @@ type OpportunityPageCard = {
   avatars?: number[];
   extraAvatars?: string;
   stage?: string;
+  classification?: "Cold" | "Warm" | "Hot";
   urgency?: "High" | "Medium" | "Low";
   intent?: string;
   interestLevel?: string;
@@ -130,7 +131,7 @@ type AudienceSource = {
 type AudienceProfile = {
   name: string;
   handle: string;
-  avatar: number;
+  avatarUrl: string;
   engagement: string;
   active: string;
   tag: string;
@@ -429,10 +430,10 @@ const creatorEscalationKeywords = [
   ...creatorUrgentOrderEscalationKeywords,
   ...creatorPartnershipKeywords,
 ];
-const creatorGoalKeywords = ["need", "want", "looking", "suggest", "recommend", "help", "fit", "size", "wide", "comfortable", "wedding", "birthday", "event", "service", "coaching", "course", "outfit"];
-const creatorBudgetKeywords = ["budget", "price", "pricing", "cost", "rate", "package", "payment", "pay", "expensive", "cheap", "$", "rs", "pkr"];
-const creatorTimelineKeywords = ["today", "tomorrow", "tonight", "urgent", "asap", "soon", "this week", "weekend", "date", "when", "event", "wedding", "birthday", "book", "appointment", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-const creatorBuyingIntentKeywords = ["buy", "purchase", "order", "book", "checkout", "available", "availability", "interested", "send", "confirm", "reserve"];
+const creatorGoalKeywords = ["need", "required", "require", "want", "looking", "looking for", "looking to", "suggest", "recommend", "help", "fit", "size", "wide", "comfortable", "wedding", "birthday", "event", "service", "coaching", "course", "outfit", "campaign", "collaboration", "partnership", "bulk order", "custom order"];
+const creatorBudgetKeywords = ["budget", "price", "pricing", "cost", "rate", "package", "payment", "pay", "fee", "quote", "charges", "how much", "expensive", "cheap"];
+const creatorTimelineKeywords = ["today", "tomorrow", "tonight", "urgent", "asap", "soon", "this week", "next week", "weekend", "deadline", "timeline", "date", "delivery date", "deliver by", "need by", "event date", "appointment", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const creatorBuyingIntentKeywords = ["buy", "purchase", "order", "book", "checkout", "available", "availability", "interested", "send", "confirm", "reserve", "payment link", "ready to buy", "ready to book"];
 
 export function formatCreatorInteger(value: number) {
   return new Intl.NumberFormat("en-US").format(Math.max(0, value || 0));
@@ -488,6 +489,38 @@ function hasCreatorKeyword(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword));
 }
 
+function escapeCreatorRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasCreatorPhrase(text: string, phrases: string[]) {
+  return phrases.some((phrase) => {
+    const escapedPhrase = escapeCreatorRegex(phrase.trim()).replace(/\s+/g, "\\s+");
+    const pattern = new RegExp(`(?:^|[^a-z0-9])${escapedPhrase}(?=$|[^a-z0-9])`, "i");
+    return pattern.test(text);
+  });
+}
+
+function countCreatorPhraseHits(text: string, phrases: string[]) {
+  return phrases.reduce((total, phrase) => total + (hasCreatorPhrase(text, [phrase]) ? 1 : 0), 0);
+}
+
+function hasCreatorBudgetSignal(text: string) {
+  return (
+    hasCreatorPhrase(text, creatorBudgetKeywords) ||
+    /\b(?:\$|rs\.?|pkr|usd|eur|gbp|aed)\s?[1-9]\d*(?:[,.]\d{3})*(?:\.\d{1,2})?\b/i.test(text) ||
+    /\b[1-9]\d*(?:[,.]\d{3})*(?:\.\d{1,2})?\s?(?:usd|pkr|rs|rupees?|dollars?|aed)\b/i.test(text)
+  );
+}
+
+function hasCreatorGoalSignal(text: string) {
+  return hasCreatorPhrase(text, creatorGoalKeywords);
+}
+
+function hasCreatorBuyingIntentSignal(text: string, buyerHits: number) {
+  return buyerHits > 0 || hasCreatorPhrase(text, creatorBuyingIntentKeywords);
+}
+
 function hasCreatorQuantityEscalationSignal(text: string) {
   return /\b(?:[2-9]\d|1\d{2,}|[1-9]\d{3,})\s?(pairs?|pieces?|pcs|shoes?|shirts?|t\s?-?\s?shirts?|tees?|hoodies?|units?|sets?|boxes?|cartons?|orders?|items?|products?)\b/i.test(text);
 }
@@ -512,23 +545,24 @@ function hasCreatorVipLeadEscalationSignal(text: string, buyerHits: number, inbo
 }
 
 function hasCreatorTimelineSignal(text: string) {
-  return hasCreatorKeyword(text, creatorTimelineKeywords) || /\b\d{1,2}(?::\d{2})?\s?(am|pm)?\b/i.test(text);
+  return (
+    hasCreatorPhrase(text, creatorTimelineKeywords) ||
+    /\b\d{1,2}(?::\d{2})\s?(?:am|pm)?\b/i.test(text) ||
+    /\b\d{1,2}\s?(?:am|pm)\b/i.test(text) ||
+    /\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/i.test(text)
+  );
 }
 
-function getCreatorLeadStage(score: number, missingCount: number) {
-  if (score >= 82 && missingCount <= 1) {
-    return "Ready for CTA";
+function getCreatorLeadClassification(score: number): "Cold" | "Warm" | "Hot" {
+  if (score >= 75) {
+    return "Hot";
   }
 
-  if (score >= 70) {
-    return "Qualified";
-  }
-
-  if (score >= 55) {
+  if (score >= 50) {
     return "Warm";
   }
 
-  return "New";
+  return "Cold";
 }
 
 function getCreatorLeadUrgency(score: number, text: string): "High" | "Medium" | "Low" {
@@ -547,7 +581,6 @@ function getCreatorLeadQualification({
   text,
   badge,
   subtitle,
-  score,
   buyerHits,
   partnershipHits,
   communityHits,
@@ -556,24 +589,35 @@ function getCreatorLeadQualification({
   text: string;
   badge: string;
   subtitle: string;
-  score: number;
   buyerHits: number;
   partnershipHits: number;
   communityHits: number;
   inboundCount: number;
 }) {
-  const hasGoal = hasCreatorKeyword(text, creatorGoalKeywords);
-  const hasBudget = hasCreatorKeyword(text, creatorBudgetKeywords);
+  const hasGoal = hasCreatorGoalSignal(text);
+  const hasBudget = hasCreatorBudgetSignal(text);
   const hasTimeline = hasCreatorTimelineSignal(text);
-  const hasBuyingIntent = buyerHits > 0 || hasCreatorKeyword(text, creatorBuyingIntentKeywords);
+  const hasBuyingIntent = hasCreatorBuyingIntentSignal(text, buyerHits);
+  const hasInterest = buyerHits > 0 || partnershipHits > 0 || communityHits > 0 || hasCreatorPhrase(text, ["interested", "tell me more", "details", "info", "information"]);
+  const qualificationScore = clampCreatorScore(
+    10 +
+      (hasInterest ? 20 : 0) +
+      (hasGoal ? 15 : 0) +
+      (hasBudget ? 15 : 0) +
+      (hasTimeline ? 15 : 0) +
+      (hasBuyingIntent ? 15 : partnershipHits > 0 ? 10 : 0) +
+      Math.min(9, inboundCount * 3) +
+      Math.min(10, countCreatorPhraseHits(text, [...creatorBuyingIntentKeywords, ...creatorBudgetKeywords, ...creatorTimelineKeywords]) * 2)
+  );
+  const classification = getCreatorLeadClassification(qualificationScore);
   const missing = [
     !hasGoal ? "goal or product need" : "",
     !hasBudget ? "budget or price range" : "",
     !hasTimeline ? "purchase timeline" : "",
     !hasBuyingIntent && badge !== "PARTNERSHIP" ? "buying intent" : "",
   ].filter(Boolean);
-  const stage = getCreatorLeadStage(score, missing.length);
-  const urgency = getCreatorLeadUrgency(score, text);
+  const stage = classification;
+  const urgency = getCreatorLeadUrgency(qualificationScore, text);
   const signals = [
     buyerHits > 0 ? "Buying or booking language" : "",
     partnershipHits > 0 ? "Partnership/collaboration language" : "",
@@ -585,24 +629,30 @@ function getCreatorLeadQualification({
   ].filter(Boolean).slice(0, 5);
   const recommendedAction =
     badge === "PARTNERSHIP"
-      ? "Ask for campaign scope, budget, deliverables, and timeline."
+      ? missing.length > 0
+        ? `Ask for ${missing.slice(0, 2).join(" and ")}.`
+        : "Ask for campaign scope, budget, deliverables, and timeline."
       : missing.length > 0
         ? `Ask for ${missing.slice(0, 2).join(" and ")}.`
-        : stage === "Ready for CTA"
+        : classification === "Hot"
           ? "Send the booking, checkout, or pricing next step."
           : "Answer the latest question and move the lead toward a clear CTA.";
 
   return {
+    score: qualificationScore,
+    scoreLabel: `${classification} Lead`,
     stage,
+    classification,
     urgency,
     intent: subtitle,
-    interestLevel: score >= 82 ? "Very high" : score >= 70 ? "High" : score >= 55 ? "Medium" : "Low",
+    interestLevel: classification === "Hot" ? "High" : classification === "Warm" ? "Medium" : "Low",
     qualificationFacts: [
-      { label: "Interest", value: score >= 70 ? "Strong" : "Warming" },
-      { label: "Goal", value: hasGoal ? "Captured" : "Missing" },
+      { label: "Interest", value: classification === "Hot" ? "High" : classification === "Warm" ? "Medium" : "Low" },
+      { label: "Goals", value: hasGoal ? "Captured" : "Missing" },
       { label: "Budget", value: hasBudget ? "Mentioned" : "Missing" },
       { label: "Timeline", value: hasTimeline ? "Mentioned" : "Missing" },
       { label: "Buying intent", value: hasBuyingIntent ? "Detected" : badge === "PARTNERSHIP" ? "Partner lead" : "Missing" },
+      { label: "Class", value: classification },
     ],
     signals,
     missing,
@@ -721,7 +771,6 @@ export function classifyCreatorOpportunity(conversation: InstagramSettingsConver
   if (partnershipHits > 0) {
     const badge = "PARTNERSHIP";
     const subtitle = "Partnership inquiry";
-    const score = clampCreatorScore(72 + partnershipHits * 8 + inboundCount * 2);
 
     return {
       badge,
@@ -729,15 +778,13 @@ export function classifyCreatorOpportunity(conversation: InstagramSettingsConver
       tone: "purple" as const,
       icon: Handshake,
       value: 5000 + partnershipHits * 250,
-      score,
-      ...getCreatorLeadQualification({ text, badge, subtitle, score, buyerHits, partnershipHits, communityHits, inboundCount }),
+      ...getCreatorLeadQualification({ text, badge, subtitle, buyerHits, partnershipHits, communityHits, inboundCount }),
     };
   }
 
   if (buyerHits > 0) {
     const badge = "HIGH INTENT";
     const subtitle = "Buying intent";
-    const score = clampCreatorScore(64 + buyerHits * 7 + inboundCount * 3);
 
     return {
       badge,
@@ -745,15 +792,13 @@ export function classifyCreatorOpportunity(conversation: InstagramSettingsConver
       tone: "green" as const,
       icon: ShoppingCart,
       value: 1800 + buyerHits * 300,
-      score,
-      ...getCreatorLeadQualification({ text, badge, subtitle, score, buyerHits, partnershipHits, communityHits, inboundCount }),
+      ...getCreatorLeadQualification({ text, badge, subtitle, buyerHits, partnershipHits, communityHits, inboundCount }),
     };
   }
 
   if (communityHits > 0) {
     const badge = "COMMUNITY";
     const subtitle = "Community signal";
-    const score = clampCreatorScore(58 + communityHits * 6 + inboundCount * 3);
 
     return {
       badge,
@@ -761,8 +806,7 @@ export function classifyCreatorOpportunity(conversation: InstagramSettingsConver
       tone: "orange" as const,
       icon: Users,
       value: 900 + communityHits * 150,
-      score,
-      ...getCreatorLeadQualification({ text, badge, subtitle, score, buyerHits, partnershipHits, communityHits, inboundCount }),
+      ...getCreatorLeadQualification({ text, badge, subtitle, buyerHits, partnershipHits, communityHits, inboundCount }),
     };
   }
 
@@ -1045,8 +1089,10 @@ export function buildCreatorLiveSummary(
   const escalatedConversationCount = new Set(escalationRecords.map((record) => record.conversation.id)).size;
   const estimatedRevenue = opportunityRecords.reduce((total, record) => total + record.opportunity.value, 0);
   const buyerCount = opportunityRecords.filter((record) => record.opportunity.badge === "HIGH INTENT").length;
+  const hotLeadCount = opportunityRecords.filter((record) => record.opportunity.classification === "Hot").length;
   const partnershipCount = opportunityRecords.filter((record) => record.opportunity.badge === "PARTNERSHIP").length;
   const warmLeadCount = opportunityRecords.filter((record) => record.opportunity.stage === "Warm").length;
+  const coldLeadCount = opportunityRecords.filter((record) => record.opportunity.classification === "Cold").length;
   const communityCount = opportunityRecords.filter((record) => record.opportunity.badge === "COMMUNITY").length;
 
   const opportunityCards: OpportunityPageCard[] = opportunityRecords.map(({ conversation, opportunity }) => {
@@ -1063,13 +1109,14 @@ export function buildCreatorLiveSummary(
       tone: opportunity.tone,
       icon: opportunity.icon,
       value: `${formatCreatorMoney(opportunity.value)} est.`,
-      scoreLabel: "Lead Score",
+      scoreLabel: opportunity.scoreLabel || "Lead Score",
       score: `${score}/100`,
       progress: `${score}%`,
       action: "Review",
       verified: Boolean(conversation.participant.username),
       avatars: [getCreatorAvatarNumber(conversation), getCreatorAvatarNumber(conversation, 1), getCreatorAvatarNumber(conversation, 2)],
       stage: opportunity.stage,
+      classification: opportunity.classification,
       urgency: opportunity.urgency,
       intent: opportunity.intent,
       interestLevel: opportunity.interestLevel,
@@ -1134,7 +1181,7 @@ export function buildCreatorLiveSummary(
     return {
       name: getCreatorParticipantName(conversation),
       handle: getCreatorParticipantHandle(conversation),
-      avatar: getCreatorAvatarNumber(conversation),
+      avatarUrl: conversation.participant.profile_pic || "",
       engagement: String(engagement),
       active: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
       tag: escalation ? "Needs attention" : opportunity ? "High intent" : inboundCount > 1 ? "Engaged" : "Contact",
@@ -1329,14 +1376,15 @@ export function buildCreatorLiveSummary(
     recentActivity,
     opportunityTabs: [
       { label: "Qualified Leads", count: formatCreatorInteger(opportunityRecords.length), icon: Users },
-      { label: "High Intent", count: formatCreatorInteger(buyerCount), icon: ShoppingCart },
+      { label: "Hot Leads", count: formatCreatorInteger(hotLeadCount), icon: ShoppingCart },
       { label: "Warm Leads", count: formatCreatorInteger(warmLeadCount), icon: Flame },
+      { label: "Cold Leads", count: formatCreatorInteger(coldLeadCount), icon: User },
       { label: "Partner Leads", count: formatCreatorInteger(partnershipCount), icon: Handshake },
       { label: "Community Leads", count: formatCreatorInteger(communityCount), icon: User },
     ],
     opportunityMetrics: [
       { label: "Leads Generated", value: formatCreatorInteger(opportunityRecords.length), change: "from Instagram DMs", icon: Users },
-      { label: "High Intent Leads", value: formatCreatorInteger(buyerCount), change: "buying or booking intent", icon: ShoppingCart },
+      { label: "Hot Leads", value: formatCreatorInteger(hotLeadCount), change: "qualified score 75+", icon: ShoppingCart },
       { label: "Estimated Revenue", value: formatCreatorMoney(estimatedRevenue), change: "from detected intent", icon: CircleDollarSign },
       { label: "Lead Rate", value: formatCreatorPercent(opportunityRecords.length, Math.max(1, totalCount)), change: "of conversations", icon: ChartPie },
     ],
@@ -1691,4 +1739,3 @@ export function buildAnalyticsSummary(
     latestActivity: formatInstagramRelativeTime(latestConversation?.updated_time),
   };
 }
-

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, SlidersHorizontal, Target, TrendingUp } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, SlidersHorizontal, Target, TrendingUp } from "lucide-react";
 import { CreatorDateRangeSelect, type AdminDateRangePreset } from "../admin/shared";
 import { formatCreatorInteger } from "../creator-insights";
 import type { CreatorLiveSummary, LeadCategoryFilter, LeadUrgencyFilter, OpportunityPageCard } from "./types";
@@ -48,8 +48,9 @@ const opportunityToneClasses = {
 
 const leadCategoryFilters: { id: LeadCategoryFilter; label: string; detail: string }[] = [
   { id: "all", label: "All leads", detail: "Every qualified lead" },
-  { id: "high-intent", label: "High intent", detail: "Buying or booking intent" },
-  { id: "warm", label: "Warm leads", detail: "Active leads still warming up" },
+  { id: "hot", label: "Hot leads", detail: "Score 75+ and ready for action" },
+  { id: "warm", label: "Warm leads", detail: "Score 50-74 and still qualifying" },
+  { id: "cold", label: "Cold leads", detail: "Early interest or missing key details" },
   { id: "partner", label: "Partner leads", detail: "Partnership or brand deal signals" },
   { id: "community", label: "Community leads", detail: "Community and referral signals" },
 ];
@@ -61,12 +62,36 @@ const leadUrgencyFilters: { id: LeadUrgencyFilter; label: string }[] = [
   { id: "Low", label: "Low urgency" },
 ];
 
+const leadsPerPage = 4;
+
+function buildLeadPaginationItems(currentPage: number, totalPages: number) {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set([1, totalPages, currentPage, currentPage - 1, currentPage + 1]);
+
+  return Array.from(pages)
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((a, b) => a - b)
+    .reduce<(number | "ellipsis")[]>((items, page, index, orderedPages) => {
+      const previousPage = orderedPages[index - 1];
+
+      if (previousPage && page - previousPage > 1) {
+        items.push("ellipsis");
+      }
+
+      items.push(page);
+      return items;
+    }, []);
+}
 
 function getLeadCategoryFromTabLabel(label: string): LeadCategoryFilter {
   const normalizedLabel = label.toLowerCase();
 
-  if (normalizedLabel.includes("high intent")) return "high-intent";
+  if (normalizedLabel.includes("hot")) return "hot";
   if (normalizedLabel.includes("warm")) return "warm";
+  if (normalizedLabel.includes("cold")) return "cold";
   if (normalizedLabel.includes("partner")) return "partner";
   if (normalizedLabel.includes("community")) return "community";
   return "all";
@@ -74,10 +99,12 @@ function getLeadCategoryFromTabLabel(label: string): LeadCategoryFilter {
 
 function isOpportunityInLeadCategory(opportunity: OpportunityPageCard, filter: LeadCategoryFilter) {
   switch (filter) {
-    case "high-intent":
-      return opportunity.badge === "HIGH INTENT";
+    case "hot":
+      return opportunity.classification === "Hot";
     case "warm":
-      return opportunity.stage === "Warm";
+      return opportunity.classification === "Warm";
+    case "cold":
+      return opportunity.classification === "Cold";
     case "partner":
       return opportunity.badge === "PARTNERSHIP";
     case "community":
@@ -136,8 +163,8 @@ function OpportunityPageCardView({ opportunity }: { opportunity: OpportunityPage
 
       <div className="mt-3 grid gap-2 text-[11px] font-semibold">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-[#697083]">Stage</span>
-          <span className="truncate font-extrabold text-black">{opportunity.stage || "Warm"}</span>
+          <span className="shrink-0 text-[#697083]">Classification</span>
+          <span className="truncate font-extrabold text-black">{opportunity.classification || opportunity.stage || "Warm"}</span>
           <span className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
             opportunity.urgency === "High"
               ? "bg-[#fff0f3] text-[#df405b]"
@@ -224,6 +251,7 @@ export function OpportunitiesPage({
 }) {
   const [leadCategoryFilter, setLeadCategoryFilter] = useState<LeadCategoryFilter>("all");
   const [leadUrgencyFilter, setLeadUrgencyFilter] = useState<LeadUrgencyFilter>("all");
+  const [currentPage, setCurrentPage] = useState(1);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const activeFilterCount = Number(leadCategoryFilter !== "all") + Number(leadUrgencyFilter !== "all");
   const filteredOpportunityCards = summary.opportunityCards.filter(
@@ -231,6 +259,13 @@ export function OpportunitiesPage({
       isOpportunityInLeadCategory(opportunity, leadCategoryFilter) &&
       (leadUrgencyFilter === "all" || opportunity.urgency === leadUrgencyFilter)
   );
+  const totalFilteredLeads = filteredOpportunityCards.length;
+  const totalPages = Math.max(1, Math.ceil(totalFilteredLeads / leadsPerPage));
+  const activePage = Math.min(currentPage, totalPages);
+  const pageStartIndex = totalFilteredLeads === 0 ? 0 : (activePage - 1) * leadsPerPage;
+  const pageEndIndex = Math.min(pageStartIndex + leadsPerPage, totalFilteredLeads);
+  const visibleOpportunityCards = filteredOpportunityCards.slice(pageStartIndex, pageEndIndex);
+  const paginationItems = buildLeadPaginationItems(activePage, totalPages);
 
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
@@ -250,7 +285,10 @@ export function OpportunitiesPage({
           <div className="grid w-full grid-cols-[1fr_auto] items-center gap-3 sm:flex sm:w-auto sm:gap-5">
             <CreatorDateRangeSelect
               dateRangePreset={dateRangePreset}
-              onDateRangeChange={onDateRangeChange}
+              onDateRangeChange={(preset) => {
+                onDateRangeChange(preset);
+                setCurrentPage(1);
+              }}
               className="h-11 px-4 sm:h-12 sm:w-[252px] sm:px-5 sm:text-[13px]"
             />
             <div className="relative">
@@ -282,6 +320,7 @@ export function OpportunitiesPage({
                       onClick={() => {
                         setLeadCategoryFilter("all");
                         setLeadUrgencyFilter("all");
+                        setCurrentPage(1);
                       }}
                       className="text-[11px] font-extrabold text-[#3044ff]"
                     >
@@ -295,7 +334,10 @@ export function OpportunitiesPage({
                       <button
                         key={filter.id}
                         type="button"
-                        onClick={() => setLeadCategoryFilter(filter.id)}
+                        onClick={() => {
+                          setLeadCategoryFilter(filter.id);
+                          setCurrentPage(1);
+                        }}
                         className={`rounded-[9px] border px-3 py-2 text-left transition ${
                           leadCategoryFilter === filter.id
                             ? "border-[#c8bfff] bg-[#f0edff]"
@@ -315,7 +357,10 @@ export function OpportunitiesPage({
                         <button
                           key={filter.id}
                           type="button"
-                          onClick={() => setLeadUrgencyFilter(filter.id)}
+                          onClick={() => {
+                            setLeadUrgencyFilter(filter.id);
+                            setCurrentPage(1);
+                          }}
                           className={`h-8 rounded-[8px] border text-[11px] font-extrabold transition ${
                             leadUrgencyFilter === filter.id
                               ? "border-[#c8bfff] bg-[#f0edff] text-[#3044ff]"
@@ -334,7 +379,7 @@ export function OpportunitiesPage({
         </header>
 
         <div className="-mx-4 mt-5 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:mt-6 lg:px-0">
-          <div className="grid w-max grid-cols-[135px_185px_165px_230px_195px] lg:grid-cols-[150px_210px_190px_260px_220px]">
+          <div className="grid w-max auto-cols-[150px] grid-flow-col lg:auto-cols-[190px]">
             {summary.opportunityTabs.map((tab, index) => {
               const Icon = tab.icon;
               const tabFilter = getLeadCategoryFromTabLabel(tab.label);
@@ -343,7 +388,10 @@ export function OpportunitiesPage({
                 <button
                   key={tab.label}
                   type="button"
-                  onClick={() => setLeadCategoryFilter(tabFilter)}
+                  onClick={() => {
+                    setLeadCategoryFilter(tabFilter);
+                    setCurrentPage(1);
+                  }}
                   className={`relative flex h-11 items-center justify-center gap-2 text-[11px] font-extrabold sm:gap-3 sm:text-[12px] ${
                     isActive ? "text-[#4b3cff]" : "text-black"
                   } ${index < summary.opportunityTabs.length - 1 ? "border-r border-[#e2e6f0]" : ""}`}
@@ -392,9 +440,9 @@ export function OpportunitiesPage({
           })}
         </section>
 
-        {filteredOpportunityCards.length > 0 ? (
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {filteredOpportunityCards.map((opportunity) => (
+        {visibleOpportunityCards.length > 0 ? (
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            {visibleOpportunityCards.map((opportunity) => (
               <OpportunityPageCardView key={`${opportunity.name}-${opportunity.badge}-${opportunity.time}`} opportunity={opportunity} />
             ))}
           </div>
@@ -412,10 +460,56 @@ export function OpportunitiesPage({
           </section>
         )}
 
-        <footer className="relative mt-4 flex items-center justify-center pb-2">
-          <p className="text-[12px] font-medium text-[#596175]">
-            Showing {filteredOpportunityCards.length > 0 ? `1 to ${filteredOpportunityCards.length}` : "0"} of {formatCreatorInteger(summary.opportunityCount)} leads
+        <footer className="relative mt-5 flex flex-col items-center justify-between gap-3 rounded-[12px] border border-[#e5e8f0] bg-white px-4 py-3 shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:flex-row">
+          <p className="text-[12px] font-semibold text-[#596175]">
+            Showing {totalFilteredLeads > 0 ? `${formatCreatorInteger(pageStartIndex + 1)} to ${formatCreatorInteger(pageEndIndex)}` : "0"} of {formatCreatorInteger(totalFilteredLeads)} leads
           </p>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              disabled={activePage === 1}
+              className="flex h-9 items-center gap-1.5 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-[#30384d] transition hover:bg-[#f6f7fb] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <ChevronLeft size={14} strokeWidth={2.5} />
+              Prev
+            </button>
+
+            <div className="flex items-center gap-1">
+              {paginationItems.map((item, index) =>
+                item === "ellipsis" ? (
+                  <span key={`ellipsis-${index}`} className="flex h-9 w-8 items-center justify-center text-[11px] font-extrabold text-[#8b92a6]">
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setCurrentPage(item)}
+                    aria-current={item === activePage ? "page" : undefined}
+                    className={`flex h-9 min-w-9 items-center justify-center rounded-[8px] border px-3 text-[11px] font-extrabold transition ${
+                      item === activePage
+                        ? "border-[#4b3cff] bg-[#f0edff] text-[#3044ff]"
+                        : "border-[#dde3ee] bg-white text-[#30384d] hover:bg-[#f6f7fb]"
+                    }`}
+                  >
+                    {item}
+                  </button>
+                )
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              disabled={activePage === totalPages}
+              className="flex h-9 items-center gap-1.5 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-[#30384d] transition hover:bg-[#f6f7fb] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              Next
+              <ChevronRight size={14} strokeWidth={2.5} />
+            </button>
+          </div>
         </footer>
       </div>
     </main>

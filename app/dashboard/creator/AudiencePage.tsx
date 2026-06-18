@@ -20,6 +20,7 @@ import type {
   AudienceSegmentFilter,
   AudienceSource,
   CreatorLiveSummary,
+  InstagramSettingsConversation,
 } from "./types";
 
 const audienceMetricToneClasses = {
@@ -39,6 +40,22 @@ const audienceSegmentFilters: { id: AudienceSegmentFilter; label: string }[] = [
   { id: "contacts", label: "Contacts" },
 ];
 
+type AudienceGrowthRange = "7d" | "30d" | "90d";
+
+const audienceGrowthRangeOptions = [
+  { value: "7d", label: "This week", days: 7 },
+  { value: "30d", label: "Last 30 days", days: 30 },
+  { value: "90d", label: "Last 90 days", days: 90 },
+] satisfies { value: AudienceGrowthRange; label: string; days: number }[];
+
+function getAudienceGrowthRangeLabel(value: AudienceGrowthRange) {
+  return audienceGrowthRangeOptions.find((option) => option.value === value)?.label || "This week";
+}
+
+function getAudienceGrowthRangeDays(value: AudienceGrowthRange) {
+  return audienceGrowthRangeOptions.find((option) => option.value === value)?.days || 7;
+}
+
 
 function isAudienceProfileInSegment(person: AudienceProfile, filter: AudienceSegmentFilter) {
   const tag = person.tag.toLowerCase();
@@ -56,6 +73,56 @@ function isAudienceProfileInSegment(person: AudienceProfile, filter: AudienceSeg
     default:
       return true;
   }
+}
+
+function getAudienceConversationActivityTime(conversation: InstagramSettingsConversation, rangeStart: number, rangeEnd: number) {
+  const messageTimes = conversation.messages
+    .map((message) => new Date(message.time).getTime())
+    .filter((timestamp) => Number.isFinite(timestamp) && timestamp >= rangeStart && timestamp <= rangeEnd);
+
+  if (messageTimes.length > 0) {
+    return Math.min(...messageTimes);
+  }
+
+  const updatedTime = conversation.updated_time ? new Date(conversation.updated_time).getTime() : 0;
+  return Number.isFinite(updatedTime) && updatedTime >= rangeStart && updatedTime <= rangeEnd ? updatedTime : null;
+}
+
+function buildAudienceGrowthSeries(conversations: InstagramSettingsConversation[], range: AudienceGrowthRange) {
+  const pointCount: number = 7;
+  const dayMs = 86_400_000;
+  const days = getAudienceGrowthRangeDays(range);
+  const now = Date.now();
+  const rangeStart = now - (days - 1) * dayMs;
+  const rangeSpan = Math.max(1, now - rangeStart);
+  const firstSeenByParticipant = new Map<string, number>();
+
+  conversations.forEach((conversation) => {
+    const activityTime = getAudienceConversationActivityTime(conversation, rangeStart, now);
+
+    if (activityTime === null) {
+      return;
+    }
+
+    const participantKey = conversation.participant.id || conversation.id;
+    const existingTime = firstSeenByParticipant.get(participantKey);
+
+    if (existingTime === undefined || activityTime < existingTime) {
+      firstSeenByParticipant.set(participantKey, activityTime);
+    }
+  });
+
+  const participantTimes = Array.from(firstSeenByParticipant.values());
+
+  return Array.from({ length: pointCount }, (_, index) => {
+    const progress = pointCount === 1 ? 1 : index / (pointCount - 1);
+    const bucketEnd = rangeStart + rangeSpan * progress;
+
+    return {
+      label: new Date(bucketEnd).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      value: participantTimes.filter((activityTime) => activityTime <= bucketEnd).length,
+    };
+  });
 }
 
 
@@ -97,29 +164,44 @@ function AudienceMetricStrip({ metrics }: { metrics: AudienceMetric[] }) {
   );
 }
 
-function AudienceGrowthChart({ totalAudience }: { totalAudience: number }) {
-  const xLabels = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - index));
+function AudienceGrowthChart({ conversations }: { conversations: InstagramSettingsConversation[] }) {
+  const [growthRange, setGrowthRange] = useState<AudienceGrowthRange>("7d");
+  const series = buildAudienceGrowthSeries(conversations, growthRange);
+  const chartTop = 24;
+  const chartBottom = 198;
+  const chartHeight = chartBottom - chartTop;
+  const currentAudience = series[series.length - 1]?.value || 0;
+  const maxValue = Math.max(...series.map((point) => point.value), 1);
+  const yLabels = [maxValue, Math.ceil(maxValue * 0.66), Math.ceil(maxValue * 0.33), 0];
+  const points = series.map((point, index) => {
+    const x = 60 + index * (580 / Math.max(1, series.length - 1));
+    const y = chartBottom - (point.value / maxValue) * chartHeight;
 
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return { ...point, x, y };
   });
-  const maxValue = Math.max(totalAudience, 1);
-  const yLabels = [maxValue, Math.round(maxValue * 0.66), Math.round(maxValue * 0.33), 0];
-  const points = [60, 162, 263, 365, 467, 568, 640].map((x) => ({ x, y: totalAudience > 0 ? 82 : 198 }));
   const path = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`).join(" ");
+  const lastPoint = points[points.length - 1];
 
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-[15px] font-extrabold text-black">Audience growth</h2>
-        <button
-          type="button"
-          className="flex h-8 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black"
-        >
-          This week
+        <label className="relative flex h-8 min-w-[118px] cursor-pointer items-center justify-between gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black">
+          <span>{getAudienceGrowthRangeLabel(growthRange)}</span>
           <ChevronDown size={14} strokeWidth={2.5} />
-        </button>
+          <select
+            aria-label="Audience growth range"
+            value={growthRange}
+            onChange={(event) => setGrowthRange(event.target.value as AudienceGrowthRange)}
+            className="absolute inset-0 cursor-pointer opacity-0"
+          >
+            {audienceGrowthRangeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="-mx-2 overflow-x-auto px-2 no-scrollbar">
@@ -143,7 +225,7 @@ function AudienceGrowthChart({ totalAudience }: { totalAudience: number }) {
           ))}
 
           {yLabels.map((label, index) => (
-            <text key={label} x="16" y={32 + index * 58} fill="#46506a" fontSize="12" fontWeight="600">
+            <text key={`${label}-${index}`} x="16" y={32 + index * 58} fill="#46506a" fontSize="12" fontWeight="600">
               {formatCreatorInteger(label)}
             </text>
           ))}
@@ -164,20 +246,20 @@ function AudienceGrowthChart({ totalAudience }: { totalAudience: number }) {
           {points.slice(0, -1).map((point) => (
             <circle key={point.x} cx={point.x} cy={point.y} r="3.5" fill="#4b3cff" />
           ))}
-          <circle cx={points[6].x} cy={points[6].y} r="9" fill="#edeaff" filter="url(#audienceDotGlow)" />
-          <circle cx={points[6].x} cy={points[6].y} r="5.5" fill="#4b3cff" />
-          <circle cx={points[6].x} cy={points[6].y} r="3" fill="#ffffff" />
+          <circle cx={lastPoint.x} cy={lastPoint.y} r="9" fill="#edeaff" filter="url(#audienceDotGlow)" />
+          <circle cx={lastPoint.x} cy={lastPoint.y} r="5.5" fill="#4b3cff" />
+          <circle cx={lastPoint.x} cy={lastPoint.y} r="3" fill="#ffffff" />
 
-          {xLabels.map((label, index) => (
-            <text key={label} x={60 + index * 97} y="232" textAnchor="middle" fill="#46506a" fontSize="12" fontWeight="600">
-              {label}
+          {points.map((point) => (
+            <text key={point.label} x={point.x} y="232" textAnchor="middle" fill="#46506a" fontSize="12" fontWeight="600">
+              {point.label}
             </text>
           ))}
         </svg>
 
         <div className="pointer-events-none absolute right-8 top-[126px] hidden h-[58px] w-[94px] rounded-[8px] bg-white px-3 py-2.5 shadow-[0_24px_60px_rgba(82,67,210,0.16)] xl:block">
           <p className="text-[10px] font-semibold text-black">Current</p>
-          <p className="mt-1 text-[15px] font-extrabold leading-none text-[#4b3cff]">{formatCreatorInteger(totalAudience)}</p>
+          <p className="mt-1 text-[15px] font-extrabold leading-none text-[#4b3cff]">{formatCreatorInteger(currentAudience)}</p>
         </div>
       </div>
     </section>
@@ -222,6 +304,35 @@ function AudienceSourceCard({ sources, totalAudience }: { sources: AudienceSourc
         <p className="mt-5 text-center text-[12px] font-medium text-[#596175]">No audience source data yet.</p>
       ) : null}
     </section>
+  );
+}
+
+function AudienceAvatar({ src, name }: { src: string; name: string }) {
+  const [failedSrc, setFailedSrc] = useState("");
+  const initials = name
+    .split(/\s+/)
+    .map((word) => word[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "IG";
+
+  if (!src || failedSrc === src) {
+    return (
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-[10px] font-extrabold text-white">
+        {initials}
+      </span>
+    );
+  }
+
+  return (
+    // Instagram profile pictures are short-lived CDN URLs, so render them directly.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={name}
+      className="h-9 w-9 shrink-0 rounded-full object-cover"
+      onError={() => setFailedSrc(src)}
+    />
   );
 }
 
@@ -277,12 +388,7 @@ function TopAudienceCard({
             }`}
           >
             <div className="flex min-w-0 items-center gap-3">
-              <span
-                aria-label={person.name}
-                role="img"
-                className="h-9 w-9 shrink-0 rounded-full bg-cover bg-center"
-                style={{ backgroundImage: `url(https://i.pravatar.cc/72?img=${person.avatar})` }}
-              />
+              <AudienceAvatar src={person.avatarUrl} name={person.name} />
               <div className="min-w-0">
                 <p className="text-[12px] font-extrabold leading-tight text-black">{person.name}</p>
                 <p className="mt-1 truncate text-[11px] font-medium text-[#46506a]">{person.handle}</p>
@@ -303,12 +409,6 @@ function TopAudienceCard({
         ))}
       </div>
 
-      {people.length > 0 ? (
-        <button type="button" className="mx-auto mt-4 flex items-center gap-3 text-[12px] font-extrabold text-[#3044ff]">
-          View all audience
-          <ArrowRight size={15} strokeWidth={2.5} />
-        </button>
-      ) : null}
     </section>
   );
 }
@@ -318,7 +418,6 @@ function AudienceSegmentsCard({ segments }: { segments: AudienceSegment[] }) {
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <div className="flex items-center justify-between">
         <h2 className="text-[15px] font-extrabold text-black">Audience segments</h2>
-        <button type="button" className="text-[12px] font-extrabold text-[#3044ff]">View all</button>
       </div>
 
       <div className="mt-4">
@@ -347,11 +446,6 @@ function AudienceSegmentsCard({ segments }: { segments: AudienceSegment[] }) {
           );
         })}
       </div>
-
-      <button type="button" className="mx-auto mt-4 flex items-center gap-3 text-[12px] font-extrabold text-[#3044ff]">
-        View all segments
-        <ArrowRight size={15} strokeWidth={2.5} />
-      </button>
     </section>
   );
 }
@@ -461,7 +555,7 @@ export function AudiencePage({
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.38fr)_minmax(390px,0.98fr)]">
           <div className="relative">
-            <AudienceGrowthChart totalAudience={summary.totalConversationCount} />
+            <AudienceGrowthChart conversations={summary.conversations} />
           </div>
           <AudienceSourceCard sources={summary.audienceSources} totalAudience={summary.totalConversationCount} />
         </div>
