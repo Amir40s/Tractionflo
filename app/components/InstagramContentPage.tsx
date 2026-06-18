@@ -584,34 +584,22 @@ function EmptyState({
   );
 }
 
-
 function FollowersTab({
   account,
   loadingContent,
   startDate,
   endDate,
-  welcomeAutomation,
-  welcomeSaving,
-  welcomeStatus,
   onStartDateChange,
   onEndDateChange,
-  onWelcomeChange,
-  onSaveWelcome,
 }: {
   account: InstagramAccount | null;
   loadingContent: boolean;
   startDate: string;
   endDate: string;
-  welcomeAutomation: InstagramWelcomeAutomationSettings;
-  welcomeSaving: boolean;
-  welcomeStatus: string;
   onStartDateChange: (value: string) => void;
   onEndDateChange: (value: string) => void;
-  onWelcomeChange: (settings: InstagramWelcomeAutomationSettings) => void;
-  onSaveWelcome: () => void;
 }) {
   const history = account?.followerHistory || [];
-  const rows = getMonthsBetweenDates(startDate, endDate);
   const newFollowersInRange = sumFollowerPoints(history, (point) => isDateInRange(point.date, startDate, endDate));
   const newFollowersSinceRangeStart = sumFollowerPoints(history, (point) => {
     const date = new Date(point.date);
@@ -621,11 +609,6 @@ function FollowersTab({
   });
   const oldFollowersBeforeRange =
     typeof account?.followersCount === "number" ? Math.max(0, account.followersCount - newFollowersSinceRangeStart) : null;
-  const welcomePreview = renderInstagramWelcomeMessage({
-    template: welcomeAutomation.message,
-    name: "Sarah Khan",
-    username: "sarah.creator",
-  });
 
   if (loadingContent) {
     return (
@@ -678,109 +661,7 @@ function FollowersTab({
             <p className="mt-3 text-[18px] font-extrabold text-black">{metric.value}</p>
           </article>
         ))}
-      </div>
-
-      <section className="rounded-[12px] border border-[#e6eaf2] bg-white p-4 shadow-[0_18px_48px_rgba(20,28,53,0.035)]">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-          <div>
-            <h2 className="text-[18px] font-extrabold text-black">Followers by month</h2>
-            <p className="mt-1 max-w-[640px] text-[12px] font-semibold leading-relaxed text-[#596175]">
-              Showing aggregate follower and following counts from Instagram. Individual follower usernames are not returned by the official API.
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">
-              From
-              <span className="mt-1 flex h-11 items-center gap-2 rounded-[8px] border border-[#dfe4ef] bg-white px-3 text-black outline-none focus-within:border-[#4b3cff] focus-within:ring-2 focus-within:ring-[#4b3cff]/10">
-                <CalendarDays size={15} className="text-[#4b3cff]" strokeWidth={2.3} />
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(event) => onStartDateChange(event.target.value)}
-                  className="h-full min-w-0 flex-1 bg-transparent text-[12px] font-extrabold text-black outline-none"
-                />
-              </span>
-            </label>
-
-            <label className="text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">
-              To
-              <span className="mt-1 flex h-11 items-center gap-2 rounded-[8px] border border-[#dfe4ef] bg-white px-3 text-black outline-none focus-within:border-[#4b3cff] focus-within:ring-2 focus-within:ring-[#4b3cff]/10">
-                <CalendarDays size={15} className="text-[#4b3cff]" strokeWidth={2.3} />
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(event) => onEndDateChange(event.target.value)}
-                  className="h-full min-w-0 flex-1 bg-transparent text-[12px] font-extrabold text-black outline-none"
-                />
-              </span>
-            </label>
-          </div>
-        </div>
-
-        {account.followerHistoryError ? (
-          <p className="mt-4 rounded-[8px] border border-[#ffe5b8] bg-[#fffaf0] p-3 text-[12px] font-semibold leading-relaxed text-[#8a5a00]">
-            {account.followerHistoryError}
-          </p>
-        ) : null}
-
-        <div className="mt-4 overflow-hidden rounded-[10px] border border-[#e6eaf2]">
-          <div className="grid grid-cols-[1fr_120px_150px] bg-[#f7f8fc] px-4 py-3 text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">
-            <span>Month</span>
-            <span className="text-right">New</span>
-            <span className="text-right">Existing before</span>
-          </div>
-          {rows.map((month) => {
-            const newFollowers = sumFollowerPoints(
-              history,
-              (point) => getMonthKey(point.date) === month.value && isDateInRange(point.date, startDate, endDate)
-            );
-            const monthStartDate = `${month.value}-01`;
-            const newFollowersFromMonthToNow = sumFollowerPoints(history, (point) => {
-              const date = new Date(point.date);
-              const monthStart = getDateFromInput(monthStartDate);
-
-              return Boolean(monthStart && Number.isFinite(date.getTime()) && date.getTime() >= monthStart.getTime());
-            });
-            const existingBeforeMonth =
-              typeof account.followersCount === "number" ? Math.max(0, account.followersCount - newFollowersFromMonthToNow) : null;
-
-            return (
-              <div key={month.value} className="grid grid-cols-[1fr_120px_150px] border-t border-[#eef1f6] px-4 py-3 text-[12px] font-semibold text-[#253049]">
-                <span className="font-extrabold text-black">{month.label}</span>
-                <span className="text-right">{formatCompactNumber(newFollowers)}</span>
-                <span className="text-right">{formatCompactNumber(existingBeforeMonth)}</span>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          <article className="rounded-[10px] border border-[#e6eaf2] bg-[#fbfcff] p-4">
-            <h3 className="text-[13px] font-extrabold text-black">Follower groups</h3>
-            <div className="mt-3 space-y-2">
-              <div className="flex items-center justify-between rounded-[8px] bg-white px-3 py-2 text-[12px] font-bold text-[#253049]">
-                <span>New followers in range</span>
-                <span>{formatCompactNumber(newFollowersInRange)}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-[8px] bg-white px-3 py-2 text-[12px] font-bold text-[#253049]">
-                <span>Old followers before range</span>
-                <span>{formatCompactNumber(oldFollowersBeforeRange)}</span>
-              </div>
-            </div>
-          </article>
-
-          <article className="rounded-[10px] border border-[#e6eaf2] bg-[#fbfcff] p-4">
-            <h3 className="text-[13px] font-extrabold text-black">Following</h3>
-            <p className="mt-3 text-[28px] font-extrabold text-black">{formatCompactNumber(account.followingCount)}</p>
-            <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#596175]">
-              Instagram exposes the following count for this connected account, but not a browsable list of every followed profile.
-            </p>
-          </article>
-        </div>
-      </section>
-
-
+      </div>   
     </section>
   );
 }
@@ -2180,13 +2061,15 @@ export default function InstagramContentPage() {
               <RefreshCw size={15} className={loadingContent ? "animate-spin" : ""} strokeWidth={2.35} />
               Refresh
             </button>
-            <a
-              href="/api/auth/instagram?next=/instagram-content"
-              className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#4b3cff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_36px_rgba(75,60,255,0.22)]"
-            >
-              <InstagramDot />
-              Connect account
-            </a>
+            {!account && (
+              <a
+                href="/api/auth/instagram?next=/instagram-content"
+                className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#4b3cff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_36px_rgba(75,60,255,0.22)]"
+              >
+                <InstagramDot />
+                Connect account
+              </a>
+            )}
           </div>
         </header>
 
@@ -2292,16 +2175,8 @@ export default function InstagramContentPage() {
                 loadingContent={loadingContent}
                 startDate={normalizedFollowerStartDate}
                 endDate={normalizedFollowerEndDate}
-                welcomeAutomation={welcomeAutomation}
-                welcomeSaving={welcomeSaving}
-                welcomeStatus={welcomeStatus}
                 onStartDateChange={handleFollowerStartDateChange}
                 onEndDateChange={handleFollowerEndDateChange}
-                onWelcomeChange={(settings) => {
-                  setWelcomeAutomation(settings);
-                  setWelcomeStatus("");
-                }}
-                onSaveWelcome={() => void saveWelcomeAutomation()}
               />
             ) : (
               <>

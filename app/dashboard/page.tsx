@@ -1385,7 +1385,7 @@ function Sidebar({
         <BrandMark />
       </div>
 
-      <nav className="mt-8 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-1">
+      <nav className="mt-8 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
         {visibleItems.map((item) => {
           const Icon = item.icon;
           const isActive = item.tab === activeTab;
@@ -1420,45 +1420,7 @@ function Sidebar({
         })}
       </nav>
 
-      <div className="shrink-0 space-y-3 pb-1 pt-4">
-        <button
-          type="button"
-          onClick={() => onChangeTab("settings")}
-          className="flex min-h-[68px] w-full items-center gap-3 rounded-[10px] border border-[#e6e9f1] bg-white px-3 shadow-[0_18px_38px_rgba(20,28,53,0.04)] transition hover:border-[#d9def0] hover:bg-[#fbfbff]"
-        >
-          {profile.avatarUrl ? (
-            <span
-              aria-label={profile.name}
-              role="img"
-              className="h-12 w-12 shrink-0 rounded-full border border-[#e3e7f0] bg-cover bg-center shadow-[0_10px_22px_rgba(20,28,53,0.08)]"
-              style={{ backgroundImage: `url(${profile.avatarUrl})` }}
-            />
-          ) : (
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-[12px] font-extrabold text-white shadow-[0_10px_22px_rgba(124,58,237,0.16)]">
-              {initials || "TF"}
-            </span>
-          )}
-          <span className="min-w-0 flex-1 text-left">
-            <span className="block truncate text-[12px] font-extrabold text-black">{profile.name}</span>
-            <span className="block truncate text-[11px] font-semibold text-[#697083]">{profile.role}</span>
-          </span>
-          <ChevronDown size={16} className="shrink-0" strokeWidth={2.4} />
-        </button>
 
-        <button
-          type="button"
-          className="flex h-[62px] w-full items-center gap-3 rounded-[10px] border border-[#e6e9f1] bg-white px-3.5 shadow-[0_18px_38px_rgba(20,28,53,0.04)]"
-        >
-          <Sparkles size={20} className="text-[#4b3cff]" strokeWidth={2.3} />
-          <span className="flex-1 text-left">
-            <span className="block text-[12px] font-extrabold text-black">Pro Plan</span>
-            <span className="block text-[11px] font-semibold text-[#697083]">Renews Jun 24, 2025</span>
-          </span>
-          <ChevronRight size={16} className="text-[#4b3cff]" strokeWidth={2.6} />
-        </button>
-
-        <LogoutButton />
-      </div>
     </aside>
   );
 }
@@ -14703,6 +14665,35 @@ function DashboardContent() {
         }}
       />
 
+      <div className="relative flex min-w-0 flex-1 flex-col [&_main>div>header]:lg:pr-[280px]">
+        {activeTab !== "inbox" && (
+          <div className="absolute right-4 top-4 z-50 hidden lg:flex items-center gap-3 xl:right-10 xl:top-5">
+            <button
+              type="button"
+              onClick={() => handleTabChange("settings")}
+              className="flex h-10 items-center gap-2.5 rounded-[10px] border border-[#e6e9f1] bg-white px-3 shadow-[0_12px_24px_rgba(20,28,53,0.03)] transition hover:border-[#d9def0] hover:bg-[#fbfbff]"
+            >
+              {accountProfile.avatarUrl ? (
+                <span
+                  aria-label={accountProfile.name}
+                  role="img"
+                  className="h-6 w-6 shrink-0 rounded-full border border-[#e3e7f0] bg-cover bg-center shadow-[0_4px_12px_rgba(20,28,53,0.08)]"
+                  style={{ backgroundImage: `url(${accountProfile.avatarUrl})` }}
+                />
+              ) : (
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-[9px] font-extrabold text-white shadow-[0_4px_12px_rgba(124,58,237,0.16)]">
+                  {accountProfile.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "TF"}
+                </span>
+              )}
+              <span className="text-[12px] font-extrabold text-black">{accountProfile.name}</span>
+              <ChevronDown size={14} className="text-[#697083]" strokeWidth={2.4} />
+            </button>
+            <div className="w-[100px]">
+              <LogoutButton />
+            </div>
+          </div>
+        )}
+
       {!canOpenDashboardTab(accountProfile, activeTab) ? (
         <RestrictedPage />
       ) : activeTab === "dashboard" ? (
@@ -14737,6 +14728,7 @@ function DashboardContent() {
           </div>
         </main>
       )}
+      </div>
       <MobileNavigation activeTab={activeTab} onChangeTab={handleTabChange} profile={accountProfile} />
     </div>
   );
