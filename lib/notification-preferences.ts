@@ -133,6 +133,7 @@ function isUrgentNotification(notification: RealtimeNotificationPayload) {
     metadata.urgent === true ||
     urgency === "high" ||
     priority === "high" ||
+    notification.type === "escalation" ||
     notification.type === "message" ||
     notification.type === "billing" ||
     notification.type === "agent" ||
@@ -147,6 +148,7 @@ function isEscalationNotification(notification: RealtimeNotificationPayload) {
   const title = notification.title.toLowerCase();
 
   return (
+    notification.type === "escalation" ||
     category.includes("escalation") ||
     urgency === "high" ||
     title.includes("escalation") ||

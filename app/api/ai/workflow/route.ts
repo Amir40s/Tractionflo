@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
-import { detectConversationEscalation } from '@/lib/conversation-escalation';
+import { detectConversationEscalation, escalationRulesMetadataKey } from '@/lib/conversation-escalation';
 import {
   defaultAiLeadInsight,
   getEnabledWorkflowMap,
@@ -227,7 +227,7 @@ export async function POST(request: Request) {
     const userMessageCount = (payload.messages || []).filter((msg) => msg.from === 'user').length;
 
     // Load lead qualifications cache
-    const leadQualifications = (metadata.lead_qualifications || {}) as Record<string, any>;
+    const leadQualifications = (metadata.lead_qualifications || {}) as Record<string, AiLeadInsight>;
     const cachedLead = leadQualifications[participantId];
 
     const messages = payload.messages || [];
@@ -246,6 +246,52 @@ export async function POST(request: Request) {
         },
         enabledWorkflows,
       } satisfies AiWorkflowRunResult);
+    }
+
+    const escalation = detectConversationEscalation(messages, {
+      rules: metadata[escalationRulesMetadataKey],
+    });
+
+    if (escalation) {
+      await triggerRealtimeNotification(getUserChannel(user.id), {
+        type: 'escalation',
+        title: `${escalation.label} detected`,
+        body: escalation.summary,
+        url: '/conversations',
+        metadata: {
+          assistantId,
+          category: escalation.intent,
+          urgency: escalation.urgency,
+          urgent: escalation.urgency === 'High',
+        },
+      }).catch((notificationError) => {
+        logger.error('Realtime workflow escalation notification error:', { error: notificationError });
+      });
+
+      return NextResponse.json({
+        assistantId,
+        assistant_id: assistantId,
+        autoSend: false,
+        starter: '',
+        reply: escalation.reply,
+        cta: '',
+        handoff: true,
+        escalation,
+        lead: {
+          ...defaultAiLeadInsight,
+          score: escalation.urgency === 'High' ? 92 : 78,
+          stage: 'Needs human',
+          urgency: escalation.urgency,
+          intent: escalation.label,
+          summary: escalation.summary,
+          signals: escalation.signals,
+          missing: [],
+          recommendedAction: escalation.recommendedAction,
+          cta: 'Take over in inbox',
+        },
+        enabledWorkflows,
+        knowledge: summarizeKnowledgeForResponse({ mode: 'none', matches: [] }, assistantId),
+      });
     }
 
     // Determine if we should qualify this lead during this run

@@ -4,14 +4,14 @@ import dynamic from "next/dynamic";
 import {
   ArrowLeft,
   Bookmark,
-  Braces,
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   ExternalLink,
   FileText,
-  Heart,
   Loader2,
   MoreHorizontal,
   Paperclip,
@@ -30,10 +30,27 @@ import {
 import type { EmojiClickData } from "emoji-picker-react";
 import { EmojiStyle, SkinTonePickerLocation, Theme } from "emoji-picker-react";
 import type { LucideIcon } from "lucide-react";
-import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiLeadInsight, AiWorkflowRunResult } from "@/lib/ai-integration";
+import {
+  detectConversationEscalations,
+  normalizeEscalationRuleSettings,
+  type ConversationEscalation,
+  type EscalationRuleSetting,
+} from "@/lib/conversation-escalation";
 import { settingsStateStorageKey } from "@/lib/notification-preferences";
+import {
+  quickRepliesChangedEvent,
+  readQuickRepliesFromStorage,
+  readSavedRepliesFromStorage,
+  readWelcomeMessageFromStorage,
+  savedRepliesChangedEvent,
+  welcomeMessageChangedEvent,
+  welcomeMessageLabel,
+  type QuickReplySetting,
+  type SavedReplySetting,
+  type WelcomeMessageSetting,
+} from "@/lib/quick-replies";
 import NotificationBell from "./NotificationBell";
 
 const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
@@ -134,8 +151,12 @@ type AiWorkflowResponse = Partial<AiWorkflowRunResult> & {
   autoSend?: boolean;
   handoff?: boolean;
   escalation?: {
+    intent?: string;
+    label?: string;
     summary?: string;
     recommendedAction?: string;
+    signals?: string[];
+    urgency?: "Medium" | "High";
   };
   knowledge?: {
     mode?: "none" | "direct" | "context";
@@ -159,6 +180,13 @@ type InboxBookingIntegrations = {
   routes?: InboxBookingSheetRoute[];
 };
 
+type ConversationNoteRecord = {
+  text: string;
+  updatedAt: string;
+};
+
+type ConversationNotesState = Record<string, ConversationNoteRecord>;
+
 type BookingExportResponse = {
   ok?: boolean;
   exported?: boolean;
@@ -170,14 +198,8 @@ type BookingExportResponse = {
 
 // ─── Static data ─────────────────────────────────────────────────────────────
 
-type QuickAction = { label: string; icon: LucideIcon };
-const quickActions: QuickAction[] = [
-  { label: "Book a call", icon: CalendarDays },
-  { label: "Send pricing", icon: CircleDollarSign },
-  { label: "Share program info", icon: FileText },
-];
-
-type ComposerMode = "reply" | "note";
+type ComposerMode = "reply";
+type ComposerMenu = "emoji" | "snippets" | "send";
 type ConversationTakeoverMode = "ai" | "human";
 
 function getTakeoverLabel(mode: ConversationTakeoverMode) {
@@ -188,6 +210,24 @@ function getTakeoverPillClass(mode: ConversationTakeoverMode) {
   return mode === "human"
     ? "border-[#dbe5ff] bg-[#f3f6ff] text-[#3044ff]"
     : "border-[#dff5e7] bg-[#eefcf3] text-[#0a9b3f]";
+}
+
+function getQuickReplyIcon(reply: QuickReplySetting): LucideIcon {
+  const query = `${reply.id} ${reply.label}`.toLowerCase();
+
+  if (/\b(call|book|meeting|schedule)\b/.test(query)) {
+    return CalendarDays;
+  }
+
+  if (/\b(price|pricing|cost|payment|pay|quote)\b/.test(query)) {
+    return CircleDollarSign;
+  }
+
+  if (/\b(info|program|details|brief|document)\b/.test(query)) {
+    return FileText;
+  }
+
+  return Sparkles;
 }
 
 function readBookingIntegrationsFromStorage(): InboxBookingIntegrations | null {
@@ -207,6 +247,52 @@ function readBookingIntegrationsFromStorage(): InboxBookingIntegrations | null {
   } catch {
     return null;
   }
+}
+
+function readEscalationRulesFromStorage(): EscalationRuleSetting[] {
+  if (typeof window === "undefined") {
+    return normalizeEscalationRuleSettings([]);
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(settingsStateStorageKey);
+
+    if (!storedValue) {
+      return normalizeEscalationRuleSettings([]);
+    }
+
+    const parsed = JSON.parse(storedValue) as { rules?: unknown };
+    return normalizeEscalationRuleSettings(parsed.rules);
+  } catch {
+    return normalizeEscalationRuleSettings([]);
+  }
+}
+
+function readConversationNotesFromStorage(): ConversationNotesState {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(conversationNotesStorageKey);
+
+    if (!storedValue) {
+      return {};
+    }
+
+    const parsed = JSON.parse(storedValue) as ConversationNotesState;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveConversationNotesToStorage(notes: ConversationNotesState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(conversationNotesStorageKey, JSON.stringify(notes));
 }
 
 function shouldAttemptBookingExport(replyText: string) {
@@ -246,17 +332,7 @@ type ComposerDraft = {
   mode: ComposerMode;
 };
 
-const savedSnippets = [
-  "Thanks for reaching out! How can I help you today? 😊",
-  "Absolutely, I can send the details here.",
-  "Here is the pricing info. Which option are you interested in?",
-  "Can you send a little more detail so I can point you the right way?",
-];
-const variableOptions = [
-  { label: "First name", token: "{first_name}" },
-  { label: "Instagram handle", token: "{instagram_handle}" },
-  { label: "Program link", token: "{program_link}" },
-];
+const conversationNotesStorageKey = "tractionflo_conversation_notes";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -266,6 +342,11 @@ function relativeTime(iso: string): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
   return `${Math.floor(diff / 86_400_000)}d`;
+}
+
+function formatNoteSavedAt(iso: string) {
+  const savedAt = relativeTime(iso);
+  return savedAt === "just now" ? "Saved just now" : `Saved ${savedAt} ago`;
 }
 
 function msgTime(iso: string): string {
@@ -354,15 +435,6 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function getSearchableMessageText(message: IGMessage) {
-  return [
-    message.text,
-    message.sender_name,
-    message.sender_id,
-    getMessagePreview(message),
-  ].filter(Boolean).join(" ").toLowerCase();
-}
-
 function getConversationsSignature(conversations: IGConversation[]) {
   return conversations
     .map((conversation) =>
@@ -399,6 +471,38 @@ function getConversationAiMessages(conv: IGConversation) {
       })),
       time: message.time,
     }));
+}
+
+function getInboxEscalations(conv: IGConversation | null): ConversationEscalation[] {
+  return conv ? detectConversationEscalations(getConversationAiMessages(conv), { rules: readEscalationRulesFromStorage() }) : [];
+}
+
+function normalizeWorkflowEscalation(escalation?: AiWorkflowResponse["escalation"]): ConversationEscalation | null {
+  if (!escalation?.label) {
+    return null;
+  }
+
+  return {
+    intent: "complex_question",
+    label: escalation.label,
+    reply: "",
+    summary: escalation.summary || "This conversation needs creator attention.",
+    recommendedAction: escalation.recommendedAction || "Take over and respond manually before AI continues.",
+    signals: escalation.signals || [],
+    urgency: escalation.urgency || "Medium",
+  };
+}
+
+function getInboxEscalationBadgeClass(escalation: { urgency?: ConversationEscalation["urgency"] } | null) {
+  if (!escalation) {
+    return "";
+  }
+
+  if (escalation.urgency === "High") {
+    return "border-[#ffd1dc] bg-[#fff3f7] text-[#df405b]";
+  }
+
+  return "border-[#d7ccff] bg-[#f0edff] text-[#6d3cff]";
 }
 
 function getLeadScoreTone(score: number) {
@@ -455,6 +559,7 @@ function IGBadge() {
 function ConvList({
   convs,
   activeId,
+  starredConversationIds,
   onSelect,
   loading,
   refreshing,
@@ -468,6 +573,7 @@ function ConvList({
 }: {
   convs: IGConversation[];
   activeId: string | null;
+  starredConversationIds: string[];
   onSelect: (id: string) => void;
   loading: boolean;
   refreshing: boolean;
@@ -600,9 +706,12 @@ function ConvList({
           </div>
         ) : (
           convs.map((conv) => {
-            const lastMsg = conv.messages[0];
+            const lastMsg = conv.messages.find((message) => message.from !== "note");
             const name = conv.participant.username || conv.participant.name || `User ${conv.participant.id.slice(-6)}`;
             const avatarSrc = conv.participant.profile_pic || "";
+            const escalations = getInboxEscalations(conv);
+            const escalation = escalations[0];
+            const isStarred = starredConversationIds.includes(conv.id);
 
             return (
               <button
@@ -622,14 +731,29 @@ function ConvList({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-[13px] font-bold text-black">{name}</span>
+                    {escalation ? (
+                      <>
+                        <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-extrabold ${getInboxEscalationBadgeClass(escalation)}`}>
+                          {escalation.label}
+                        </span>
+                        {escalations.length > 1 ? (
+                          <span className="shrink-0 rounded-full bg-[#eff1f6] px-1.5 py-0.5 text-[9px] font-extrabold text-[#596175]">
+                            +{escalations.length - 1}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
                   </span>
                   <span className="mt-1 block line-clamp-1 text-[12px] font-medium leading-[1.35] text-[#4f566c]">
                     {getShortMessagePreview(lastMsg)}
                   </span>
                 </span>
                 <span className="flex h-full shrink-0 flex-col items-end justify-between gap-5">
-                  <span className="text-[11px] font-medium text-[#596175]">
-                    {conv.updated_time ? relativeTime(conv.updated_time) : ""}
+                  <span className="flex items-center gap-1.5 text-[11px] font-medium text-[#596175]">
+                    {isStarred ? (
+                      <Star size={12} strokeWidth={2.35} fill="currentColor" className="text-[#f59e0b]" />
+                    ) : null}
+                    <span>{conv.updated_time ? relativeTime(conv.updated_time) : ""}</span>
                   </span>
                   <IGBadge />
                 </span>
@@ -645,24 +769,9 @@ function ConvList({
 // ─── Chat Thread ──────────────────────────────────────────────────────────────
 
 function ChatBubble({ msg, igUserId }: { msg: IGMessage; igUserId: string }) {
-  const isNote = msg.from === "note";
   const isMe = msg.from === "me" || msg.sender_id === igUserId;
   const hasText = Boolean(msg.text);
   const attachments = msg.attachments || [];
-
-  if (isNote) {
-    return (
-      <div className="flex w-full justify-center px-4">
-        <div className="max-w-[84%] rounded-[10px] border border-[#ffe3a3] bg-[#fff9e8] px-3 py-2 text-center shadow-[0_14px_30px_rgba(78,58,10,0.055)]">
-          <p className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#9b6a00]">Internal note</p>
-          <p className="mt-1 whitespace-pre-wrap break-words text-[12px] font-medium leading-[1.4] text-[#342b13]">
-            {msg.text}
-          </p>
-          <p className="mt-1 text-[10px] font-medium text-[#8a7a58]">{msgTime(msg.time)}</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className={`flex w-full items-end gap-2.5 ${isMe ? "justify-end sm:pr-4" : "justify-start"}`}>
@@ -758,10 +867,14 @@ function ChatBubble({ msg, igUserId }: { msg: IGMessage; igUserId: string }) {
         </div>
       </div>
       {isMe && (
-        <span className="mb-5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#3044ff] text-white">
-          <span className="relative text-[15px] font-extrabold leading-none">
-            T<span className="absolute -right-1 top-0 h-1.5 w-1.5 rounded-full bg-white" />
-          </span>
+        <span className="mb-5 flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#101113] shadow-[0_8px_22px_rgba(20,28,53,0.12)] ring-1 ring-black/5">
+          {/* Local brand avatar lives in public/, so use the direct public path. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/dp.png"
+            alt="TractionFlo"
+            className="h-[22px] w-[26px] object-contain"
+          />
         </span>
       )}
     </div>
@@ -773,6 +886,8 @@ function ChatComposer({
   initialDraft,
   status,
   takeoverMode,
+  savedReplies,
+  welcomeMessage,
   onSubmit,
   onGenerateAiReply,
 }: {
@@ -780,37 +895,36 @@ function ChatComposer({
   initialDraft: ComposerDraft | null;
   status: ComposerStatus;
   takeoverMode: ConversationTakeoverMode;
+  savedReplies: SavedReplySetting[];
+  welcomeMessage: WelcomeMessageSetting;
   onSubmit: (payload: ComposerSubmitPayload) => Promise<void>;
   onGenerateAiReply: () => Promise<string>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [mode, setMode] = useState<ComposerMode>(initialDraft?.mode || "reply");
   const [text, setText] = useState(initialDraft?.text || "");
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
-  const [emojiOpen, setEmojiOpen] = useState(false);
-  const [snippetsOpen, setSnippetsOpen] = useState(false);
-  const [variablesOpen, setVariablesOpen] = useState(false);
-  const [sendMenuOpen, setSendMenuOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<ComposerMenu | null>(null);
   const [aiReplying, setAiReplying] = useState(false);
 
-  const isReply = mode === "reply";
   const isHumanTakeover = takeoverMode === "human";
-  const canUseAiTools = Boolean(conv && !isHumanTakeover);
-  const canAttach = Boolean(conv && isReply && !status.sending);
+  const canManualReply = Boolean(conv && isHumanTakeover && !status.sending);
+  const canUseAiTools = Boolean(conv && isHumanTakeover);
+  const canUseWelcomeMessage = Boolean(canManualReply && welcomeMessage.enabled && welcomeMessage.text.trim());
+  const visibleSavedReplies = savedReplies.filter((reply) => reply.enabled && reply.text.trim());
+  const canAttach = canManualReply;
   const canSubmit = Boolean(
-    conv &&
-      !status.sending &&
-      (text.trim() || (isReply && attachments.length > 0))
+    canManualReply &&
+      (text.trim() || attachments.length > 0)
   );
+  const activeMenu = canManualReply ? openMenu : null;
 
   const closeMenus = () => {
-    setEmojiOpen(false);
-    setSnippetsOpen(false);
-    setVariablesOpen(false);
-    setSendMenuOpen(false);
+    setOpenMenu(null);
   };
 
   const insertText = (value: string) => {
+    if (!canManualReply) return;
+
     setText((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}${value}`);
   };
 
@@ -820,7 +934,7 @@ function ChatComposer({
   };
 
   const handleFilesSelected = (files: FileList | null) => {
-    if (!files) return;
+    if (!files || !canAttach) return;
 
     const nextAttachments = Array.from(files)
       .filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/"))
@@ -851,9 +965,8 @@ function ChatComposer({
   };
 
   const generateAiReply = async () => {
-    if (!conv || aiReplying || !canUseAiTools || isHumanTakeover) return;
+    if (!conv || aiReplying || !canUseAiTools) return;
 
-    setMode("reply");
     setAiReplying(true);
 
     try {
@@ -870,7 +983,7 @@ function ChatComposer({
   const submitComposer = async (refreshAfter = false) => {
     if (!conv || !canSubmit) return;
 
-    const finalText = isReply ? resolveComposerVariables(text.trim(), conv) : text.trim();
+    const finalText = resolveComposerVariables(text.trim(), conv);
     const localAttachments = attachments.map((attachment) => ({
       type: attachment.type.startsWith("video/") ? "video" : "image",
       url: attachment.previewUrl,
@@ -882,9 +995,9 @@ function ChatComposer({
 
     try {
       await onSubmit({
-        mode,
+        mode: "reply",
         text: finalText,
-        files: isReply ? attachments.map((attachment) => attachment.file) : [],
+        files: attachments.map((attachment) => attachment.file),
         localAttachments,
         refreshAfter,
       });
@@ -900,22 +1013,7 @@ function ChatComposer({
   return (
     <div className="relative rounded-[10px] border border-[#dde3ee] bg-white shadow-[0_18px_40px_rgba(20,28,53,0.04)]">
       <div className="flex h-8 items-center gap-1 border-b border-[#edf0f6] px-3 text-[12px] font-bold">
-        {(["reply", "note"] as ComposerMode[]).map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => {
-              setMode(option);
-              closeMenus();
-            }}
-            className={`h-7 rounded-[7px] px-3 capitalize transition ${
-              mode === option ? "bg-[#f0efff] text-black" : "text-[#596175] hover:bg-[#f6f7fb]"
-            }`}
-          >
-            {option}
-          </button>
-        ))}
-        <span className="mx-1 h-4 w-px bg-[#e1e5ee]" />
+        <span className="flex h-7 items-center rounded-[7px] bg-[#f0efff] px-3 text-black">Reply</span>
         {status.notice && <span className="ml-auto text-[10px] font-extrabold text-[#0a9b3f]">{status.notice}</span>}
       </div>
 
@@ -935,14 +1033,12 @@ function ChatComposer({
               void submitComposer(false);
             }
           }}
-          disabled={!conv || status.sending}
+          disabled={!canManualReply}
           rows={2}
           placeholder={
-            isReply
-              ? isHumanTakeover
-                ? "Human takeover active. Type a manual reply..."
-                : "Type your message or let AI reply for you..."
-              : "Write a private note for your team..."
+            isHumanTakeover
+              ? "Human takeover active. Type a manual reply..."
+              : "AI takeover active. Switch to human takeover to reply manually."
           }
           className="min-h-[48px] w-full resize-none bg-transparent text-[13px] font-medium leading-[1.45] text-[#20273b] outline-none placeholder:text-[#9aa1b5] disabled:cursor-not-allowed disabled:opacity-60"
         />
@@ -960,8 +1056,9 @@ function ChatComposer({
                 <button
                   type="button"
                   aria-label={`Remove ${attachment.name}`}
+                  disabled={!canManualReply}
                   onClick={() => removeAttachment(attachment.id)}
-                  className="rounded-full p-0.5 text-[#596175] hover:bg-[#e8ebf3] hover:text-black"
+                  className="rounded-full p-0.5 text-[#596175] hover:bg-[#e8ebf3] hover:text-black disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <X size={12} />
                 </button>
@@ -974,10 +1071,10 @@ function ChatComposer({
           <div className="flex items-center gap-1 text-[#31394f]">
             <button
               type="button"
-              title="Quick response"
-              aria-label="Quick response"
-              disabled={!conv || status.sending}
-              onClick={() => insertText("Thanks for reaching out! I can help with that.")}
+              title={welcomeMessageLabel}
+              aria-label={welcomeMessageLabel}
+              disabled={!canUseWelcomeMessage}
+              onClick={() => insertText(welcomeMessage.text)}
               className="flex h-8 w-8 items-center justify-center rounded-[8px] transition hover:bg-[#f3f4f8] disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Zap size={16} />
@@ -986,12 +1083,8 @@ function ChatComposer({
               type="button"
               title="Emoji"
               aria-label="Emoji"
-              disabled={!conv || status.sending}
-              onClick={() => {
-                setEmojiOpen((open) => !open);
-                setSnippetsOpen(false);
-                setVariablesOpen(false);
-              }}
+              disabled={!canManualReply}
+              onClick={() => setOpenMenu((menu) => (menu === "emoji" ? null : "emoji"))}
               className="flex h-8 w-8 items-center justify-center rounded-[8px] transition hover:bg-[#f3f4f8] disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Smile size={16} />
@@ -1010,29 +1103,11 @@ function ChatComposer({
               type="button"
               title="Saved replies"
               aria-label="Saved replies"
-              disabled={!conv || status.sending}
-              onClick={() => {
-                setSnippetsOpen((open) => !open);
-                setEmojiOpen(false);
-                setVariablesOpen(false);
-              }}
+              disabled={!canManualReply}
+              onClick={() => setOpenMenu((menu) => (menu === "snippets" ? null : "snippets"))}
               className="flex h-8 w-8 items-center justify-center rounded-[8px] transition hover:bg-[#f3f4f8] disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Bookmark size={16} />
-            </button>
-            <button
-              type="button"
-              title="Variables"
-              aria-label="Variables"
-              disabled={!conv || status.sending}
-              onClick={() => {
-                setVariablesOpen((open) => !open);
-                setEmojiOpen(false);
-                setSnippetsOpen(false);
-              }}
-              className="flex h-8 w-8 items-center justify-center rounded-[8px] transition hover:bg-[#f3f4f8] disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <Braces size={16} />
             </button>
             <input
               ref={fileInputRef}
@@ -1045,7 +1120,7 @@ function ChatComposer({
           </div>
 
           <div className="flex gap-2">
-            {!isHumanTakeover ? (
+            {isHumanTakeover ? (
               <button
                 type="button"
                 disabled={!conv || status.sending || aiReplying || !canUseAiTools}
@@ -1066,27 +1141,25 @@ function ChatComposer({
                 className="flex h-8 items-center gap-2 rounded-l-[8px] bg-[#3044ff] px-3.5 text-[12px] font-semibold text-white shadow-[0_16px_30px_rgba(48,68,255,0.24)] transition hover:bg-[#2638f0] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {status.sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-                {mode === "note" ? "Save" : "Send"}
+                Send
               </button>
               <button
                 type="button"
                 aria-label="Send options"
                 disabled={!canSubmit}
-                onClick={() => setSendMenuOpen((open) => !open)}
+                onClick={() => setOpenMenu((menu) => (menu === "send" ? null : "send"))}
                 className="flex h-8 w-8 items-center justify-center rounded-r-[8px] bg-[#3044ff] text-white transition hover:bg-[#2638f0] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <ChevronDown size={14} />
               </button>
-              {sendMenuOpen && (
+              {activeMenu === "send" && (
                 <div className="absolute bottom-10 right-0 z-20 w-44 overflow-hidden rounded-[9px] border border-[#dde3ee] bg-white py-1 text-[11px] font-semibold text-[#252c41] shadow-[0_20px_55px_rgba(20,28,53,0.14)]">
                   <button type="button" onClick={() => void submitComposer(false)} className="block w-full px-3 py-2 text-left hover:bg-[#f6f7fb]">
-                    {mode === "note" ? "Save note" : "Send now"}
+                    Send now
                   </button>
-                  {mode === "reply" && (
-                    <button type="button" onClick={() => void submitComposer(true)} className="block w-full px-3 py-2 text-left hover:bg-[#f6f7fb]">
-                      Send and refresh
-                    </button>
-                  )}
+                  <button type="button" onClick={() => void submitComposer(true)} className="block w-full px-3 py-2 text-left hover:bg-[#f6f7fb]">
+                    Send and refresh
+                  </button>
                 </div>
               )}
             </div>
@@ -1094,7 +1167,7 @@ function ChatComposer({
         </div>
       </div>
 
-      {emojiOpen && (
+      {activeMenu === "emoji" && (
         <div className="absolute bottom-[62px] left-2 z-20 overflow-hidden rounded-[12px] border border-[#dde3ee] bg-white shadow-[0_22px_60px_rgba(20,28,53,0.16)] sm:left-4">
           <EmojiPicker
             width={320}
@@ -1110,39 +1183,28 @@ function ChatComposer({
         </div>
       )}
 
-      {snippetsOpen && (
+      {activeMenu === "snippets" && (
         <div className="absolute bottom-[62px] left-24 z-20 w-72 overflow-hidden rounded-[10px] border border-[#dde3ee] bg-white py-1 shadow-[0_20px_55px_rgba(20,28,53,0.14)]">
-          {savedSnippets.map((snippet) => (
-            <button
-              key={snippet}
-              type="button"
-              onClick={() => {
-                setText(snippet);
-                closeMenus();
-              }}
-              className="block w-full px-3 py-2 text-left text-[11px] font-semibold leading-[1.35] text-[#252c41] hover:bg-[#f6f7fb]"
-            >
-              {snippet}
-            </button>
-          ))}
+          {visibleSavedReplies.length > 0 ? (
+            visibleSavedReplies.map((reply) => (
+              <button
+                key={reply.id}
+                type="button"
+                onClick={() => {
+                  setText(reply.text);
+                  closeMenus();
+                }}
+                className="block w-full px-3 py-2 text-left text-[11px] font-semibold leading-[1.35] text-[#252c41] hover:bg-[#f6f7fb]"
+              >
+                {reply.text}
+              </button>
+            ))
+          ) : (
+            <p className="px-3 py-2 text-[11px] font-semibold text-[#596175]">No saved replies yet</p>
+          )}
         </div>
       )}
 
-      {variablesOpen && (
-        <div className="absolute bottom-[62px] left-40 z-20 w-48 overflow-hidden rounded-[10px] border border-[#dde3ee] bg-white py-1 shadow-[0_20px_55px_rgba(20,28,53,0.14)]">
-          {variableOptions.map((variable) => (
-            <button
-              key={variable.token}
-              type="button"
-              onClick={() => insertText(variable.token)}
-              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[11px] font-semibold text-[#252c41] hover:bg-[#f6f7fb]"
-            >
-              <span>{variable.label}</span>
-              <span className="text-[#596175]">{variable.token}</span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -1156,12 +1218,8 @@ function ChatThread({
   onGenerateAiReply,
   takeoverMode,
   onToggleTakeoverMode,
-  agents,
-  loadingAgents,
-  canManageAgents,
-  assignmentSavingAgentId,
-  assignmentStatus,
-  onToggleAgentAssignment,
+  isStarred,
+  onToggleStarred,
 }: {
   conv: IGConversation | null;
   igUserId: string;
@@ -1171,88 +1229,136 @@ function ChatThread({
   onGenerateAiReply: () => Promise<string>;
   takeoverMode: ConversationTakeoverMode;
   onToggleTakeoverMode: () => void;
-  agents: AgentAccount[];
-  loadingAgents: boolean;
-  canManageAgents: boolean;
-  assignmentSavingAgentId: string;
-  assignmentStatus: string;
-  onToggleAgentAssignment: (agent: AgentAccount) => Promise<void>;
+  isStarred: boolean;
+  onToggleStarred: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
-  const messages = conv ? [...conv.messages].reverse() : [];
-  const [lovedConversationIds, setLovedConversationIds] = useState<string[]>([]);
-  const [starredConversationIds, setStarredConversationIds] = useState<string[]>([]);
+  const messages = conv ? [...conv.messages].filter((message) => message.from !== "note").reverse() : [];
+  const [quickReplies, setQuickReplies] = useState<QuickReplySetting[]>(() => readQuickRepliesFromStorage());
+  const [savedReplies, setSavedReplies] = useState<SavedReplySetting[]>(() => readSavedRepliesFromStorage());
+  const [welcomeMessage, setWelcomeMessage] = useState<WelcomeMessageSetting>(() => readWelcomeMessageFromStorage());
   const [actionsOpen, setActionsOpen] = useState(false);
-  const [assignmentOpen, setAssignmentOpen] = useState(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conv?.id, messages.length]);
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setAssignmentOpen(false);
-    }, 0);
+    const refreshComposerShortcuts = () => {
+      setQuickReplies(readQuickRepliesFromStorage());
+      setSavedReplies(readSavedRepliesFromStorage());
+      setWelcomeMessage(readWelcomeMessageFromStorage());
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key || event.key === settingsStateStorageKey) {
+        refreshComposerShortcuts();
+      }
+    };
 
-    return () => window.clearTimeout(timeout);
-  }, [conv?.id]);
+    window.addEventListener(quickRepliesChangedEvent, refreshComposerShortcuts);
+    window.addEventListener(savedRepliesChangedEvent, refreshComposerShortcuts);
+    window.addEventListener(welcomeMessageChangedEvent, refreshComposerShortcuts);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener(quickRepliesChangedEvent, refreshComposerShortcuts);
+      window.removeEventListener(savedRepliesChangedEvent, refreshComposerShortcuts);
+      window.removeEventListener(welcomeMessageChangedEvent, refreshComposerShortcuts);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
 
   const name = conv ? getParticipantName(conv) : "Select a conversation";
   const avatarSrc = conv?.participant.profile_pic || "";
   const profileUrl = getInstagramProfileUrl(conv);
-  const isLoved = Boolean(conv && lovedConversationIds.includes(conv.id));
-  const isStarred = Boolean(conv && starredConversationIds.includes(conv.id));
-  const assignedAgents = conv ? agents.filter((agent) => agent.assignedConversationIds.includes(conv.id)) : [];
   const isHumanTakeover = takeoverMode === "human";
   const takeoverLabel = getTakeoverLabel(takeoverMode);
   const TakeoverStatusIcon = isHumanTakeover ? Users : Sparkles;
-
-  const toggleConversationId = (id: string, setter: Dispatch<SetStateAction<string[]>>) => {
-    setter((ids) => (ids.includes(id) ? ids.filter((existingId) => existingId !== id) : [...ids, id]));
-  };
+  const visibleQuickReplies = quickReplies.filter((reply) => reply.enabled && reply.label.trim() && reply.text.trim());
 
   return (
     <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white">
-      <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#e7eaf2] px-4 sm:px-6">
-        <div className="flex min-w-0 items-center gap-3.5">
+      <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-[#e7eaf2] px-4 py-1.5 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <button type="button" aria-label="Back" className="text-[#1f2638]">
-            <ArrowLeft size={18} strokeWidth={2.3} />
+            <ArrowLeft size={20} strokeWidth={2.3} />
           </button>
           {conv ? (
             <>
               <Avatar src={avatarSrc} name={name} size="h-10 w-10" />
-              <div>
-                <h2 className="text-[14px] font-bold leading-tight text-black">{name}</h2>
-                <div className="flex flex-wrap items-center gap-1.5">
+              <div className="min-w-0">
+                <h2 className="truncate text-[15px] font-bold leading-tight text-black">{name}</h2>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                   <IGBadge />
-                  <p className="text-[11px] font-medium text-[#596175]">Instagram</p>
+                  <p className="text-[12px] font-medium text-[#596175]">Instagram</p>
                   <span
-                    className={`inline-flex h-5 items-center gap-1 rounded-full border px-2 text-[10px] font-extrabold ${getTakeoverPillClass(
+                    className={`inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-bold ${getTakeoverPillClass(
                       takeoverMode
                     )}`}
                   >
-                    <TakeoverStatusIcon size={11} strokeWidth={2.5} />
+                    <TakeoverStatusIcon size={13} strokeWidth={2.4} />
                     {takeoverLabel}
                   </span>
                 </div>
               </div>
-              {profileUrl && (
-                <a
-                  href={profileUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ml-4 hidden h-9 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-semibold text-black transition hover:bg-[#f6f7fb] sm:flex"
-                >
-                  View profile
-                  <ExternalLink size={14} strokeWidth={2.4} />
-                </a>
-              )}
             </>
           ) : (
             <h2 className="text-[14px] font-bold text-black">Select a conversation</h2>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {conv ? (
+            <>
+              <button
+                type="button"
+                aria-label={isStarred ? "Remove star marker" : "Star conversation"}
+                aria-pressed={isStarred}
+                onClick={onToggleStarred}
+                className={`flex h-9 w-9 items-center justify-center rounded-[9px] border transition ${
+                  isStarred ? "border-[#ffe2a8] bg-[#fff8e8] text-[#f59e0b]" : "border-[#dde3ee] bg-white text-black hover:bg-[#f6f7fb]"
+                }`}
+              >
+                <Star size={17} strokeWidth={2.25} fill={isStarred ? "currentColor" : "none"} />
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label="More conversation actions"
+                  onClick={() => setActionsOpen((open) => !open)}
+                  className="flex h-9 w-9 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white text-black transition hover:bg-[#f6f7fb]"
+                >
+                  <MoreHorizontal size={17} strokeWidth={2.25} />
+                </button>
+                {actionsOpen ? (
+                  <div className="absolute right-0 top-10 z-30 w-44 overflow-hidden rounded-[9px] border border-[#dde3ee] bg-white py-1 text-[11px] font-semibold text-[#252c41] shadow-[0_20px_55px_rgba(20,28,53,0.14)]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (profileUrl) void navigator.clipboard.writeText(profileUrl);
+                        setActionsOpen(false);
+                      }}
+                      disabled={!profileUrl}
+                      className="block w-full px-3 py-2 text-left hover:bg-[#f6f7fb] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Copy profile link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isStarred) {
+                          onToggleStarred();
+                        }
+                        setActionsOpen(false);
+                      }}
+                      className="block w-full px-3 py-2 text-left hover:bg-[#f6f7fb]"
+                    >
+                      Clear star
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : null}
           {conv && (
             <button
               type="button"
@@ -1267,98 +1373,6 @@ function ChatThread({
               {isHumanTakeover ? "Take over AI" : "Take over human"}
             </button>
           )}
-          {conv && canManageAgents && (
-            <div className="relative hidden sm:block">
-              <button
-                type="button"
-                onClick={() => setAssignmentOpen((open) => !open)}
-                className="flex h-10 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black transition hover:bg-[#f6f7fb]"
-              >
-                <Users size={16} strokeWidth={2.3} />
-                Assign
-                <span className="rounded-full bg-[#f0edff] px-2 py-0.5 text-[10px] text-[#3044ff]">
-                  {assignedAgents.length}
-                </span>
-                <ChevronDown size={14} strokeWidth={2.4} />
-              </button>
-
-              {assignmentOpen && (
-                <div className="absolute right-0 top-12 z-30 w-[292px] rounded-[10px] border border-[#dde3ee] bg-white p-2 shadow-[0_22px_60px_rgba(20,28,53,0.16)]">
-                  <div className="flex items-center justify-between px-2 py-1">
-                    <p className="text-[11px] font-extrabold uppercase text-[#596175]">Assign to agent</p>
-                    <button
-                      type="button"
-                      aria-label="Close assignment menu"
-                      onClick={() => setAssignmentOpen(false)}
-                      className="flex h-6 w-6 items-center justify-center rounded-[6px] text-[#596175] hover:bg-[#f6f7fb]"
-                    >
-                      <X size={13} strokeWidth={2.4} />
-                    </button>
-                  </div>
-
-                  {loadingAgents ? (
-                    <div className="flex items-center gap-2 px-2 py-4 text-[11px] font-semibold text-[#46506a]">
-                      <Loader2 size={14} className="animate-spin text-[#3044ff]" />
-                      Loading agents
-                    </div>
-                  ) : agents.length === 0 ? (
-                    <p className="px-2 py-4 text-[11px] font-semibold leading-relaxed text-[#46506a]">
-                      Create an agent in Settings first.
-                    </p>
-                  ) : (
-                    <div className="mt-1 grid max-h-[280px] gap-1 overflow-y-auto">
-                      {agents.map((agent) => {
-                        const checked = agent.assignedConversationIds.includes(conv.id);
-                        const canAssign = agent.status === "Active" && agent.allowedPages.includes("inbox");
-
-                        return (
-                          <button
-                            key={agent.id}
-                            type="button"
-                            onClick={() => void onToggleAgentAssignment(agent)}
-                            disabled={!canAssign || assignmentSavingAgentId === agent.id}
-                            className={`grid min-h-[58px] grid-cols-[22px_minmax(0,1fr)] items-start gap-2 rounded-[8px] px-2 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-55 ${
-                              checked ? "bg-[#f6f7ff]" : "hover:bg-[#f6f7fb]"
-                            }`}
-                          >
-                            <span
-                              className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-[6px] border ${
-                                checked ? "border-[#3044ff] bg-[#3044ff] text-white" : "border-[#d7ddeb] bg-white text-transparent"
-                              }`}
-                            >
-                              {assignmentSavingAgentId === agent.id ? (
-                                <Loader2 size={12} className="animate-spin" />
-                              ) : (
-                                <Check size={13} strokeWidth={2.8} />
-                              )}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block truncate text-[12px] font-extrabold text-black">{agent.name}</span>
-                              <span className="mt-0.5 block truncate text-[10px] font-semibold text-[#596175]">{agent.email}</span>
-                              {!canAssign && (
-                                <span className="mt-1 block text-[10px] font-extrabold text-[#df405b]">
-                                  Enable Conversations permission first
-                                </span>
-                              )}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {assignmentStatus && (
-                    <p className="mt-2 rounded-[8px] bg-[#f6f7fb] px-2 py-2 text-[11px] font-semibold leading-relaxed text-[#46506a]">
-                      {assignmentStatus}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          <button type="button" className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee] xl:hidden">
-            <Search size={17} />
-          </button>
           <NotificationBell
             iconSize={17}
             buttonClassName="relative flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee] bg-white transition hover:bg-[#f6f7fb] xl:hidden"
@@ -1376,115 +1390,180 @@ function ChatThread({
             No messages in this conversation
           </div>
         ) : (
-          <>
-            <div className="relative mb-2 flex justify-end gap-2">
-              <button
-                type="button"
-                aria-pressed={isLoved}
-                onClick={() => conv && toggleConversationId(conv.id, setLovedConversationIds)}
-                className={`flex h-7 w-7 items-center justify-center rounded-[8px] border transition ${
-                  isLoved ? "border-[#ffd1dc] bg-[#fff3f7] text-[#e13563]" : "border-[#dde3ee] bg-white text-black hover:bg-[#f6f7fb]"
-                }`}
-              >
-                <Heart size={15} strokeWidth={2.2} fill={isLoved ? "currentColor" : "none"} />
-              </button>
-              <button
-                type="button"
-                aria-pressed={isStarred}
-                onClick={() => conv && toggleConversationId(conv.id, setStarredConversationIds)}
-                className={`flex h-7 w-7 items-center justify-center rounded-[8px] border transition ${
-                  isStarred ? "border-[#ffe2a8] bg-[#fff8e8] text-[#f59e0b]" : "border-[#dde3ee] bg-white text-black hover:bg-[#f6f7fb]"
-                }`}
-              >
-                <Star size={15} strokeWidth={2.2} fill={isStarred ? "currentColor" : "none"} />
-              </button>
-              <button
-                type="button"
-                aria-label="More conversation actions"
-                onClick={() => setActionsOpen((open) => !open)}
-                className="flex h-7 w-7 items-center justify-center rounded-[8px] border border-[#dde3ee] bg-white text-black transition hover:bg-[#f6f7fb]"
-              >
-                <MoreHorizontal size={15} strokeWidth={2.2} />
-              </button>
-              {actionsOpen && (
-                <div className="absolute right-0 top-8 z-20 w-44 overflow-hidden rounded-[9px] border border-[#dde3ee] bg-white py-1 text-[11px] font-semibold text-[#252c41] shadow-[0_20px_55px_rgba(20,28,53,0.14)]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (profileUrl) void navigator.clipboard.writeText(profileUrl);
-                      setActionsOpen(false);
-                    }}
-                    className="block w-full px-3 py-2 text-left hover:bg-[#f6f7fb]"
-                  >
-                    Copy profile link
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLovedConversationIds((ids) => (conv && ids.includes(conv.id) ? ids.filter((id) => id !== conv.id) : ids));
-                      setStarredConversationIds((ids) => (conv && ids.includes(conv.id) ? ids.filter((id) => id !== conv.id) : ids));
-                      setActionsOpen(false);
-                    }}
-                    className="block w-full px-3 py-2 text-left hover:bg-[#f6f7fb]"
-                  >
-                    Clear flags
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="space-y-2">
-              {messages.map((msg) => (
-                <ChatBubble key={msg.id} msg={msg} igUserId={igUserId} />
-              ))}
-              <div ref={bottomRef} />
-            </div>
-          </>
+          <div className="space-y-2">
+            {messages.map((msg) => (
+              <ChatBubble key={msg.id} msg={msg} igUserId={igUserId} />
+            ))}
+            <div ref={bottomRef} />
+          </div>
         )}
       </div>
 
       <footer className="shrink-0 px-4 pb-3 sm:px-6">
-        <div className="mb-2 flex flex-nowrap items-center gap-2 overflow-x-auto">
-          {quickActions.map((a) => {
-            const Icon = a.icon;
-            const actionText =
-              a.label === "Book a call"
-                ? "Would you like to book a quick call? I can send over a time."
-                : a.label === "Send pricing"
-                  ? "Here is the pricing info. Which option are you interested in?"
-                  : "Here is the program info. Tell me what you want to know first.";
-            return (
-              <button
-                key={a.label}
-                type="button"
-                onClick={() => {
-                  void onComposerSubmit({
-                    mode: "reply",
-                    text: actionText,
-                    files: [],
-                    localAttachments: [],
-                    refreshAfter: false,
-                  }).catch(() => undefined);
-                }}
-                disabled={!conv || composerStatus.sending}
-                className="flex h-7 items-center gap-2 rounded-[9px] border border-[#dde3ee] bg-white px-3 text-[11px] font-medium text-[#31394f] transition hover:bg-[#f6f7fb] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Icon size={14} strokeWidth={2.2} />
-                {a.label}
-              </button>
-            );
-          })}
-        </div>
+        {visibleQuickReplies.length > 0 ? (
+          <div className="mb-2 flex max-w-full flex-nowrap items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
+            {visibleQuickReplies.map((reply) => {
+              const Icon = getQuickReplyIcon(reply);
+
+              return (
+                <button
+                  key={reply.id}
+                  type="button"
+                  onClick={() => {
+                    void onComposerSubmit({
+                      mode: "reply",
+                      text: reply.text,
+                      files: [],
+                      localAttachments: [],
+                      refreshAfter: false,
+                    }).catch(() => undefined);
+                  }}
+                  disabled={!conv || composerStatus.sending || !isHumanTakeover}
+                  className="flex h-7 shrink-0 items-center gap-2 rounded-[9px] border border-[#dde3ee] bg-white px-3 text-[11px] font-medium text-[#31394f] transition hover:bg-[#f6f7fb] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Icon size={14} strokeWidth={2.2} />
+                  {reply.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <ChatComposer
-          key={`${conv?.id || "empty"}-${composerDraft?.id || 0}`}
+          key={`${conv?.id || "empty"}-${composerDraft?.id || 0}-${takeoverMode}`}
           conv={conv}
           initialDraft={composerDraft}
           status={composerStatus}
           takeoverMode={takeoverMode}
+          savedReplies={savedReplies}
+          welcomeMessage={welcomeMessage}
           onSubmit={onComposerSubmit}
           onGenerateAiReply={onGenerateAiReply}
         />
       </footer>
     </main>
+  );
+}
+
+function EscalationFlagCarousel({
+  escalations,
+  isHumanTakeover,
+  onToggleTakeoverMode,
+}: {
+  escalations: ConversationEscalation[];
+  isHumanTakeover: boolean;
+  onToggleTakeoverMode: () => void;
+}) {
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  if (escalations.length === 0) {
+    return null;
+  }
+
+  const safeIndex = Math.min(activeIndex, escalations.length - 1);
+  const hasMultipleEscalations = escalations.length > 1;
+  const moveTo = (nextIndex: number) => {
+    setActiveIndex((nextIndex + escalations.length) % escalations.length);
+  };
+
+  return (
+    <section className="mt-3">
+      {hasMultipleEscalations ? (
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] font-extrabold text-[#596175]">
+            {safeIndex + 1} of {escalations.length} flags
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              aria-label="Previous escalation flag"
+              onClick={() => moveTo(safeIndex - 1)}
+              className="flex h-7 w-7 items-center justify-center rounded-[7px] border border-[#dde3ee] bg-white text-[#46506a] transition hover:bg-[#f6f7fb]"
+            >
+              <ChevronLeft size={14} strokeWidth={2.5} />
+            </button>
+            <button
+              type="button"
+              aria-label="Next escalation flag"
+              onClick={() => moveTo(safeIndex + 1)}
+              className="flex h-7 w-7 items-center justify-center rounded-[7px] border border-[#dde3ee] bg-white text-[#46506a] transition hover:bg-[#f6f7fb]"
+            >
+              <ChevronRight size={14} strokeWidth={2.5} />
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="overflow-hidden rounded-[10px]">
+        <div
+          className="flex transition-transform duration-300 ease-out"
+          style={{ transform: `translateX(-${safeIndex * 100}%)` }}
+        >
+          {escalations.map((escalation) => (
+            <div key={escalation.intent} className="w-full shrink-0">
+              <div className={`rounded-[10px] border p-3 ${getInboxEscalationBadgeClass(escalation)}`}>
+                <div className="flex items-start gap-2">
+                  <TriangleAlert size={15} className="mt-0.5 shrink-0" strokeWidth={2.4} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-[12px] font-extrabold text-black">Escalation flag</h3>
+                      <span className="rounded-[7px] bg-white/75 px-2 py-0.5 text-[10px] font-extrabold">
+                        {escalation.label || "Needs human review"}
+                      </span>
+                      {escalation.urgency ? (
+                        <span className="rounded-[7px] bg-white/75 px-2 py-0.5 text-[10px] font-extrabold">
+                          {escalation.urgency} urgency
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-[11px] font-semibold leading-relaxed text-[#253049]">
+                      {escalation.summary || "This conversation needs creator attention."}
+                    </p>
+                    <p className="mt-2 rounded-[8px] bg-white/75 p-2 text-[11px] font-semibold leading-relaxed text-[#253049]">
+                      {escalation.recommendedAction || "Take over and respond manually before AI continues."}
+                    </p>
+                    {escalation.signals?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {escalation.signals.slice(0, 3).map((signal) => (
+                          <span key={signal} className="rounded-[7px] bg-white/75 px-2 py-1 text-[10px] font-bold">
+                            {signal}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {!isHumanTakeover ? (
+                      <button
+                        type="button"
+                        onClick={onToggleTakeoverMode}
+                        className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-3 text-[11px] font-extrabold text-white shadow-[0_12px_24px_rgba(48,68,255,0.18)]"
+                      >
+                        <Users size={13} strokeWidth={2.4} />
+                        Take over human
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {hasMultipleEscalations ? (
+        <div className="mt-2 flex justify-center gap-1.5">
+          {escalations.map((escalation, index) => (
+            <button
+              key={`${escalation.intent}-dot`}
+              type="button"
+              aria-label={`Show ${escalation.label}`}
+              onClick={() => setActiveIndex(index)}
+              className={`h-1.5 rounded-full transition-all ${
+                index === safeIndex ? "w-5 bg-[#3044ff]" : "w-1.5 bg-[#d7deeb]"
+              }`}
+            />
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1500,6 +1579,12 @@ function SummaryPanel({
   onToggleTakeoverMode,
   onDraftSuggestedReply,
   onAutoSendAiReply,
+  agents,
+  loadingAgents,
+  canManageAgents,
+  assignmentSavingAgentId,
+  assignmentStatus,
+  onToggleAgentAssignment,
 }: {
   conv: IGConversation | null;
   igUserId: string;
@@ -1510,42 +1595,80 @@ function SummaryPanel({
   onToggleTakeoverMode: () => void;
   onDraftSuggestedReply: (text: string) => void;
   onAutoSendAiReply: (text: string, conversationId: string) => Promise<void>;
+  agents: AgentAccount[];
+  loadingAgents: boolean;
+  canManageAgents: boolean;
+  assignmentSavingAgentId: string;
+  assignmentStatus: string;
+  onToggleAgentAssignment: (agent: AgentAccount) => Promise<void>;
 }) {
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [aiWorkflow, setAiWorkflow] = useState<AiWorkflowResponse | null>(null);
   const [aiStatus, setAiStatus] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [conversationNotes, setConversationNotes] = useState<ConversationNotesState>(() => readConversationNotesFromStorage());
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [messageSearchOpen, setMessageSearchOpen] = useState(false);
+  const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const [, setClockTick] = useState(0);
   const lastAiKeyRef = useRef("");
   const takeoverModeRef = useRef<ConversationTakeoverMode>(takeoverMode);
   const isHumanTakeover = takeoverMode === "human";
   const takeoverLabel = getTakeoverLabel(takeoverMode);
   const TakeoverStatusIcon = isHumanTakeover ? Users : Sparkles;
+  const profileUrl = getInstagramProfileUrl(conv);
+  const assignedAgents = conv ? agents.filter((agent) => agent.assignedConversationIds.includes(conv.id)) : [];
   const msgs = conv ? [...conv.messages].filter((m) => m.from !== "note").reverse() : [];
+  const trimmedMessageSearch = messageSearchQuery.trim().toLowerCase();
+  const messageSearchMatches = trimmedMessageSearch
+    ? msgs.filter((message) =>
+        [
+          message.text,
+          message.sender_name,
+          getMessagePreview(message),
+        ].filter(Boolean).join(" ").toLowerCase().includes(trimmedMessageSearch)
+      )
+    : [];
   const lastUserMsg = conv?.messages.find(m => m.from === "user" && m.sender_id !== igUserId);
   const lastUserMsgPreview = getMessagePreview(lastUserMsg);
   const knowledgeSummary = aiWorkflow?.knowledge;
   const hasKnowledgeReply = knowledgeSummary?.mode === "direct" || knowledgeSummary?.mode === "context";
+  const localEscalations = getInboxEscalations(conv);
+  const workflowEscalation = normalizeWorkflowEscalation(aiWorkflow?.escalation);
+  const escalationCards = localEscalations.length > 0 ? localEscalations : workflowEscalation ? [workflowEscalation] : [];
   const suggestedReply = isHumanTakeover
     ? ""
     : aiWorkflow?.reply ||
       (aiLoading ? "Reading saved knowledge and conversation context..." : getSuggestedReply(conv));
   const leadInsight = aiWorkflow?.lead;
-  const starterDraft = isHumanTakeover ? "" : aiWorkflow?.starter || suggestedReply;
-  const ctaDraft = isHumanTakeover ? "" : aiWorkflow?.cta || leadInsight?.cta || suggestedReply;
   const aiRefreshKey = conv ? `${conv.id}-${conv.updated_time}-${conv.messages.length}` : "empty";
-  const trimmedSearch = searchQuery.trim().toLowerCase();
-  const searchMatches = trimmedSearch
-    ? msgs.filter((message) => getSearchableMessageText(message).includes(trimmedSearch))
-    : [];
   const lastMessage = msgs[msgs.length - 1];
   const latestInboundMessage = lastMessage?.from === "user" ? lastMessage : null;
   const lastAutoSendKeyRef = useRef("");
+  const savedConversationNote = conv ? conversationNotes[conv.id] : undefined;
+  const noteDraft = conv ? noteDrafts[conv.id] ?? savedConversationNote?.text ?? "" : "";
+  const hasConversationNote = Boolean(savedConversationNote?.text.trim());
+  const hasConversationNoteChanges = Boolean(conv && noteDraft !== (savedConversationNote?.text || ""));
+  const conversationNoteStatus = hasConversationNoteChanges
+    ? "Unsaved changes"
+    : hasConversationNote && savedConversationNote
+      ? formatNoteSavedAt(savedConversationNote.updatedAt)
+      : "No notes yet";
+  const canSaveConversationNote = Boolean(conv && hasConversationNoteChanges);
 
   useEffect(() => {
     takeoverModeRef.current = takeoverMode;
   }, [takeoverMode]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setAssignmentOpen(false);
+      setMessageSearchOpen(false);
+      setMessageSearchQuery("");
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [conv?.id]);
 
   const runAiWorkflow = useCallback(
     async (options?: { silent?: boolean; forceRefresh?: boolean; signal?: AbortSignal }) => {
@@ -1621,19 +1744,6 @@ function SummaryPanel({
     }, 30_000);
 
     return () => window.clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   useEffect(() => {
@@ -1717,25 +1827,210 @@ function SummaryPanel({
     onAutoSendAiReply,
   ]);
 
+  function updateConversationNoteDraft(value: string) {
+    if (!conv) {
+      return;
+    }
+
+    setNoteDrafts((current) => ({
+      ...current,
+      [conv.id]: value,
+    }));
+  }
+
+  function saveConversationNote() {
+    if (!conv) {
+      return;
+    }
+
+    const trimmedNote = noteDraft.trim();
+    const nextNotes = { ...conversationNotes };
+
+    if (trimmedNote) {
+      nextNotes[conv.id] = {
+        text: trimmedNote,
+        updatedAt: new Date().toISOString(),
+      };
+    } else {
+      delete nextNotes[conv.id];
+    }
+
+    setConversationNotes(nextNotes);
+    setNoteDrafts((current) => ({
+      ...current,
+      [conv.id]: trimmedNote,
+    }));
+    saveConversationNotesToStorage(nextNotes);
+  }
+
+  function clearConversationNote() {
+    if (!conv) {
+      return;
+    }
+
+    const nextNotes = { ...conversationNotes };
+    delete nextNotes[conv.id];
+    setConversationNotes(nextNotes);
+    setNoteDrafts((current) => ({
+      ...current,
+      [conv.id]: "",
+    }));
+    saveConversationNotesToStorage(nextNotes);
+  }
+
   return (
     <aside className="hidden h-full min-w-0 flex-col overflow-hidden border-l border-[#e7eaf2] bg-white xl:flex">
-      <header className="flex h-[58px] shrink-0 items-center justify-end gap-4 border-b border-[#e7eaf2] px-5">
-        <label className="flex h-8 w-[180px] items-center gap-3 rounded-[9px] border border-[#dde3ee] bg-white px-3 text-[#596175] focus-within:border-[#3044ff] focus-within:ring-2 focus-within:ring-[#3044ff]/10">
-          <Search size={16} />
-          <input
-            ref={searchInputRef}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search"
-            className="min-w-0 flex-1 bg-transparent text-[12px] font-medium text-[#252c41] outline-none placeholder:text-[#596175]"
-          />
-          <span className="rounded bg-[#eff1f6] px-1.5 py-0.5 text-[11px] font-extrabold text-[#8b92a6]">⌘K</span>
-        </label>
-        <NotificationBell
-          ariaLabel="Conversation notifications"
-          iconSize={17}
-          buttonClassName="relative flex h-8 w-8 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white transition hover:bg-[#f6f7fb]"
-        />
+      <header className="relative z-10 flex h-[58px] shrink-0 items-center border-b border-[#e7eaf2] bg-white px-3">
+        {messageSearchOpen ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-[9px] border border-[#dde3ee] bg-white px-3 text-[#596175]">
+              <Search size={15} strokeWidth={2.35} />
+              <input
+                autoFocus
+                value={messageSearchQuery}
+                onChange={(event) => setMessageSearchQuery(event.target.value)}
+                placeholder="Search messages..."
+                className="min-w-0 flex-1 bg-transparent text-[12px] font-semibold text-[#20273b] outline-none placeholder:text-[#9aa1b5]"
+              />
+              {trimmedMessageSearch ? (
+                <span className="rounded-full bg-[#eff1f6] px-2 py-0.5 text-[10px] font-extrabold text-[#596175]">
+                  {messageSearchMatches.length}
+                </span>
+              ) : null}
+            </label>
+            <button
+              type="button"
+              aria-label="Close message search"
+              onClick={() => {
+                setMessageSearchOpen(false);
+                setMessageSearchQuery("");
+              }}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white text-black transition hover:bg-[#f6f7fb]"
+            >
+              <X size={15} strokeWidth={2.35} />
+            </button>
+          </div>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 overflow-hidden">
+            {conv && profileUrl ? (
+              <a
+                href={profileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="flex h-9 w-[88px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[9px] border border-[#dde3ee] bg-white px-2 text-[11px] font-extrabold text-black transition hover:bg-[#f6f7fb]"
+              >
+                Profile
+                <ExternalLink size={12} strokeWidth={2.45} />
+              </a>
+            ) : null}
+
+            {conv && canManageAgents ? (
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setAssignmentOpen((open) => !open)}
+                  className="flex h-9 w-[124px] items-center justify-center gap-1.5 whitespace-nowrap rounded-[9px] border border-[#dde3ee] bg-white px-2 text-[11px] font-extrabold text-black transition hover:bg-[#f6f7fb]"
+                >
+                  <Users size={14} strokeWidth={2.35} />
+                  Assign
+                  <span className="rounded-full bg-[#f0edff] px-1.5 py-0.5 text-[10px] text-[#3044ff]">
+                    {assignedAgents.length}
+                  </span>
+                  <ChevronDown size={12} strokeWidth={2.45} />
+                </button>
+
+                {assignmentOpen && (
+                  <div className="absolute right-0 top-10 z-30 w-[292px] rounded-[10px] border border-[#dde3ee] bg-white p-2 shadow-[0_22px_60px_rgba(20,28,53,0.16)]">
+                    <div className="flex items-center justify-between px-2 py-1">
+                      <p className="text-[11px] font-extrabold uppercase text-[#596175]">Assign to agent</p>
+                      <button
+                        type="button"
+                        aria-label="Close assignment menu"
+                        onClick={() => setAssignmentOpen(false)}
+                        className="flex h-6 w-6 items-center justify-center rounded-[6px] text-[#596175] hover:bg-[#f6f7fb]"
+                      >
+                        <X size={13} strokeWidth={2.4} />
+                      </button>
+                    </div>
+
+                    {loadingAgents ? (
+                      <div className="flex items-center gap-2 px-2 py-4 text-[11px] font-semibold text-[#46506a]">
+                        <Loader2 size={14} className="animate-spin text-[#3044ff]" />
+                        Loading agents
+                      </div>
+                    ) : agents.length === 0 ? (
+                      <p className="px-2 py-4 text-[11px] font-semibold leading-relaxed text-[#46506a]">
+                        Create an agent in Settings first.
+                      </p>
+                    ) : (
+                      <div className="mt-1 grid max-h-[280px] gap-1 overflow-y-auto">
+                        {agents.map((agent) => {
+                          const checked = agent.assignedConversationIds.includes(conv.id);
+                          const canAssign = agent.status === "Active" && agent.allowedPages.includes("inbox");
+
+                          return (
+                            <button
+                              key={agent.id}
+                              type="button"
+                              onClick={() => void onToggleAgentAssignment(agent)}
+                              disabled={!canAssign || assignmentSavingAgentId === agent.id}
+                              className={`grid min-h-[58px] grid-cols-[22px_minmax(0,1fr)] items-start gap-2 rounded-[8px] px-2 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-55 ${
+                                checked ? "bg-[#f6f7ff]" : "hover:bg-[#f6f7fb]"
+                              }`}
+                            >
+                              <span
+                                className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-[6px] border ${
+                                  checked ? "border-[#3044ff] bg-[#3044ff] text-white" : "border-[#d7ddeb] bg-white text-transparent"
+                                }`}
+                              >
+                                {assignmentSavingAgentId === agent.id ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                  <Check size={13} strokeWidth={2.8} />
+                                )}
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-[12px] font-extrabold text-black">{agent.name}</span>
+                                <span className="mt-0.5 block truncate text-[10px] font-semibold text-[#596175]">{agent.email}</span>
+                                {!canAssign && (
+                                  <span className="mt-1 block text-[10px] font-extrabold text-[#df405b]">
+                                    Enable Conversations permission first
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {assignmentStatus && (
+                      <p className="mt-2 rounded-[8px] bg-[#f6f7fb] px-2 py-2 text-[11px] font-semibold leading-relaxed text-[#46506a]">
+                        {assignmentStatus}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              aria-label="Search messages"
+              disabled={!conv}
+              onClick={() => setMessageSearchOpen(true)}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white text-black transition hover:bg-[#f6f7fb] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Search size={16} strokeWidth={2.35} />
+            </button>
+
+            <NotificationBell
+              ariaLabel="Conversation notifications"
+              iconSize={16}
+              buttonClassName="relative flex h-9 w-9 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white transition hover:bg-[#f6f7fb]"
+            />
+          </div>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto p-3">
@@ -1800,6 +2095,13 @@ function SummaryPanel({
                 </div>
               </div>
 
+              <EscalationFlagCarousel
+                key={conv.id}
+                escalations={escalationCards}
+                isHumanTakeover={isHumanTakeover}
+                onToggleTakeoverMode={onToggleTakeoverMode}
+              />
+
               {!isHumanTakeover ? (
                 <div className="mt-3 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-2.5">
                   <div className="flex items-center justify-between gap-2">
@@ -1855,54 +2157,57 @@ function SummaryPanel({
                     <p className="mt-2 text-[10px] font-bold text-[#596175]">{aiStatus}</p>
                   )}
 
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onDraftSuggestedReply(starterDraft)}
-                      disabled={!starterDraft || aiLoading}
-                      className="h-8 rounded-[8px] border border-[#dde3ee] bg-white px-2 text-[11px] font-extrabold text-black disabled:cursor-not-allowed disabled:opacity-55"
-                    >
-                      Draft opener
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDraftSuggestedReply(ctaDraft)}
-                      disabled={!ctaDraft || aiLoading}
-                      className="h-8 rounded-[8px] bg-[#3044ff] px-2 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-55"
-                    >
-                      Draft CTA
-                    </button>
-                  </div>
                 </div>
               ) : null}
 
-              {trimmedSearch && (
-                <div className="mt-3 rounded-[10px] border border-[#dde3ee] bg-white p-2.5">
-                  <div className="mb-2 flex items-center justify-between">
-                    <h3 className="text-[12px] font-extrabold text-black">Search results</h3>
-                    <span className="text-[10px] font-bold text-[#596175]">{searchMatches.length}</span>
-                  </div>
-                  <div className="max-h-40 space-y-1 overflow-y-auto">
-                    {searchMatches.length > 0 ? (
-                      searchMatches.slice(0, 6).map((message) => (
-                        <div key={message.id} className="rounded-[8px] bg-[#f8f9fd] px-2 py-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate text-[11px] font-bold text-black">
-                              {message.from === "me" ? "You" : message.sender_name || getParticipantName(conv)}
-                            </span>
-                            <span className="shrink-0 text-[10px] font-medium text-[#596175]">{relativeTime(message.time)}</span>
-                          </div>
-                          <p className="mt-0.5 line-clamp-2 text-[11px] leading-[1.35] text-[#596175]">
-                            {getMessagePreview(message)}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="py-3 text-center text-[11px] font-medium text-[#596175]">No matching messages</p>
-                    )}
+              <div className="mt-3 rounded-[10px] border border-[#e2e7f2] bg-white p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="flex min-w-0 items-center gap-1.5 text-[12px] font-extrabold text-black">
+                    <FileText size={14} className="text-[#3044ff]" strokeWidth={2.35} />
+                    Notes
+                  </h3>
+                  <span
+                    className={`rounded-[8px] px-2 py-1 text-[10px] font-extrabold ${
+                      hasConversationNoteChanges ? "bg-[#fff3e6] text-[#ff850d]" : "bg-[#f0efff] text-[#596175]"
+                    }`}
+                  >
+                    {conversationNoteStatus}
+                  </span>
+                </div>
+
+                <textarea
+                  value={noteDraft}
+                  onChange={(event) => updateConversationNoteDraft(event.target.value)}
+                  disabled={!conv}
+                  rows={5}
+                  placeholder="Add private notes for this conversation..."
+                  className="mt-2 min-h-[116px] w-full resize-none rounded-[9px] border border-[#dde3ee] bg-[#fbfbff] p-2.5 text-[12px] font-medium leading-[1.45] text-[#20273b] outline-none placeholder:text-[#9aa1b5] focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold text-[#8b92a6]">{noteDraft.length} chars</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={clearConversationNote}
+                      disabled={!conv || (!hasConversationNote && !noteDraft)}
+                      className="flex h-8 items-center justify-center gap-1.5 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[11px] font-extrabold text-[#596175] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <X size={13} strokeWidth={2.4} />
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveConversationNote}
+                      disabled={!canSaveConversationNote}
+                      className="flex h-8 items-center justify-center gap-1.5 rounded-[8px] bg-[#3044ff] px-3 text-[11px] font-extrabold text-white shadow-[0_12px_24px_rgba(48,68,255,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Check size={13} strokeWidth={2.4} />
+                      Save
+                    </button>
                   </div>
                 </div>
-              )}
+              </div>
 
               {lastUserMsg && (
                 <div className="mt-3">
@@ -1986,6 +2291,7 @@ export default function Inbox() {
   const [assignmentSavingAgentId, setAssignmentSavingAgentId] = useState("");
   const [assignmentStatus, setAssignmentStatus] = useState("");
   const [takeoverModes, setTakeoverModes] = useState<Record<string, ConversationTakeoverMode>>({});
+  const [starredConversationIds, setStarredConversationIds] = useState<string[]>([]);
   const hasLoadedInboxRef = useRef(false);
   const activeIdRef = useRef<string | null>(null);
   const activeTakeoverModeRef = useRef<ConversationTakeoverMode>("ai");
@@ -2183,11 +2489,11 @@ export default function Inbox() {
         id: localId,
         text: payload.text,
         attachments: payload.localAttachments,
-        from: payload.mode === "note" ? "note" : "me",
+        from: "me",
         sender_name: account?.name || account?.username || "You",
-        sender_id: payload.mode === "note" ? "internal-note" : igUserId,
+        sender_id: igUserId,
         time: new Date().toISOString(),
-        status: payload.mode === "note" ? "sent" : "sending",
+        status: "sending",
       };
 
       setConvs((current) =>
@@ -2201,11 +2507,6 @@ export default function Inbox() {
             : conv
         )
       );
-
-      if (payload.mode === "note") {
-        setComposerStatus({ sending: false, error: null, notice: "Note saved" });
-        return;
-      }
 
       setComposerStatus({ sending: true, error: null, notice: null });
 
@@ -2340,6 +2641,7 @@ export default function Inbox() {
 
   const activeConv = convs.find(c => c.id === activeId) ?? null;
   const activeTakeoverMode: ConversationTakeoverMode = activeConv ? takeoverModes[activeConv.id] || "ai" : "ai";
+  const activeConversationIsStarred = Boolean(activeId && starredConversationIds.includes(activeId));
 
   useEffect(() => {
     activeTakeoverModeRef.current = activeTakeoverMode;
@@ -2367,6 +2669,18 @@ export default function Inbox() {
       error: null,
       notice: nextMode === "human" ? "Human takeover active" : "AI takeover active",
     });
+  }, []);
+
+  const toggleActiveConversationStar = useCallback(() => {
+    const targetConvId = activeIdRef.current;
+
+    if (!targetConvId) {
+      return;
+    }
+
+    setStarredConversationIds((ids) =>
+      ids.includes(targetConvId) ? ids.filter((id) => id !== targetConvId) : [...ids, targetConvId]
+    );
   }, []);
 
   const draftSuggestedReply = useCallback((text: string) => {
@@ -2455,6 +2769,7 @@ export default function Inbox() {
       <ConvList
         convs={convs}
         activeId={activeId}
+        starredConversationIds={starredConversationIds}
         onSelect={setActiveId}
         loading={loading}
         refreshing={refreshing}
@@ -2477,12 +2792,8 @@ export default function Inbox() {
         onGenerateAiReply={generateAiReply}
         takeoverMode={activeTakeoverMode}
         onToggleTakeoverMode={toggleTakeoverMode}
-        agents={agents}
-        loadingAgents={loadingAgents}
-        canManageAgents={canManageAgents}
-        assignmentSavingAgentId={assignmentSavingAgentId}
-        assignmentStatus={assignmentStatus}
-        onToggleAgentAssignment={toggleAgentAssignment}
+        isStarred={activeConversationIsStarred}
+        onToggleStarred={toggleActiveConversationStar}
       />
       <SummaryPanel
         key={activeConv?.id || "empty-summary"}
@@ -2495,6 +2806,12 @@ export default function Inbox() {
         onToggleTakeoverMode={toggleTakeoverMode}
         onDraftSuggestedReply={draftSuggestedReply}
         onAutoSendAiReply={autoSendAiReply}
+        agents={agents}
+        loadingAgents={loadingAgents}
+        canManageAgents={canManageAgents}
+        assignmentSavingAgentId={assignmentSavingAgentId}
+        assignmentStatus={assignmentStatus}
+        onToggleAgentAssignment={toggleAgentAssignment}
       />
     </div>
   );

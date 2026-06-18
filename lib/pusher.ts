@@ -5,6 +5,7 @@ export type RealtimeNotificationType =
   | "message"
   | "instagram"
   | "ai"
+  | "escalation"
   | "billing"
   | "agent"
   | "profile"
