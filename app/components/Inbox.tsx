@@ -45,8 +45,6 @@ const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
   ),
 });
 
-// ─── API Types ────────────────────────────────────────────────────────────────
-
 type IGMessage = {
   id: string;
   text: string;

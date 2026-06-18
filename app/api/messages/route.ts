@@ -16,7 +16,21 @@ export async function GET() {
       return NextResponse.json([]);
     }
 
-    return NextResponse.json(data || []);
+    const cleanedData = (data || []).map((m) => {
+      let text = m.text || '';
+      if (text.startsWith('__STORY_REPLY__:') && text.includes('__TEXT__:')) {
+        const parts = text.split('__TEXT__:', 2);
+        if (parts.length === 2) {
+          text = parts[1];
+        }
+      }
+      return {
+        ...m,
+        text,
+      };
+    });
+
+    return NextResponse.json(cleanedData);
   } catch {
     return NextResponse.json([]);
   }
