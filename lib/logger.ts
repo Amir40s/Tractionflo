@@ -1,5 +1,27 @@
 import winston from 'winston';
 
+function serializeMeta(value: any): any {
+  if (value instanceof Error) {
+    return {
+      ...value,
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+    };
+  }
+  if (Array.isArray(value)) {
+    return value.map(serializeMeta);
+  }
+  if (value && typeof value === 'object') {
+    const clean: any = {};
+    for (const key of Object.getOwnPropertyNames(value)) {
+      clean[key] = serializeMeta(value[key]);
+    }
+    return clean;
+  }
+  return value;
+}
+
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
@@ -8,7 +30,8 @@ const logger = winston.createLogger({
       let metaString = '';
       if (Object.keys(meta).length) {
         try {
-          metaString = `\n${JSON.stringify(meta, null, 2)}`;
+          const cleanMeta = serializeMeta(meta);
+          metaString = `\n${JSON.stringify(cleanMeta, null, 2)}`;
         } catch (e) {
           metaString = `\n[Error serializing meta data]`;
         }

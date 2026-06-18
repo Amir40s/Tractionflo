@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import logger from '@/lib/logger';
 import type { User } from '@supabase/supabase-js';
 import {
@@ -235,7 +235,7 @@ async function generateWebhookAiReply({
   return runAssistantThread({
     apiKey,
     assistantId,
-    maxTokens: 180,
+    maxTokens: 800,
     additionalInstructions: `${integration.systemPrompt}
 
 IMPORTANT: The attached files and vector store contain the primary truth for this business (such as menus, pricing, services, and policies). You MUST search these files using the file_search tool for any specific business inquiries (e.g. "menu", "pricing", "cost", "hours", "booking", or specific products/services). Do NOT rely on default prompts or assume the business context is TractionFlo if the knowledge base documents specify a different business (e.g. Taste Haven Restaurant).
@@ -437,33 +437,57 @@ export async function POST(request: Request) {
         }
       }
 
+      const insertedMids = new Set<string>();
       if (messagesToInsert.length > 0) {
-        const { error: dbError } = await supabase.from('messages').insert(messagesToInsert);
-        if (dbError) {
-           console.error('Supabase Insert Error:', dbError);
+        for (const msgToInsert of messagesToInsert) {
+          const { error: insertError } = await supabase
+            .from('messages')
+            .insert(msgToInsert);
+
+          if (!insertError) {
+            insertedMids.add(msgToInsert.mid);
+          } else {
+            if (insertError.code === '23505') {
+              logger.info('Duplicate message received concurrently, skipping processing:', { mid: msgToInsert.mid });
+            } else {
+              logger.error('Failed to insert message into Supabase:', { error: insertError, mid: msgToInsert.mid });
+            }
+          }
         }
 
-        await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
-          type: 'message',
-          title: messagesToInsert.length === 1 ? 'New Instagram message' : 'New Instagram messages',
-          body:
-            messagesToInsert.length === 1
-              ? messagesToInsert[0].text.slice(0, 120) || 'A new Instagram DM arrived.'
-              : `${messagesToInsert.length} new Instagram DMs arrived.`,
-          url: '/conversations',
-          metadata: {
-            count: messagesToInsert.length,
-            source: 'meta-webhook',
-          },
-        }).catch((notificationError) => {
-          logger.error('Realtime webhook notification error:', { error: notificationError });
-        });
+        const messagesForNotification = messagesToInsert.filter(m => insertedMids.has(m.mid));
+        if (messagesForNotification.length > 0) {
+          await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+            type: 'message',
+            title: messagesForNotification.length === 1 ? 'New Instagram message' : 'New Instagram messages',
+            body:
+              messagesForNotification.length === 1
+                ? messagesForNotification[0].text.slice(0, 120) || 'A new Instagram DM arrived.'
+                : `${messagesForNotification.length} new Instagram DMs arrived.`,
+            url: '/conversations',
+            metadata: {
+              count: messagesForNotification.length,
+              source: 'meta-webhook',
+            },
+          }).catch((notificationError) => {
+            logger.error('Realtime webhook notification error:', { error: notificationError });
+          });
+        }
       }
-
-      await processInstagramAutomations(supabase, automationEvents);
+      const filteredEvents = automationEvents.filter(event => insertedMids.has(event.mid));
+      if (filteredEvents.length > 0) {
+        try {
+          after(async () => {
+            await processInstagramAutomations(supabase, filteredEvents).catch((err) => {
+              logger.error('Error processing background Instagram automations:', { error: err });
+            });
+          });
+        } catch (afterError) {
+          logger.warn('after() was not available or failed. Running automations synchronously:', { error: afterError });
+          await processInstagramAutomations(supabase, filteredEvents);
+        }
+      }
     }
-
-    // Acknowledge receipt to Meta quickly (must be within 20 seconds)
     return new NextResponse('EVENT_RECEIVED', { status: 200 });
   } catch (error) {
     logger.error('Webhook Error:', { error });
