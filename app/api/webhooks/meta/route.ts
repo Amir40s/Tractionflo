@@ -36,6 +36,12 @@ type InstagramWebhookMessageEvent = {
     mid?: string;
     text?: string;
     is_echo?: boolean;
+    reply_to?: {
+      story?: {
+        id?: string;
+        url?: string;
+      };
+    };
   };
 };
 
@@ -449,10 +455,16 @@ export async function POST(request: Request) {
           const previousSenderMessageCount = await getSenderMessageCount(supabase, senderId);
 
           if (!alreadyStored) {
+            let dbText = text;
+            const story = msg.message?.reply_to?.story;
+            if (story) {
+              dbText = `__STORY_REPLY__:${JSON.stringify(story)}__TEXT__:${text}`;
+            }
+
             messagesToInsert.push({
               mid,
               sender_id: senderId,
-              text,
+              text: dbText,
               timestamp: msg.timestamp,
             });
 
@@ -488,12 +500,17 @@ export async function POST(request: Request) {
 
         const messagesForNotification = messagesToInsert.filter(m => insertedMids.has(m.mid));
         if (messagesForNotification.length > 0) {
+          const firstMsgText = messagesForNotification[0].text;
+          const cleanText = firstMsgText.startsWith('__STORY_REPLY__:') && firstMsgText.includes('__TEXT__:')
+            ? firstMsgText.split('__TEXT__:', 2)[1]
+            : firstMsgText;
+
           await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
             type: 'message',
             title: messagesForNotification.length === 1 ? 'New Instagram message' : 'New Instagram messages',
             body:
               messagesForNotification.length === 1
-                ? messagesForNotification[0].text.slice(0, 120) || 'A new Instagram DM arrived.'
+                ? cleanText.slice(0, 120) || 'A new Instagram DM arrived.'
                 : `${messagesForNotification.length} new Instagram DMs arrived.`,
             url: '/conversations',
             metadata: {

@@ -1,15 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
-  AtSign,
   BookOpen,
   CalendarDays,
   Bot,
-  Check,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -19,7 +17,6 @@ import {
   MessageCircle,
   Play,
   RefreshCw,
-  Search,
   Send,
   Sparkles,
   TriangleAlert,
@@ -27,6 +24,8 @@ import {
   UserCheck,
   UserPlus,
   Users,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import {
@@ -83,19 +82,6 @@ type InstagramContentResponse = {
   storyError?: string;
 };
 
-type InstagramAudiencePerson = {
-  id: string;
-  username: string;
-  name: string;
-  profilePic?: string;
-  source: "inbox";
-};
-
-type InstagramAudienceResponse = {
-  people?: InstagramAudiencePerson[];
-  limitation?: string;
-  error?: string;
-};
 
 type InstagramCommentsResponse = {
   comments?: InstagramComment[];
@@ -342,13 +328,103 @@ function sumFollowerPoints(history: InstagramFollowerPoint[], predicate: (point:
   }, 0);
 }
 
-function MediaPreview({ item }: { item: InstagramContentItem }) {
+function InstagramVideoPlayer({ src, poster }: { src: string; poster?: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isMuted, setIsMuted] = useState(true);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.play().catch(() => setIsPlaying(false));
+      } else {
+        videoRef.current.pause();
+      }
+    }
+  }, [isPlaying]);
+
+  const togglePlay = () => {
+    setIsPlaying(!isPlaying);
+  };
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (videoRef.current) {
+      const newMuted = !isMuted;
+      videoRef.current.muted = newMuted;
+      setIsMuted(newMuted);
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current) {
+      const current = videoRef.current.currentTime;
+      const duration = videoRef.current.duration || 1;
+      setProgress((current / duration) * 100);
+    }
+  };
+
+  return (
+    <div
+      onClick={togglePlay}
+      className="relative h-full w-full bg-black cursor-pointer group select-none"
+    >
+      <video
+        ref={videoRef}
+        src={src}
+        poster={poster}
+        loop
+        muted={isMuted}
+        autoPlay
+        playsInline
+        onTimeUpdate={handleTimeUpdate}
+        className="h-full w-full object-cover"
+      />
+
+      {!isPlaying && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/30 transition-all">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm animate-in zoom-in-90 duration-150">
+            <Play size={26} fill="currentColor" className="ml-1" />
+          </div>
+        </div>
+      )}
+
+      <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/60 to-transparent flex items-center justify-between pointer-events-none">
+        <div />
+        <button
+          type="button"
+          onClick={toggleMute}
+          className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-sm transition hover:bg-black/60 active:scale-95"
+          aria-label={isMuted ? "Unmute video" : "Mute video"}
+        >
+          {isMuted ? (
+            <VolumeX size={15} strokeWidth={2.4} />
+          ) : (
+            <Volume2 size={15} strokeWidth={2.4} />
+          )}
+        </button>
+      </div>
+
+      <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+        <div
+          className="h-full bg-[#4b3cff] transition-[width] duration-75"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function MediaPreview({ item, play = false }: { item: InstagramContentItem; play?: boolean }) {
   const previewUrl = item.thumbnailUrl || item.mediaUrl;
   const isVideo = item.mediaType.toLowerCase().includes("video") || item.mediaType.toLowerCase().includes("reel");
 
   return (
     <div className="relative aspect-square overflow-hidden rounded-[8px] bg-[#f0f2f7]">
-      {previewUrl ? (
+      {play && isVideo && item.mediaUrl ? (
+        <InstagramVideoPlayer src={item.mediaUrl} poster={item.thumbnailUrl} />
+      ) : previewUrl ? (
         <div
           className="absolute inset-0 bg-cover bg-center"
           style={{ backgroundImage: `url(${previewUrl})` }}
@@ -358,18 +434,20 @@ function MediaPreview({ item }: { item: InstagramContentItem }) {
           <ImageIcon size={30} strokeWidth={2.2} />
         </div>
       )}
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/60 to-transparent px-3 pb-3 pt-10 text-white">
-        <span className="flex items-center gap-1.5 rounded-[7px] bg-white/18 px-2 py-1 text-[10px] font-extrabold uppercase backdrop-blur">
-          {isVideo ? <Play size={12} fill="currentColor" strokeWidth={2.1} /> : <ImageIcon size={12} strokeWidth={2.1} />}
-          {item.mediaType || item.kind}
-        </span>
-        {item.kind === "post" ? (
-          <span className="flex items-center gap-1.5 text-[11px] font-extrabold">
-            <MessageCircle size={13} strokeWidth={2.2} />
-            {item.commentsCount}
+      {(!play || !isVideo) && (
+        <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/60 to-transparent px-3 pb-3 pt-10 text-white">
+          <span className="flex items-center gap-1.5 rounded-[7px] bg-white/18 px-2 py-1 text-[10px] font-extrabold uppercase backdrop-blur">
+            {isVideo ? <Play size={12} fill="currentColor" strokeWidth={2.1} /> : <ImageIcon size={12} strokeWidth={2.1} />}
+            {item.mediaType || item.kind}
           </span>
-        ) : null}
-      </div>
+          {item.kind === "post" ? (
+            <span className="flex items-center gap-1.5 text-[11px] font-extrabold">
+              <MessageCircle size={13} strokeWidth={2.25} />
+              {item.commentsCount}
+            </span>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -387,9 +465,8 @@ function ContentCard({
     <button
       type="button"
       onClick={onSelect}
-      className={`rounded-[10px] border bg-white p-3 text-left shadow-[0_18px_48px_rgba(20,28,53,0.035)] transition ${
-        active ? "border-[#4b3cff] ring-2 ring-[#4b3cff]/10" : "border-[#e6eaf2] hover:border-[#cfd6e6]"
-      }`}
+      className={`rounded-[10px] border bg-white p-3 text-left shadow-[0_18px_48px_rgba(20,28,53,0.035)] transition ${active ? "border-[#4b3cff] ring-2 ring-[#4b3cff]/10" : "border-[#e6eaf2] hover:border-[#cfd6e6]"
+        }`}
     >
       <MediaPreview item={item} />
       <div className="mt-3 flex items-center gap-2 text-[11px] font-bold text-[#596175]">
@@ -507,195 +584,22 @@ function EmptyState({
   );
 }
 
-function getPersonMention(person: InstagramAudiencePerson) {
-  return person.username ? `@${person.username}` : person.name;
-}
-
-function AudienceMentionPicker({
-  people,
-  title,
-  detail,
-  emptyText,
-  onInsert,
-}: {
-  people: InstagramAudiencePerson[];
-  title: string;
-  detail?: string;
-  emptyText: string;
-  onInsert: (mentions: string) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const normalizedQuery = query.trim().toLowerCase();
-  const visiblePeople = normalizedQuery
-    ? people.filter((person) =>
-        [person.username, person.name]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedQuery)
-      )
-    : people;
-  const selectedPeople = people.filter((person) => selectedIds.includes(person.id));
-
-  function togglePerson(personId: string) {
-    setSelectedIds((current) =>
-      current.includes(personId)
-        ? current.filter((id) => id !== personId)
-        : [...current, personId]
-    );
-  }
-
-  function selectVisible() {
-    setSelectedIds((current) => Array.from(new Set([...current, ...visiblePeople.map((person) => person.id)])));
-  }
-
-  return (
-    <div className="rounded-[10px] border border-[#e7eaf2] bg-[#fbfcff] p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-wide text-[#596175]">
-            <AtSign size={13} className="text-[#4b3cff]" strokeWidth={2.3} />
-            {title}
-          </p>
-          {detail ? <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#697083]">{detail}</p> : null}
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={selectVisible}
-            disabled={visiblePeople.length === 0}
-            className="h-7 rounded-[7px] border border-[#dfe4ef] bg-white px-2 text-[10px] font-extrabold text-black disabled:opacity-50"
-          >
-            Select visible
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedIds([])}
-            disabled={selectedIds.length === 0}
-            className="h-7 rounded-[7px] border border-[#dfe4ef] bg-white px-2 text-[10px] font-extrabold text-black disabled:opacity-50"
-          >
-            Clear
-          </button>
-        </div>
-      </div>
-
-      <label className="mt-3 flex h-9 items-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[#596175] focus-within:border-[#4b3cff] focus-within:ring-2 focus-within:ring-[#4b3cff]/10">
-        <Search size={14} strokeWidth={2.2} />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Filter inbox people..."
-          className="h-full min-w-0 flex-1 bg-transparent text-[12px] font-semibold text-black outline-none"
-        />
-      </label>
-
-      <div className="mt-3 max-h-36 space-y-2 overflow-y-auto pr-1">
-        {visiblePeople.length === 0 ? (
-          <p className="rounded-[8px] border border-dashed border-[#d7deeb] bg-white p-3 text-[11px] font-semibold leading-relaxed text-[#697083]">
-            {emptyText}
-          </p>
-        ) : (
-          visiblePeople.map((person) => {
-            const selected = selectedIds.includes(person.id);
-
-            return (
-              <button
-                key={person.id}
-                type="button"
-                onClick={() => togglePerson(person.id)}
-                className={`flex w-full items-center justify-between gap-3 rounded-[8px] border px-3 py-2 text-left transition ${
-                  selected ? "border-[#4b3cff] bg-[#f2f0ff]" : "border-[#e6eaf2] bg-white hover:border-[#cfd6e6]"
-                }`}
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-[12px] font-extrabold text-black">
-                    {person.username ? `@${person.username}` : person.name}
-                  </span>
-                  <span className="mt-0.5 block truncate text-[10px] font-semibold text-[#697083]">
-                    {person.name || "Instagram inbox"}
-                  </span>
-                </span>
-                <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#4b3cff] bg-[#4b3cff] text-white" : "border-[#cfd6e6] bg-white text-transparent"}`}>
-                  <Check size={12} strokeWidth={2.5} />
-                </span>
-              </button>
-            );
-          })
-        )}
-      </div>
-
-      {selectedPeople.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {selectedPeople.slice(0, 12).map((person) => (
-            <button
-              key={person.id}
-              type="button"
-              onClick={() => togglePerson(person.id)}
-              className="inline-flex items-center gap-1 rounded-full bg-[#edeaff] px-2 py-1 text-[10px] font-extrabold text-[#4b3cff]"
-            >
-              {getPersonMention(person)}
-              <X size={10} strokeWidth={2.4} />
-            </button>
-          ))}
-          {selectedPeople.length > 12 ? (
-            <span className="rounded-full bg-[#eff1f6] px-2 py-1 text-[10px] font-extrabold text-[#596175]">
-              +{selectedPeople.length - 12} more
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={() => onInsert(selectedPeople.map(getPersonMention).join(" "))}
-        disabled={selectedPeople.length === 0}
-        className="mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-[#4b3cff] px-3 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <AtSign size={13} strokeWidth={2.35} />
-        Insert {selectedPeople.length || ""} mention{selectedPeople.length === 1 ? "" : "s"}
-      </button>
-    </div>
-  );
-}
-
-function appendMentionText(currentText: string, mentionText: string) {
-  if (!mentionText.trim()) {
-    return currentText;
-  }
-
-  return currentText.trim()
-    ? `${currentText.trimEnd()} ${mentionText}`
-    : mentionText;
-}
-
 function FollowersTab({
   account,
   loadingContent,
   startDate,
   endDate,
-  welcomeAutomation,
-  welcomeSaving,
-  welcomeStatus,
   onStartDateChange,
   onEndDateChange,
-  onWelcomeChange,
-  onSaveWelcome,
 }: {
   account: InstagramAccount | null;
   loadingContent: boolean;
   startDate: string;
   endDate: string;
-  welcomeAutomation: InstagramWelcomeAutomationSettings;
-  welcomeSaving: boolean;
-  welcomeStatus: string;
   onStartDateChange: (value: string) => void;
   onEndDateChange: (value: string) => void;
-  onWelcomeChange: (settings: InstagramWelcomeAutomationSettings) => void;
-  onSaveWelcome: () => void;
 }) {
   const history = account?.followerHistory || [];
-  const rows = getMonthsBetweenDates(startDate, endDate);
   const newFollowersInRange = sumFollowerPoints(history, (point) => isDateInRange(point.date, startDate, endDate));
   const newFollowersSinceRangeStart = sumFollowerPoints(history, (point) => {
     const date = new Date(point.date);
@@ -705,11 +609,6 @@ function FollowersTab({
   });
   const oldFollowersBeforeRange =
     typeof account?.followersCount === "number" ? Math.max(0, account.followersCount - newFollowersSinceRangeStart) : null;
-  const welcomePreview = renderInstagramWelcomeMessage({
-    template: welcomeAutomation.message,
-    name: "Sarah Khan",
-    username: "sarah.creator",
-  });
 
   if (loadingContent) {
     return (
@@ -762,209 +661,28 @@ function FollowersTab({
             <p className="mt-3 text-[18px] font-extrabold text-black">{metric.value}</p>
           </article>
         ))}
-      </div>
-
-      <section className="rounded-[12px] border border-[#e6eaf2] bg-white p-4 shadow-[0_18px_48px_rgba(20,28,53,0.035)]">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-          <div>
-            <h2 className="text-[18px] font-extrabold text-black">Followers by month</h2>
-            <p className="mt-1 max-w-[640px] text-[12px] font-semibold leading-relaxed text-[#596175]">
-              Showing aggregate follower and following counts from Instagram. Individual follower usernames are not returned by the official API.
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">
-              From
-              <span className="mt-1 flex h-11 items-center gap-2 rounded-[8px] border border-[#dfe4ef] bg-white px-3 text-black outline-none focus-within:border-[#4b3cff] focus-within:ring-2 focus-within:ring-[#4b3cff]/10">
-                <CalendarDays size={15} className="text-[#4b3cff]" strokeWidth={2.3} />
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(event) => onStartDateChange(event.target.value)}
-                  className="h-full min-w-0 flex-1 bg-transparent text-[12px] font-extrabold text-black outline-none"
-                />
-              </span>
-            </label>
-
-            <label className="text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">
-              To
-              <span className="mt-1 flex h-11 items-center gap-2 rounded-[8px] border border-[#dfe4ef] bg-white px-3 text-black outline-none focus-within:border-[#4b3cff] focus-within:ring-2 focus-within:ring-[#4b3cff]/10">
-                <CalendarDays size={15} className="text-[#4b3cff]" strokeWidth={2.3} />
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(event) => onEndDateChange(event.target.value)}
-                  className="h-full min-w-0 flex-1 bg-transparent text-[12px] font-extrabold text-black outline-none"
-                />
-              </span>
-            </label>
-          </div>
-        </div>
-
-        {account.followerHistoryError ? (
-          <p className="mt-4 rounded-[8px] border border-[#ffe5b8] bg-[#fffaf0] p-3 text-[12px] font-semibold leading-relaxed text-[#8a5a00]">
-            {account.followerHistoryError}
-          </p>
-        ) : null}
-
-        <div className="mt-4 overflow-hidden rounded-[10px] border border-[#e6eaf2]">
-          <div className="grid grid-cols-[1fr_120px_150px] bg-[#f7f8fc] px-4 py-3 text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">
-            <span>Month</span>
-            <span className="text-right">New</span>
-            <span className="text-right">Existing before</span>
-          </div>
-          {rows.map((month) => {
-            const newFollowers = sumFollowerPoints(
-              history,
-              (point) => getMonthKey(point.date) === month.value && isDateInRange(point.date, startDate, endDate)
-            );
-            const monthStartDate = `${month.value}-01`;
-            const newFollowersFromMonthToNow = sumFollowerPoints(history, (point) => {
-              const date = new Date(point.date);
-              const monthStart = getDateFromInput(monthStartDate);
-
-              return Boolean(monthStart && Number.isFinite(date.getTime()) && date.getTime() >= monthStart.getTime());
-            });
-            const existingBeforeMonth =
-              typeof account.followersCount === "number" ? Math.max(0, account.followersCount - newFollowersFromMonthToNow) : null;
-
-            return (
-              <div key={month.value} className="grid grid-cols-[1fr_120px_150px] border-t border-[#eef1f6] px-4 py-3 text-[12px] font-semibold text-[#253049]">
-                <span className="font-extrabold text-black">{month.label}</span>
-                <span className="text-right">{formatCompactNumber(newFollowers)}</span>
-                <span className="text-right">{formatCompactNumber(existingBeforeMonth)}</span>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          <article className="rounded-[10px] border border-[#e6eaf2] bg-[#fbfcff] p-4">
-            <h3 className="text-[13px] font-extrabold text-black">Follower groups</h3>
-            <div className="mt-3 space-y-2">
-              <div className="flex items-center justify-between rounded-[8px] bg-white px-3 py-2 text-[12px] font-bold text-[#253049]">
-                <span>New followers in range</span>
-                <span>{formatCompactNumber(newFollowersInRange)}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-[8px] bg-white px-3 py-2 text-[12px] font-bold text-[#253049]">
-                <span>Old followers before range</span>
-                <span>{formatCompactNumber(oldFollowersBeforeRange)}</span>
-              </div>
-            </div>
-          </article>
-
-          <article className="rounded-[10px] border border-[#e6eaf2] bg-[#fbfcff] p-4">
-            <h3 className="text-[13px] font-extrabold text-black">Following</h3>
-            <p className="mt-3 text-[28px] font-extrabold text-black">{formatCompactNumber(account.followingCount)}</p>
-            <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#596175]">
-              Instagram exposes the following count for this connected account, but not a browsable list of every followed profile.
-            </p>
-          </article>
-        </div>
-      </section>
-
-      <section className="rounded-[12px] border border-[#e6eaf2] bg-white p-4 shadow-[0_18px_48px_rgba(20,28,53,0.035)]">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-          <div>
-            <h2 className="text-[18px] font-extrabold text-black">Follower inbox welcome</h2>
-            <p className="mt-1 max-w-[680px] text-[12px] font-semibold leading-relaxed text-[#596175]">
-              This is the inbox message for new Instagram followers. Meta does not expose a direct “new follower” DM event, so TractionFlo sends it when that follower first creates an inbox event we can receive.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() =>
-              onWelcomeChange({
-                ...welcomeAutomation,
-                enabled: !welcomeAutomation.enabled,
-              })
-            }
-            className={`relative h-8 w-14 rounded-full transition ${welcomeAutomation.enabled ? "bg-[#4b3cff]" : "bg-[#cfd5e3]"}`}
-            aria-pressed={welcomeAutomation.enabled}
-            aria-label={welcomeAutomation.enabled ? "Turn welcome automation off" : "Turn welcome automation on"}
-          >
-            <span className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition ${welcomeAutomation.enabled ? "left-7" : "left-1"}`} />
-          </button>
-        </div>
-
-        <textarea
-          value={welcomeAutomation.message}
-          onChange={(event) =>
-            onWelcomeChange({
-              ...welcomeAutomation,
-              message: event.target.value,
-            })
-          }
-          className="mt-4 min-h-[104px] w-full resize-none rounded-[10px] border border-[#dde3ee] bg-white px-3 py-3 text-[13px] font-semibold leading-relaxed text-black outline-none transition focus:border-[#4b3cff] focus:ring-2 focus:ring-[#4b3cff]/10"
-          placeholder={defaultInstagramWelcomeAutomation.message}
-        />
-
-        <div className="mt-3 flex flex-col gap-3 rounded-[10px] bg-[#f7f8fc] px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">Instagram inbox preview</p>
-            <p className="mt-1 text-[12px] font-semibold leading-relaxed text-[#596175]">
-              Example sent from @{account.username || "your_account"} after the first eligible inbox message.
-            </p>
-          </div>
-          <div className="max-w-[460px] rounded-[14px] rounded-bl-[5px] bg-white px-3 py-2 text-[12px] font-semibold leading-relaxed text-black shadow-[0_10px_24px_rgba(20,28,53,0.06)]">
-            {welcomePreview}
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
-          <p className="text-[11px] font-semibold leading-relaxed text-[#596175]">
-            Variables: {"{first_name}"}, {"{name}"}, {"{instagram_handle}"}. Auto-send must also be enabled in AI Integration for webhook replies.
-          </p>
-          <button
-            type="button"
-            onClick={onSaveWelcome}
-            disabled={welcomeSaving || !welcomeAutomation.message.trim()}
-            className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#4b3cff] px-4 text-[12px] font-extrabold text-white shadow-[0_14px_30px_rgba(75,60,255,0.2)] transition hover:bg-[#3f32e6] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {welcomeSaving ? <RefreshCw size={14} className="animate-spin" strokeWidth={2.25} /> : <Send size={14} strokeWidth={2.25} />}
-            {welcomeSaving ? "Saving..." : "Save welcome"}
-          </button>
-        </div>
-
-        {welcomeStatus ? (
-          <p className="mt-3 rounded-[8px] bg-[#f7f8fc] px-3 py-2 text-[12px] font-semibold text-[#46506a]">
-            {welcomeStatus}
-          </p>
-        ) : null}
-      </section>
+      </div>   
     </section>
   );
 }
 
 function StoryToolsPanel({
-  audiencePeople,
-  audienceLoading,
-  audienceNotice,
   mediaFile,
   mediaPreviewUrl,
   mediaType,
-  mentionText,
   publishing,
   status,
   onMediaFileChange,
   onClearMedia,
-  onMentionTextChange,
   onPublish,
 }: {
-  audiencePeople: InstagramAudiencePerson[];
-  audienceLoading: boolean;
-  audienceNotice: string;
   mediaFile: File | null;
   mediaPreviewUrl: string;
   mediaType: "image" | "video" | "";
-  mentionText: string;
   publishing: boolean;
   status: string;
   onMediaFileChange: (file: File | null) => void;
   onClearMedia: () => void;
-  onMentionTextChange: (value: string) => void;
   onPublish: () => void;
 }) {
   return (
@@ -1052,23 +770,6 @@ function StoryToolsPanel({
           </div>
         ) : null}
 
-        <textarea
-          value={mentionText}
-          onChange={(event) => onMentionTextChange(event.target.value)}
-          placeholder="Prepared mention text for this story..."
-          className="mt-3 min-h-[74px] w-full resize-none rounded-[8px] border border-[#dde3ee] bg-white px-3 py-2 text-[12px] font-semibold leading-relaxed text-black outline-none focus:border-[#4b3cff] focus:ring-2 focus:ring-[#4b3cff]/10"
-        />
-
-        <div className="mt-3">
-          <AudienceMentionPicker
-            people={audiencePeople}
-            title="Mention inbox users"
-            detail={audienceLoading ? "Loading Instagram inbox users..." : audienceNotice}
-            emptyText="No inbox users loaded yet. People appear here after they message the connected Instagram account."
-            onInsert={(mentions) => onMentionTextChange(appendMentionText(mentionText, mentions))}
-          />
-        </div>
-
         <button
           type="button"
           onClick={onPublish}
@@ -1091,14 +792,16 @@ function StoryToolsPanel({
 
 function StoryDetailPanel({
   story,
-  audiencePeople,
-  audienceLoading,
-  audienceNotice,
+  replies,
+  loadingReplies,
+  repliesError,
+  onRefreshReplies,
 }: {
   story?: InstagramContentItem;
-  audiencePeople: InstagramAudiencePerson[];
-  audienceLoading: boolean;
-  audienceNotice: string;
+  replies: any[];
+  loadingReplies: boolean;
+  repliesError: string;
+  onRefreshReplies: () => void;
 }) {
   if (!story) {
     return (
@@ -1117,7 +820,6 @@ function StoryDetailPanel({
     { label: "Replies", value: "Handled in Conversations" },
     { label: "Mentions", value: "Prepared when publishing media" },
   ];
-  const inboxPreviewPeople = audiencePeople.slice(0, 8);
 
   return (
     <section className="rounded-[12px] border border-[#e6eaf2] bg-white p-4 shadow-[0_18px_48px_rgba(20,28,53,0.035)]">
@@ -1137,7 +839,7 @@ function StoryDetailPanel({
       </div>
 
       <div className="mt-4 overflow-hidden rounded-[10px] border border-[#e6eaf2]">
-        <MediaPreview item={story} />
+        <MediaPreview item={story} play />
       </div>
 
       <div className="mt-4 grid gap-2">
@@ -1175,45 +877,61 @@ function StoryDetailPanel({
       </div>
 
       <div className="mt-4 rounded-[10px] border border-[#e7eaf2] bg-[#fbfcff] p-3">
-        <p className="flex items-center gap-2 text-[12px] font-extrabold text-black">
-          <Users size={15} className="text-[#4b3cff]" strokeWidth={2.3} />
-          Story viewers
-        </p>
-        <p className="mt-2 text-[11px] font-semibold leading-relaxed text-[#596175]">
-          Instagram does not return a full viewer username list through this app connection. Story replies and mentions appear in Conversations; loaded inbox people are shown below.
-        </p>
-
-        {audienceLoading ? (
-          <p className="mt-3 rounded-[8px] border border-dashed border-[#d7deeb] bg-white p-3 text-[11px] font-semibold text-[#596175]">
-            Loading inbox people...
+        <div className="flex items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-[12px] font-extrabold text-black">
+            <MessageCircle size={15} className="text-[#4b3cff]" strokeWidth={2.3} />
+            Story replies
           </p>
-        ) : inboxPreviewPeople.length > 0 ? (
-          <div className="mt-3 space-y-2">
-            {inboxPreviewPeople.map((person) => (
-              <div key={person.id} className="flex items-center justify-between gap-3 rounded-[8px] border border-[#e6eaf2] bg-white px-3 py-2">
-                <span className="min-w-0">
-                  <span className="block truncate text-[12px] font-extrabold text-black">
-                    {person.username ? `@${person.username}` : person.name}
-                  </span>
-                  <span className="mt-0.5 block truncate text-[10px] font-semibold text-[#697083]">
-                    {person.name || "Instagram inbox"}
-                  </span>
-                </span>
-                <span className="shrink-0 rounded-full bg-[#f0edff] px-2 py-1 text-[10px] font-extrabold text-[#4b3cff]">
-                  Inbox
-                </span>
+          <button
+            type="button"
+            onClick={onRefreshReplies}
+            disabled={loadingReplies}
+            className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-[#dfe4ef] bg-white text-black disabled:opacity-60"
+            aria-label="Refresh story replies"
+          >
+            <RefreshCw size={11} className={loadingReplies ? "animate-spin" : ""} strokeWidth={2.5} />
+          </button>
+        </div>
+
+        {repliesError ? (
+          <p className="mt-2 text-[11px] font-semibold text-[#b4233c]">{repliesError}</p>
+        ) : null}
+
+        {loadingReplies ? (
+          <div className="mt-3 rounded-[8px] border border-dashed border-[#d7deeb] bg-white p-4 text-center text-[11px] font-semibold text-[#596175]">
+            Loading replies...
+          </div>
+        ) : replies.length === 0 ? (
+          <p className="mt-3 rounded-[8px] border border-dashed border-[#d7deeb] bg-white p-3 text-center text-[11px] font-semibold text-[#596175]">
+            No story replies yet. Replies sent by users will appear here.
+          </p>
+        ) : (
+          <div className="mt-3 max-h-[260px] space-y-2.5 overflow-y-auto pr-1">
+            {replies.map((reply) => (
+              <div key={reply.id} className="rounded-[8px] border border-[#e6eaf2] bg-white p-2.5 shadow-[0_4px_12px_rgba(20,28,53,0.015)]">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {reply.profilePic ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={reply.profilePic}
+                        alt={reply.username}
+                        className="h-5 w-5 rounded-full object-cover shrink-0"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-white text-[8px] font-extrabold">
+                        {reply.username.slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                    <span className="truncate text-[11px] font-extrabold text-black">@{reply.username}</span>
+                  </div>
+                  <span className="shrink-0 text-[9px] font-semibold text-[#697083]">{formatDate(reply.timestamp)}</span>
+                </div>
+                <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049] break-words">{reply.text}</p>
               </div>
             ))}
-            {audiencePeople.length > inboxPreviewPeople.length ? (
-              <p className="text-[11px] font-semibold text-[#596175]">
-                +{audiencePeople.length - inboxPreviewPeople.length} more inbox people available in mention filters.
-              </p>
-            ) : null}
           </div>
-        ) : (
-          <p className="mt-3 rounded-[8px] border border-dashed border-[#d7deeb] bg-white p-3 text-[11px] font-semibold leading-relaxed text-[#596175]">
-            {audienceNotice || "No inbox people loaded yet. People appear after they message the connected Instagram account."}
-          </p>
         )}
       </div>
     </section>
@@ -1342,9 +1060,6 @@ function CommentCard({
   latest,
   takeoverMode,
   commentsActive,
-  audiencePeople,
-  audienceLoading,
-  audienceNotice,
   onDraftChange,
   onDraft,
   onPost,
@@ -1357,9 +1072,6 @@ function CommentCard({
   latest: boolean;
   takeoverMode: CommentTakeoverMode;
   commentsActive: boolean;
-  audiencePeople: InstagramAudiencePerson[];
-  audienceLoading: boolean;
-  audienceNotice: string;
   onDraftChange: (text: string) => void;
   onDraft: () => void;
   onPost: () => void;
@@ -1426,15 +1138,6 @@ function CommentCard({
           className="mt-3 min-h-[88px] w-full resize-none rounded-[8px] border border-[#dde3ee] bg-white px-3 py-2 text-[12px] font-semibold leading-relaxed text-black outline-none transition focus:border-[#4b3cff] focus:ring-2 focus:ring-[#4b3cff]/10"
         />
         {draft?.status ? <p className="mt-2 text-[11px] font-semibold text-[#596175]">{draft.status}</p> : null}
-        <div className="mt-3">
-          <AudienceMentionPicker
-            people={audiencePeople}
-            title="Mention in comment"
-            detail={audienceLoading ? "Loading inbox users..." : audienceNotice}
-            emptyText="No inbox users loaded yet. People appear here after they message the connected account."
-            onInsert={(mentions) => onDraftChange(appendMentionText(draft?.text || "", mentions))}
-          />
-        </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <button
             type="button"
@@ -1511,9 +1214,8 @@ function TakeoverControls({
               key={mode}
               type="button"
               onClick={() => onChangeMode(mode)}
-              className={`flex h-9 items-center justify-center gap-2 rounded-[7px] text-[11px] font-extrabold transition ${
-                isActive ? "bg-[#4b3cff] text-white" : "text-[#46506a] hover:bg-[#f7f8fc]"
-              }`}
+              className={`flex h-9 items-center justify-center gap-2 rounded-[7px] text-[11px] font-extrabold transition ${isActive ? "bg-[#4b3cff] text-white" : "text-[#46506a] hover:bg-[#f7f8fc]"
+                }`}
             >
               {mode === "ai" ? <Sparkles size={13} strokeWidth={2.3} /> : <UserCheck size={13} strokeWidth={2.3} />}
               {mode === "ai" ? "AI takeover" : "Human takeover"}
@@ -1551,9 +1253,6 @@ function CommentsList({
   latestCommentId,
   takeoverMode,
   commentsActive,
-  audiencePeople,
-  audienceLoading,
-  audienceNotice,
   onDraftChange,
   onDraft,
   onPost,
@@ -1566,9 +1265,6 @@ function CommentsList({
   latestCommentId?: string;
   takeoverMode: CommentTakeoverMode;
   commentsActive: boolean;
-  audiencePeople: InstagramAudiencePerson[];
-  audienceLoading: boolean;
-  audienceNotice: string;
   onDraftChange: (commentId: string, text: string) => void;
   onDraft: (comment: InstagramComment) => void;
   onPost: (comment: InstagramComment) => void;
@@ -1586,9 +1282,6 @@ function CommentsList({
           latest={latestCommentId === comment.id}
           takeoverMode={takeoverMode}
           commentsActive={commentsActive}
-          audiencePeople={audiencePeople}
-          audienceLoading={audienceLoading}
-          audienceNotice={audienceNotice}
           onDraftChange={(text) => onDraftChange(comment.id, text)}
           onDraft={() => onDraft(comment)}
           onPost={() => onPost(comment)}
@@ -1609,9 +1302,6 @@ function PostDetailView({
   drafts,
   draftingId,
   postingId,
-  audiencePeople,
-  audienceLoading,
-  audienceNotice,
   onToggleActive,
   onChangeTakeover,
   onRefreshComments,
@@ -1629,9 +1319,6 @@ function PostDetailView({
   drafts: Record<string, DraftState>;
   draftingId: string;
   postingId: string;
-  audiencePeople: InstagramAudiencePerson[];
-  audienceLoading: boolean;
-  audienceNotice: string;
   onToggleActive: () => void;
   onChangeTakeover: (mode: CommentTakeoverMode) => void;
   onRefreshComments: () => void;
@@ -1648,7 +1335,7 @@ function PostDetailView({
 
       <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
         <article className="rounded-[12px] border border-[#e6eaf2] bg-white p-4 shadow-[0_18px_48px_rgba(20,28,53,0.035)]">
-          <MediaPreview item={post} />
+          <MediaPreview item={post} play />
           <div className="mt-4 flex flex-wrap items-center gap-3 text-[12px] font-bold text-[#596175]">
             <span className="flex items-center gap-2">
               <InstagramDot />
@@ -1732,9 +1419,6 @@ function PostDetailView({
                 latestCommentId={latestComment?.id}
                 takeoverMode={takeoverMode}
                 commentsActive={commentsActive}
-                audiencePeople={audiencePeople}
-                audienceLoading={audienceLoading}
-                audienceNotice={audienceNotice}
                 onDraftChange={onDraftChange}
                 onDraft={onDraft}
                 onPost={onPost}
@@ -1773,6 +1457,10 @@ export default function InstagramContentPage() {
   const [detailPostId, setDetailPostId] = useState("");
   const [comments, setComments] = useState<InstagramComment[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftState>>({});
+  const [storyReplies, setStoryReplies] = useState<any[]>([]);
+  const [loadingStoryReplies, setLoadingStoryReplies] = useState(false);
+  const [storyRepliesError, setStoryRepliesError] = useState("");
+  const [activeModal, setActiveModal] = useState<"details" | "publish" | null>(null);
   const [commentAutomation, setCommentAutomation] = useState<Record<string, boolean>>(() =>
     readStoredRecord<boolean>(commentAutomationStorageKey)
   );
@@ -1789,13 +1477,9 @@ export default function InstagramContentPage() {
   const [storyNotice, setStoryNotice] = useState("");
   const [welcomeSaving, setWelcomeSaving] = useState(false);
   const [welcomeStatus, setWelcomeStatus] = useState("");
-  const [audiencePeople, setAudiencePeople] = useState<InstagramAudiencePerson[]>([]);
-  const [audienceNotice, setAudienceNotice] = useState("");
-  const [audienceLoading, setAudienceLoading] = useState(false);
   const [storyMediaFile, setStoryMediaFile] = useState<File | null>(null);
   const [storyMediaPreviewUrl, setStoryMediaPreviewUrl] = useState("");
   const [storyMediaType, setStoryMediaType] = useState<"image" | "video" | "">("");
-  const [storyMentionText, setStoryMentionText] = useState("");
   const [storyPublishing, setStoryPublishing] = useState(false);
   const [storyPublishStatus, setStoryPublishStatus] = useState("");
 
@@ -1916,29 +1600,6 @@ export default function InstagramContentPage() {
     }
   }, []);
 
-  const loadAudiencePeople = useCallback(async () => {
-    setAudienceLoading(true);
-
-    try {
-      const response = await fetch("/api/instagram/audience", {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      const data = (await response.json()) as InstagramAudienceResponse;
-
-      if (!response.ok || data.error) {
-        throw new Error(data.error || "Could not load inbox users");
-      }
-
-      setAudiencePeople(data.people || []);
-      setAudienceNotice(data.limitation || "Inbox users loaded.");
-    } catch (loadError) {
-      setAudiencePeople([]);
-      setAudienceNotice(loadError instanceof Error ? loadError.message : "Could not load inbox users");
-    } finally {
-      setAudienceLoading(false);
-    }
-  }, []);
 
   const loadComments = useCallback(async (mediaId: string) => {
     if (!mediaId) {
@@ -1969,6 +1630,35 @@ export default function InstagramContentPage() {
       setCommentsError(loadError instanceof Error ? loadError.message : "Could not load comments");
     } finally {
       setLoadingComments(false);
+    }
+  }, []);
+
+  const loadStoryReplies = useCallback(async (storyId: string) => {
+    if (!storyId) {
+      setStoryReplies([]);
+      return;
+    }
+
+    setLoadingStoryReplies(true);
+    setStoryRepliesError("");
+
+    try {
+      const response = await fetch(`/api/instagram/content/stories/replies?storyId=${encodeURIComponent(storyId)}`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Could not load story replies");
+      }
+
+      setStoryReplies(data.replies || []);
+    } catch (loadError) {
+      setStoryReplies([]);
+      setStoryRepliesError(loadError instanceof Error ? loadError.message : "Could not load story replies");
+    } finally {
+      setLoadingStoryReplies(false);
     }
   }, []);
 
@@ -2055,13 +1745,6 @@ export default function InstagramContentPage() {
     return () => window.clearTimeout(timeout);
   }, [loadWelcomeAutomation]);
 
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      void loadAudiencePeople();
-    }, 0);
-
-    return () => window.clearTimeout(timeout);
-  }, [loadAudiencePeople]);
 
   useEffect(() => {
     const syncDetailPost = () => {
@@ -2094,6 +1777,18 @@ export default function InstagramContentPage() {
 
     return () => window.clearTimeout(timeout);
   }, [loadComments, selectedPost?.id]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      if (selectedStory?.id) {
+        void loadStoryReplies(selectedStory.id);
+      } else {
+        setStoryReplies([]);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [loadStoryReplies, selectedStory?.id]);
 
   const updateDraft = useCallback((commentId: string, patch: Partial<DraftState>) => {
     setDrafts((current) => {
@@ -2307,7 +2002,6 @@ export default function InstagramContentPage() {
     try {
       const formData = new FormData();
       formData.append("media", storyMediaFile);
-      formData.append("mentionText", storyMentionText);
 
       const response = await fetch("/api/instagram/content/stories/publish", {
         method: "POST",
@@ -2322,11 +2016,7 @@ export default function InstagramContentPage() {
         throw new Error(data.error || "Could not publish story");
       }
 
-      setStoryPublishStatus(
-        storyMentionText.trim()
-          ? "Story published. Mention text is prepared here, but Instagram API story publishing does not add tappable mention stickers."
-          : "Story published."
-      );
+      setStoryPublishStatus("Story published.");
       clearStoryMedia(false);
       void loadContent();
     } catch (publishError) {
@@ -2352,6 +2042,16 @@ export default function InstagramContentPage() {
           </div>
 
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            {activeTab === "stories" && account && (
+              <button
+                type="button"
+                onClick={() => setActiveModal("publish")}
+                className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#4b3cff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_36px_rgba(75,60,255,0.22)] transition hover:bg-[#3f32e6]"
+              >
+                <UploadCloud size={15} strokeWidth={2.35} />
+                Create story
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void loadContent()}
@@ -2361,13 +2061,15 @@ export default function InstagramContentPage() {
               <RefreshCw size={15} className={loadingContent ? "animate-spin" : ""} strokeWidth={2.35} />
               Refresh
             </button>
-            <a
-              href="/api/auth/instagram?next=/instagram-content"
-              className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#4b3cff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_36px_rgba(75,60,255,0.22)]"
-            >
-              <InstagramDot />
-              Connect account
-            </a>
+            {!account && (
+              <a
+                href="/api/auth/instagram?next=/instagram-content"
+                className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#4b3cff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_36px_rgba(75,60,255,0.22)]"
+              >
+                <InstagramDot />
+                Connect account
+              </a>
+            )}
           </div>
         </header>
 
@@ -2383,15 +2085,15 @@ export default function InstagramContentPage() {
             { label: "Followers", value: loadingContent ? "..." : formatCompactNumber(account?.followersCount), icon: <Users size={15} strokeWidth={2.35} /> },
             { label: "Post comments", value: loadingContent ? "..." : String(totalComments), icon: <MessageCircle size={15} strokeWidth={2.35} /> },
           ].map((metric: { label: string; value: string; icon: ReactNode }) => (
-              <article key={metric.label} className="rounded-[10px] border border-[#e6eaf2] bg-white p-4 shadow-[0_18px_48px_rgba(20,28,53,0.035)]">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">{metric.label}</span>
-                  <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[#f0edff] text-[#4b3cff]">
-                    {metric.icon}
-                  </span>
-                </div>
-                <p className="mt-3 truncate text-[18px] font-extrabold text-black">{metric.value}</p>
-              </article>
+            <article key={metric.label} className="rounded-[10px] border border-[#e6eaf2] bg-white p-4 shadow-[0_18px_48px_rgba(20,28,53,0.035)]">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] font-extrabold uppercase tracking-wide text-[#697083]">{metric.label}</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[#f0edff] text-[#4b3cff]">
+                  {metric.icon}
+                </span>
+              </div>
+              <p className="mt-3 truncate text-[18px] font-extrabold text-black">{metric.value}</p>
+            </article>
           ))}
         </section>
 
@@ -2427,9 +2129,6 @@ export default function InstagramContentPage() {
               drafts={drafts}
               draftingId={draftingId}
               postingId={postingId}
-              audiencePeople={audiencePeople}
-              audienceLoading={audienceLoading}
-              audienceNotice={audienceNotice}
               onToggleActive={() => setPostAutomation(selectedPost.id, !commentsActive)}
               onChangeTakeover={(mode) => setPostTakeoverMode(selectedPost.id, mode)}
               onRefreshComments={() => void loadComments(selectedPost.id)}
@@ -2462,9 +2161,8 @@ export default function InstagramContentPage() {
                   key={tab}
                   type="button"
                   onClick={() => changeContentTab(tab)}
-                  className={`flex h-9 flex-1 items-center justify-center rounded-[8px] text-[12px] font-extrabold capitalize transition ${
-                    activeTab === tab ? "bg-[#4b3cff] text-white" : "text-[#46506a] hover:bg-[#f7f8fc]"
-                  }`}
+                  className={`flex h-9 flex-1 items-center justify-center rounded-[8px] text-[12px] font-extrabold capitalize transition ${activeTab === tab ? "bg-[#4b3cff] text-white" : "text-[#46506a] hover:bg-[#f7f8fc]"
+                    }`}
                 >
                   {tab}
                 </button>
@@ -2477,159 +2175,247 @@ export default function InstagramContentPage() {
                 loadingContent={loadingContent}
                 startDate={normalizedFollowerStartDate}
                 endDate={normalizedFollowerEndDate}
-                welcomeAutomation={welcomeAutomation}
-                welcomeSaving={welcomeSaving}
-                welcomeStatus={welcomeStatus}
                 onStartDateChange={handleFollowerStartDateChange}
                 onEndDateChange={handleFollowerEndDateChange}
-                onWelcomeChange={(settings) => {
-                  setWelcomeAutomation(settings);
-                  setWelcomeStatus("");
-                }}
-                onSaveWelcome={() => void saveWelcomeAutomation()}
               />
             ) : (
-            <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_430px]">
-              <div>
-                {loadingContent ? (
-                  <EmptyState title="Loading Instagram content" detail="Reading the connected account posts and stories." />
-                ) : currentItems.length === 0 ? (
-                  <EmptyState
-                    title={activeTab === "posts" ? "No posts found" : "No active stories found"}
-                    detail={
-                      activeTab === "posts"
-                        ? "Published Instagram media will appear here after the account is connected and permissions are approved."
-                        : storyNotice || "Instagram only returns active stories that are currently available."
-                    }
-                  />
-                ) : (
-                  <>
-                    <ContentPagination
-                      totalItems={currentItems.length}
-                      startItem={visibleContentStart}
-                      endItem={visibleContentEnd}
-                      page={safeContentPage}
-                      totalPages={contentTotalPages}
-                      pageSize={contentPageSize}
-                      onPageChange={setContentPage}
-                      onPageSizeChange={changeContentPageSize}
+              <>
+                <section className="mt-5 w-full">
+                  {loadingContent ? (
+                    <EmptyState title="Loading Instagram content" detail="Reading the connected account posts and stories." />
+                  ) : currentItems.length === 0 ? (
+                    <EmptyState
+                      title={activeTab === "posts" ? "No posts found" : "No active stories found"}
+                      detail={
+                        activeTab === "posts"
+                          ? "Published Instagram media will appear here after the account is connected and permissions are approved."
+                          : storyNotice || "Instagram only returns active stories that are currently available."
+                      }
+                      action={
+                        activeTab === "stories" && account ? (
+                          <button
+                            type="button"
+                            onClick={() => setActiveModal("publish")}
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#4b3cff] px-4 text-[12px] font-extrabold text-white hover:bg-[#3f32e6]"
+                          >
+                            <UploadCloud size={15} strokeWidth={2.35} />
+                            Create story
+                          </button>
+                        ) : undefined
+                      }
                     />
-                    <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
-                      {paginatedItems.map((item) => (
-                        <ContentCard
-                          key={item.id}
-                          item={item}
-                          active={
-                            activeTab === "posts"
-                              ? selectedPost?.id === item.id
-                              : activeTab === "stories" && selectedStory?.id === item.id
-                          }
-                          onSelect={() => {
-                            if (item.kind === "post") {
-                              window.location.href = `/instagram-content/${encodeURIComponent(item.id)}`;
-                              return;
+                  ) : (
+                    <>
+                      <ContentPagination
+                        totalItems={currentItems.length}
+                        startItem={visibleContentStart}
+                        endItem={visibleContentEnd}
+                        page={safeContentPage}
+                        totalPages={contentTotalPages}
+                        pageSize={contentPageSize}
+                        onPageChange={setContentPage}
+                        onPageSizeChange={changeContentPageSize}
+                      />
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                        {paginatedItems.map((item) => (
+                          <ContentCard
+                            key={item.id}
+                            item={item}
+                            active={
+                              activeTab === "posts"
+                                ? selectedPost?.id === item.id
+                                : activeTab === "stories" && selectedStory?.id === item.id
                             }
+                            onSelect={() => {
+                              if (item.kind === "post") {
+                                setSelectedPostId(item.id);
+                              } else {
+                                setSelectedStoryId(item.id);
+                              }
+                              setActiveModal("details");
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </section>
 
-                            setSelectedStoryId(item.id);
-                          }}
-                        />
-                      ))}
+                {activeModal === "details" && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className={`relative flex h-[90dvh] w-full flex-col overflow-hidden rounded-[16px] bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200 ${activeTab === "posts" ? "max-w-6xl" : "max-w-2xl"
+                      }`}>
+                      {/* Modal Header */}
+                      <header className="flex items-center justify-between border-b border-[#e6eaf2] px-6 py-4">
+                        <h2 className="text-[18px] font-extrabold text-black">
+                          {activeTab === "posts" ? "Post Details & Comments" : "Story Details & Replies"}
+                        </h2>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModal(null)}
+                          className="flex h-8 w-8 items-center justify-center rounded-full text-[#697083] transition hover:bg-[#f3f4f8] hover:text-black"
+                          aria-label="Close details modal"
+                        >
+                          <X size={18} strokeWidth={2.4} />
+                        </button>
+                      </header>
+
+                      {/* Modal Body */}
+                      <div className="flex-1 overflow-y-auto p-6 bg-[#fdfdff]">
+                        {activeTab === "posts" && selectedPost ? (
+                          <div className="grid gap-6 lg:grid-cols-[480px_1fr]">
+                            {/* Left Side: Post Media & Info */}
+                            <div className="space-y-4">
+                              <div className="rounded-[12px] border border-[#e6eaf2] bg-white p-4 shadow-[0_10px_30px_rgba(20,28,53,0.02)]">
+                                <MediaPreview item={selectedPost} play />
+                                <div className="mt-4 flex flex-wrap items-center gap-3 text-[12px] font-bold text-[#596175]">
+                                  <span className="flex items-center gap-2">
+                                    <InstagramDot />
+                                    {formatDate(selectedPost.timestamp)}
+                                  </span>
+                                  <span className="flex items-center gap-1.5">
+                                    <MessageCircle size={14} strokeWidth={2.25} />
+                                    {selectedPost.commentsCount} comments
+                                  </span>
+                                  {typeof selectedPost.likeCount === "number" ? (
+                                    <span className="flex items-center gap-1.5">
+                                      <Heart size={14} strokeWidth={2.25} />
+                                      {selectedPost.likeCount} likes
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <h3 className="mt-4 text-[15px] font-extrabold text-black">Caption</h3>
+                                <p className="mt-2 whitespace-pre-wrap text-[13px] font-semibold leading-relaxed text-[#253049]">
+                                  {selectedPost.caption || "No description available for this post."}
+                                </p>
+                                {selectedPost.permalink ? (
+                                  <a
+                                    href={selectedPost.permalink}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="mt-4 inline-flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#dfe4ef] bg-white px-4 text-[12px] font-extrabold text-black"
+                                  >
+                                    Open on Instagram
+                                    <ExternalLink size={12} strokeWidth={2.4} />
+                                  </a>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            {/* Right Side: Comments and Takeover Controls */}
+                            <div className="rounded-[12px] border border-[#e6eaf2] bg-white p-4 shadow-[0_10px_30px_rgba(20,28,53,0.02)] flex flex-col h-full overflow-hidden">
+                              <div className="flex items-start justify-between gap-3 shrink-0">
+                                <div>
+                                  <h3 className="text-[16px] font-extrabold text-black">Comments</h3>
+                                  <p className="mt-1 text-[12px] font-semibold text-[#596175]">
+                                    {comments.length} loaded comment{comments.length === 1 ? "" : "s"} • {commentsActive ? "active" : "inactive"}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => void loadComments(selectedPost.id)}
+                                  disabled={loadingComments}
+                                  className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#dfe4ef] bg-white text-black disabled:opacity-60"
+                                  aria-label="Refresh comments"
+                                >
+                                  <RefreshCw size={14} className={loadingComments ? "animate-spin" : ""} strokeWidth={2.3} />
+                                </button>
+                              </div>
+
+                              <TakeoverControls
+                                commentsActive={commentsActive}
+                                takeoverMode={takeoverMode}
+                                onToggleActive={() => setPostAutomation(selectedPost.id, !commentsActive)}
+                                onChangeMode={(mode) => setPostTakeoverMode(selectedPost.id, mode)}
+                              />
+                              <LatestCommentSummary comment={latestComment} />
+
+                              {commentsError ? (
+                                <p className="mt-4 rounded-[8px] border border-[#ffd8df] bg-[#fff6f8] p-3 text-[12px] font-semibold text-[#b4233c]">{commentsError}</p>
+                              ) : null}
+
+                              <div className="flex-1 overflow-y-auto mt-4 pr-1 min-h-[300px]">
+                                {loadingComments ? (
+                                  <div className="rounded-[10px] border border-dashed border-[#d7deeb] p-8 text-center text-[12px] font-semibold text-[#596175]">
+                                    Loading comments...
+                                  </div>
+                                ) : comments.length === 0 ? (
+                                  <EmptyState title="No comments yet" detail="New comments on this post will appear here after refresh." />
+                                ) : (
+                                  <div className="space-y-4">
+                                    <CommentsList
+                                      comments={comments}
+                                      selectedPost={selectedPost}
+                                      drafts={drafts}
+                                      draftingId={draftingId}
+                                      postingId={postingId}
+                                      latestCommentId={latestComment?.id}
+                                      takeoverMode={takeoverMode}
+                                      commentsActive={commentsActive}
+                                      onDraftChange={(commentId, text) => updateDraft(commentId, { text, status: "" })}
+                                      onDraft={(comment) => void draftReply(comment, selectedPost)}
+                                      onPost={(comment) => void postReply(comment)}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ) : activeTab === "stories" && selectedStory ? (
+                          <div className="w-full">
+                            <StoryDetailPanel
+                              story={selectedStory}
+                              replies={storyReplies}
+                              loadingReplies={loadingStoryReplies}
+                              repliesError={storyRepliesError}
+                              onRefreshReplies={() => {
+                                if (selectedStory?.id) {
+                                  void loadStoryReplies(selectedStory.id);
+                                }
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="text-center py-12 text-[#596175]">No details available</div>
+                        )}
+                      </div>
                     </div>
-                  </>
+                  </div>
                 )}
-              </div>
 
-              <aside className={activeTab === "stories" ? "space-y-4 xl:sticky xl:top-6 xl:max-h-[calc(100dvh-48px)] xl:overflow-y-auto" : "rounded-[12px] border border-[#e6eaf2] bg-white p-4 shadow-[0_18px_48px_rgba(20,28,53,0.035)] xl:sticky xl:top-6 xl:max-h-[calc(100dvh-48px)] xl:overflow-y-auto"}>
-                {activeTab === "stories" ? (
-                  <>
-                    <StoryDetailPanel
-                      story={selectedStory}
-                      audiencePeople={audiencePeople}
-                      audienceLoading={audienceLoading}
-                      audienceNotice={audienceNotice}
-                    />
-                    <StoryToolsPanel
-                      audiencePeople={audiencePeople}
-                      audienceLoading={audienceLoading}
-                      audienceNotice={audienceNotice}
-                      mediaFile={storyMediaFile}
-                      mediaPreviewUrl={storyMediaPreviewUrl}
-                      mediaType={storyMediaType}
-                      mentionText={storyMentionText}
-                      publishing={storyPublishing}
-                      status={storyPublishStatus}
-                      onMediaFileChange={selectStoryMediaFile}
-                      onClearMedia={() => clearStoryMedia()}
-                      onMentionTextChange={setStoryMentionText}
-                      onPublish={() => void publishStory()}
-                    />
-                  </>
-                ) : !selectedPost ? (
-                  <EmptyState title="Select a post" detail="Choose a post to load comments and draft AI replies." />
-                ) : (
-                  <>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h2 className="text-[16px] font-extrabold text-black">Post comments</h2>
-                        <p className="mt-1 text-[12px] font-semibold text-[#596175]">
-                          {selectedPost.commentsCount} visible comment{selectedPost.commentsCount === 1 ? "" : "s"} • {commentsActive ? "active" : "inactive"}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void loadComments(selectedPost.id)}
-                        disabled={loadingComments}
-                        className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-[#dfe4ef] bg-white text-black disabled:opacity-60"
-                        aria-label="Refresh comments"
-                      >
-                        <RefreshCw size={15} className={loadingComments ? "animate-spin" : ""} strokeWidth={2.3} />
-                      </button>
-                    </div>
+                {activeModal === "publish" && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className="relative flex h-[80dvh] w-full max-w-2xl flex-col overflow-hidden rounded-[16px] bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                      {/* Modal Header */}
+                      <header className="flex items-center justify-between border-b border-[#e6eaf2] px-6 py-4">
+                        <h2 className="text-[18px] font-extrabold text-black">Create Story</h2>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModal(null)}
+                          className="flex h-8 w-8 items-center justify-center rounded-full text-[#697083] transition hover:bg-[#f3f4f8] hover:text-black"
+                          aria-label="Close publish modal"
+                        >
+                          <X size={18} strokeWidth={2.4} />
+                        </button>
+                      </header>
 
-                    <TakeoverControls
-                      commentsActive={commentsActive}
-                      takeoverMode={takeoverMode}
-                      onToggleActive={() => setPostAutomation(selectedPost.id, !commentsActive)}
-                      onChangeMode={(mode) => setPostTakeoverMode(selectedPost.id, mode)}
-                    />
-                    <LatestCommentSummary comment={latestComment} />
-
-                    {commentsError ? (
-                      <p className="mt-4 rounded-[8px] border border-[#ffd8df] bg-[#fff6f8] p-3 text-[12px] font-semibold text-[#b4233c]">{commentsError}</p>
-                    ) : null}
-
-                    {loadingComments ? (
-                      <div className="mt-5 rounded-[10px] border border-dashed border-[#d7deeb] p-6 text-center text-[12px] font-semibold text-[#596175]">
-                        Loading comments...
-                      </div>
-                    ) : comments.length === 0 ? (
-                      <div className="mt-5">
-                        <EmptyState title="No comments yet" detail="New comments on this post will appear here after refresh." />
-                      </div>
-                    ) : (
-                      <div className="mt-5 space-y-4">
-                        <CommentsList
-                          comments={comments}
-                          selectedPost={selectedPost}
-                          drafts={drafts}
-                          draftingId={draftingId}
-                          postingId={postingId}
-                          latestCommentId={latestComment?.id}
-                          takeoverMode={takeoverMode}
-                          commentsActive={commentsActive}
-                          audiencePeople={audiencePeople}
-                          audienceLoading={audienceLoading}
-                          audienceNotice={audienceNotice}
-                          onDraftChange={(commentId, text) => updateDraft(commentId, { text, status: "" })}
-                          onDraft={(comment) => void draftReply(comment, selectedPost)}
-                          onPost={(comment) => void postReply(comment)}
+                      {/* Modal Body */}
+                      <div className="flex-1 overflow-y-auto p-6 bg-[#fdfdff]">
+                        <StoryToolsPanel
+                          mediaFile={storyMediaFile}
+                          mediaPreviewUrl={storyMediaPreviewUrl}
+                          mediaType={storyMediaType}
+                          publishing={storyPublishing}
+                          status={storyPublishStatus}
+                          onMediaFileChange={selectStoryMediaFile}
+                          onClearMedia={() => clearStoryMedia()}
+                          onPublish={() => void publishStory()}
                         />
                       </div>
-                    )}
-                  </>
+                    </div>
+                  </div>
                 )}
-              </aside>
-            </section>
+              </>
             )}
           </>
         )}

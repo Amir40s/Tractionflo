@@ -216,6 +216,22 @@ export async function GET(request: Request) {
 
         const messages: InstagramMessage[] = msgsData.messages?.data || [];
 
+        // Fetch matching stored messages from Supabase to parse story reply metadata
+        const mids = messages.map((m) => m.id).filter(Boolean);
+        const dbMessagesMap: Record<string, string> = {};
+        if (mids.length > 0) {
+          const { data: dbMessages, error: dbError } = await supabase
+            .from('messages')
+            .select('mid, text')
+            .in('mid', mids);
+          
+          if (!dbError && dbMessages) {
+            for (const dbMsg of dbMessages) {
+              dbMessagesMap[dbMsg.mid] = dbMsg.text;
+            }
+          }
+        }
+
         // Find the other participant (not the page/ig user)
         const otherParticipant = participants.find(
           (p) => p.id !== ownParticipantId && p.username !== meData.username
@@ -228,17 +244,40 @@ export async function GET(request: Request) {
           id: conv.id,
           participant: otherParticipantProfile || { id: 'unknown', name: 'Instagram User' },
           updated_time: conv.updated_time,
-          messages: messages.map((m) => ({
-            id: m.id,
-            text: m.message || '',
-            attachments: normalizeAttachments(m.attachments),
-            from: m.from?.id === ownParticipantId || m.from?.username === meData.username ? 'me' : 'user',
-            sender_name: m.from?.name || m.from?.username,
-            sender_profile_pic: m.from?.id === otherParticipantProfileId ? otherParticipantProfilePic : undefined,
-            sender_id: m.from?.id,
-            time: m.created_time,
-            reply_to: m.reply_to,
-          })),
+          messages: messages.map((m) => {
+            let text = m.message || '';
+            let reply_to = m.reply_to;
+
+            const dbText = dbMessagesMap[m.id];
+            if (dbText && dbText.startsWith('__STORY_REPLY__:')) {
+              try {
+                const parts = dbText.split('__TEXT__:', 2);
+                if (parts.length === 2) {
+                  const storyStr = parts[0].substring('__STORY_REPLY__:'.length);
+                  const story = JSON.parse(storyStr);
+                  text = parts[1];
+                  reply_to = {
+                    ...reply_to,
+                    story
+                  };
+                }
+              } catch (e) {
+                console.error('Failed to parse serialized story reply from DB:', e);
+              }
+            }
+
+            return {
+              id: m.id,
+              text,
+              attachments: normalizeAttachments(m.attachments),
+              from: m.from?.id === ownParticipantId || m.from?.username === meData.username ? 'me' : 'user',
+              sender_name: m.from?.name || m.from?.username,
+              sender_profile_pic: m.from?.id === otherParticipantProfileId ? otherParticipantProfilePic : undefined,
+              sender_id: m.from?.id,
+              time: m.created_time,
+              reply_to,
+            };
+          }),
         };
       })
     );
