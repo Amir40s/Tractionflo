@@ -40,6 +40,13 @@ type InstagramMessage = {
   attachments?: {
     data?: InstagramAttachment[];
   };
+  reply_to?: {
+    mid?: string;
+    story?: {
+      id?: string;
+      url?: string;
+    };
+  };
 };
 
 type InstagramConversation = {
@@ -201,7 +208,7 @@ export async function GET(request: Request) {
         );
         const ownParticipantId = ownParticipant?.id || real_ig_user_id;
         const msgsUrl = new URL(`https://graph.instagram.com/v21.0/${conv.id}`);
-        msgsUrl.searchParams.set('fields', 'messages{id,message,from,to,created_time,attachments}');
+        msgsUrl.searchParams.set('fields', 'messages{id,message,from,to,created_time,attachments,reply_to}');
         msgsUrl.searchParams.set('access_token', access_token);
 
         const msgsRes = await fetch(msgsUrl.toString());
@@ -230,6 +237,7 @@ export async function GET(request: Request) {
             sender_profile_pic: m.from?.id === otherParticipantProfileId ? otherParticipantProfilePic : undefined,
             sender_id: m.from?.id,
             time: m.created_time,
+            reply_to: m.reply_to,
           })),
         };
       })

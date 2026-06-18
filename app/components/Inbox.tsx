@@ -66,6 +66,13 @@ type IGMessage = {
   sender_id: string;
   time: string; // ISO string
   status?: "sending" | "sent" | "failed";
+  reply_to?: {
+    mid?: string;
+    story?: {
+      id?: string;
+      url?: string;
+    };
+  };
 };
 
 type IGConversation = {
@@ -274,6 +281,7 @@ function formatInstagramAccount(account: IGAccount | null): string {
 
 function getMessagePreview(msg: IGMessage | undefined): string {
   if (!msg) return "No messages";
+  if (msg.reply_to?.story) return `Replied to story: ${msg.text || "reaction"}`;
   if (msg.text) return msg.text;
 
   const firstAttachment = msg.attachments?.[0];
@@ -670,6 +678,27 @@ function ChatBubble({ msg, igUserId }: { msg: IGMessage; igUserId: string }) {
           isMe ? "bg-[#f0efff] text-[#171c33]" : "bg-white text-black"
         }`}
       >
+        {msg.reply_to?.story && (
+          <div className="mb-2 flex items-start gap-2.5 rounded-[9px] border border-[#e7eaf2] bg-[#f8f9fc] p-1.5 pr-2.5">
+            {msg.reply_to.story.url && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={msg.reply_to.story.url}
+                alt="Story preview"
+                className="h-14 w-10 shrink-0 rounded-[6px] object-cover bg-gray-100"
+                referrerPolicy="no-referrer"
+              />
+            )}
+            <div className="min-w-0 py-0.5">
+              <span className="block text-[10px] font-extrabold uppercase tracking-wider text-[#7c3aed]">
+                Story Reply
+              </span>
+              <span className="block truncate text-[10px] font-semibold text-[#596175]">
+                ID: {msg.reply_to.story.id || 'N/A'}
+              </span>
+            </div>
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="mb-2 space-y-2">
             {attachments.map((attachment, index) => {
