@@ -465,6 +465,56 @@ function getInstagramOAuthErrorFromLocation() {
   return error || null;
 }
 
+const instagramAutoSendStorageKey = "tractionflo.instagram.aiAutoSentKeys";
+
+function readInstagramAutoSendKeys() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const value = window.sessionStorage.getItem(instagramAutoSendStorageKey);
+    const parsed = value ? JSON.parse(value) : [];
+
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasInstagramAutoSendKey(key: string) {
+  return readInstagramAutoSendKeys().includes(key);
+}
+
+function rememberInstagramAutoSendKey(key: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const keys = readInstagramAutoSendKeys().filter((item) => item !== key);
+  keys.push(key);
+
+  try {
+    window.sessionStorage.setItem(instagramAutoSendStorageKey, JSON.stringify(keys.slice(-50)));
+  } catch {
+    // Session storage is best-effort; the in-memory ref still guards this render lifetime.
+  }
+}
+
+function forgetInstagramAutoSendKey(key: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const keys = readInstagramAutoSendKeys().filter((item) => item !== key);
+
+  try {
+    window.sessionStorage.setItem(instagramAutoSendStorageKey, JSON.stringify(keys));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function getConversationAiMessages(conv: IGConversation) {
   return [...conv.messages]
     .reverse()
@@ -1674,6 +1724,7 @@ function SummaryPanel({
       ? formatNoteSavedAt(savedConversationNote.updatedAt)
       : "No notes yet";
   const canSaveConversationNote = Boolean(conv && hasConversationNoteChanges);
+  const autoSendPaused = Boolean(aiWorkflow?.handoff || aiWorkflow?.autoSend === false);
 
   useEffect(() => {
     takeoverModeRef.current = takeoverMode;
@@ -1799,7 +1850,6 @@ function SummaryPanel({
     const reply = aiWorkflow?.reply?.trim();
 
     if (
-      true || // Backend webhook handles auto-sending; disable frontend auto-sending to prevent race conditions and duplicate messages
       !conv ||
       isHumanTakeover ||
       aiLoading ||
@@ -1814,11 +1864,12 @@ function SummaryPanel({
 
     const autoSendKey = `${conv?.id || ""}:${latestInboundMessage?.id || ""}:${reply}`;
 
-    if (lastAutoSendKeyRef.current === autoSendKey) {
+    if (lastAutoSendKeyRef.current === autoSendKey || hasInstagramAutoSendKey(autoSendKey)) {
       return;
     }
 
     lastAutoSendKeyRef.current = autoSendKey;
+    rememberInstagramAutoSendKey(autoSendKey);
     setAiStatus("AI takeover active. Sending reply automatically...");
 
     void onAutoSendAiReply(reply || "", conv?.id || "")
@@ -1829,6 +1880,7 @@ function SummaryPanel({
       })
       .catch((error) => {
         lastAutoSendKeyRef.current = "";
+        forgetInstagramAutoSendKey(autoSendKey);
 
         if (takeoverModeRef.current !== "human") {
           setAiStatus(error instanceof Error ? error.message : "AI auto-send failed.");
@@ -2254,7 +2306,7 @@ function SummaryPanel({
                       disabled={aiLoading || !suggestedReply}
                       className="text-[11px] font-bold text-[#3044ff] disabled:cursor-not-allowed disabled:opacity-55"
                     >
-                      {aiLoading ? "Thinking" : "Auto-send on"}
+                      {aiLoading ? "Thinking" : autoSendPaused ? "Auto-send paused" : "Auto-send on"}
                     </button>
                   </div>
                   <div className="rounded-[8px] border border-[#dde3ee] bg-white p-2.5 text-[12px] leading-[1.35] text-[#252c41]">
@@ -2269,7 +2321,7 @@ function SummaryPanel({
                     className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded-[7px] bg-[#0d1118] text-[12px] font-semibold text-white opacity-70"
                   >
                     {composerStatus.sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-                    AI sends automatically
+                    {autoSendPaused ? "Human review required" : "AI sends automatically"}
                   </button>
                 </div>
               ) : null}
