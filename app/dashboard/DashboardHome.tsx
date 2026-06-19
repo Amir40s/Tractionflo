@@ -38,6 +38,18 @@ import { DashboardOverview } from "./creator/DashboardOverview";
 import { KnowledgeBasePage } from "./creator/KnowledgeBasePage";
 import { BrandMark } from "./creator/BrandMark";
 import { OpportunitiesPage } from "./creator/LeadsPage";
+import {
+  escalationWorkflowStateChangedEvent,
+  loadEscalationWorkflowStateFromDatabase,
+  readStoredEscalationWorkflowState,
+  saveEscalationWorkflowStateToDatabase,
+} from "./escalation-resolution";
+import {
+  loadOpportunityWorkflowStateFromDatabase,
+  opportunityWorkflowStateChangedEvent,
+  readStoredOpportunityWorkflowState,
+  saveOpportunityWorkflowStateToDatabase,
+} from "./opportunity-resolution";
 import type {
   AccountProfile,
   AccountProfileResponse,
@@ -45,8 +57,11 @@ import type {
   InstagramConversationsResponse,
   NavigationCounts,
   NavItem,
+  OpportunityPageCard,
 } from "./creator/types";
 import { buildCreatorLiveSummary } from "./creator-insights";
+import { emptyEscalationWorkflowState } from "@/lib/escalation-workflow-state";
+import { emptyOpportunityWorkflowState } from "@/lib/opportunity-workflow-state";
 
 const accountProfileStorageKey = "tractionflo_account_profile";
 
@@ -243,6 +258,74 @@ function getVisibleNavItems(profile: AccountProfile) {
   return navItems.filter((item) => item.tab && profile.allowedPages.includes(item.tab as PagePermissionId));
 }
 
+function isOpportunityCardInTab(card: OpportunityPageCard, label: string) {
+  const normalizedLabel = label.toLowerCase();
+
+  if (normalizedLabel.includes("hot")) return card.classification === "Hot";
+  if (normalizedLabel.includes("warm")) return card.classification === "Warm";
+  if (normalizedLabel.includes("cold")) return card.classification === "Cold";
+  if (normalizedLabel.includes("partner")) return card.badge === "PARTNERSHIP";
+  if (normalizedLabel.includes("community")) return card.badge === "COMMUNITY";
+  return true;
+}
+
+function getOpportunityCardEstimatedValue(card: OpportunityPageCard) {
+  return Number((card.value || "").replace(/[^\d.-]/g, "")) || 0;
+}
+
+function formatDashboardMoney(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatDashboardPercent(value: number, total: number) {
+  return `${Math.round((value / Math.max(1, total)) * 100)}%`;
+}
+
+function buildDisplayOpportunityTabs(
+  tabs: ReturnType<typeof buildCreatorLiveSummary>["opportunityTabs"],
+  cards: OpportunityPageCard[],
+) {
+  return tabs.map((tab) => ({
+    ...tab,
+    count: cards.filter((card) => isOpportunityCardInTab(card, tab.label)).length.toLocaleString("en-US"),
+  }));
+}
+
+function buildDisplayOpportunityMetrics(
+  metrics: ReturnType<typeof buildCreatorLiveSummary>["opportunityMetrics"],
+  cards: OpportunityPageCard[],
+  totalConversationCount: number,
+) {
+  const estimatedRevenue = cards.reduce((total, card) => total + getOpportunityCardEstimatedValue(card), 0);
+  const hotLeadCount = cards.filter((card) => card.classification === "Hot").length;
+
+  return metrics.map((metric) => {
+    const normalizedLabel = metric.label.toLowerCase();
+
+    if (normalizedLabel.includes("leads generated")) {
+      return { ...metric, value: cards.length.toLocaleString("en-US") };
+    }
+
+    if (normalizedLabel.includes("hot")) {
+      return { ...metric, value: hotLeadCount.toLocaleString("en-US") };
+    }
+
+    if (normalizedLabel.includes("revenue")) {
+      return { ...metric, value: formatDashboardMoney(estimatedRevenue) };
+    }
+
+    if (normalizedLabel.includes("rate")) {
+      return { ...metric, value: formatDashboardPercent(cards.length, totalConversationCount) };
+    }
+
+    return metric;
+  });
+}
+
 function LogoutButton() {
   return (
     <form action={signout}>
@@ -431,6 +514,8 @@ function DashboardContent() {
   const [creatorDateRangePreset, setCreatorDateRangePreset] = useState<AdminDateRangePreset>("7d");
   const [creatorAutoRefreshOn, setCreatorAutoRefreshOn] = useState(true);
   const [creatorEscalationRules, setCreatorEscalationRules] = useState<EscalationRuleSetting[]>(() => readStoredSettingsState().rules);
+  const [escalationWorkflowState, setEscalationWorkflowState] = useState(emptyEscalationWorkflowState);
+  const [opportunityWorkflowState, setOpportunityWorkflowState] = useState(emptyOpportunityWorkflowState);
   const hasLoadedAccountProfileRef = useRef(false);
   const creatorSummary = buildCreatorLiveSummary(
     creatorConversationResponse.conversations || [],
@@ -439,6 +524,28 @@ function DashboardContent() {
     creatorDateRangePreset,
     creatorEscalationRules,
   );
+  const resolvedEscalationIdSet = new Set(escalationWorkflowState.resolvedIds);
+  const readEscalationIdSet = new Set(escalationWorkflowState.readIds);
+  const resolvedOpportunityIdSet = new Set(opportunityWorkflowState.resolvedIds);
+  const readOpportunityIdSet = new Set(opportunityWorkflowState.readIds);
+  const unresolvedEscalations = creatorSummary.escalations.filter((escalation) => !resolvedEscalationIdSet.has(escalation.id));
+  const unresolvedOpportunityCards = creatorSummary.opportunityCards.filter((opportunity) => !resolvedOpportunityIdSet.has(opportunity.id));
+  const unreadEscalationCount = unresolvedEscalations.filter((escalation) => !readEscalationIdSet.has(escalation.id)).length;
+  const unreadOpportunityCount = unresolvedOpportunityCards.filter((opportunity) => !readOpportunityIdSet.has(opportunity.id)).length;
+  const unresolvedEscalationIdsKey = unresolvedEscalations.map((escalation) => escalation.id).join("|");
+  const unresolvedOpportunityIdsKey = unresolvedOpportunityCards.map((opportunity) => opportunity.id).join("|");
+  const readEscalationIdsKey = escalationWorkflowState.readIds.join("|");
+  const readOpportunityIdsKey = opportunityWorkflowState.readIds.join("|");
+  const creatorSummaryForDisplay = {
+    ...creatorSummary,
+    dashboardOpportunities: creatorSummary.dashboardOpportunities.filter((opportunity) => !opportunity.id || !resolvedOpportunityIdSet.has(opportunity.id)),
+    opportunityCount: unresolvedOpportunityCards.length,
+    opportunityTabs: buildDisplayOpportunityTabs(creatorSummary.opportunityTabs, unresolvedOpportunityCards),
+    opportunityMetrics: buildDisplayOpportunityMetrics(creatorSummary.opportunityMetrics, unresolvedOpportunityCards, creatorSummary.totalConversationCount),
+    opportunityCards: unresolvedOpportunityCards,
+    escalations: unresolvedEscalations,
+    escalationCount: unresolvedEscalations.length,
+  };
 
   useEffect(() => {
     const syncFromUrl = () => {
@@ -498,6 +605,78 @@ function DashboardContent() {
       window.removeEventListener(escalationRulesChangedEvent, handleRulesChanged);
     };
   }, []);
+
+  useEffect(() => {
+    const syncEscalationWorkflowState = () => {
+      setEscalationWorkflowState(readStoredEscalationWorkflowState());
+    };
+
+    syncEscalationWorkflowState();
+    void loadEscalationWorkflowStateFromDatabase().catch((error) => {
+      console.error("Escalation workflow state load error:", error);
+    });
+    window.addEventListener("storage", syncEscalationWorkflowState);
+    window.addEventListener(escalationWorkflowStateChangedEvent, syncEscalationWorkflowState);
+
+    return () => {
+      window.removeEventListener("storage", syncEscalationWorkflowState);
+      window.removeEventListener(escalationWorkflowStateChangedEvent, syncEscalationWorkflowState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncOpportunityWorkflowState = () => {
+      setOpportunityWorkflowState(readStoredOpportunityWorkflowState());
+    };
+
+    syncOpportunityWorkflowState();
+    void loadOpportunityWorkflowStateFromDatabase().catch((error) => {
+      console.error("Lead workflow state load error:", error);
+    });
+    window.addEventListener("storage", syncOpportunityWorkflowState);
+    window.addEventListener(opportunityWorkflowStateChangedEvent, syncOpportunityWorkflowState);
+
+    return () => {
+      window.removeEventListener("storage", syncOpportunityWorkflowState);
+      window.removeEventListener(opportunityWorkflowStateChangedEvent, syncOpportunityWorkflowState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "escalations" || !unresolvedEscalationIdsKey) {
+      return;
+    }
+
+    const unresolvedEscalationIds = unresolvedEscalationIdsKey.split("|").filter(Boolean);
+    const readIds = new Set(readEscalationIdsKey.split("|").filter(Boolean));
+    const unreadEscalationIds = unresolvedEscalationIds.filter((escalationId) => !readIds.has(escalationId));
+
+    if (unreadEscalationIds.length === 0) {
+      return;
+    }
+
+    void saveEscalationWorkflowStateToDatabase({ readIds: unreadEscalationIds }).catch((error) => {
+      console.error("Escalation read state save error:", error);
+    });
+  }, [activeTab, unresolvedEscalationIdsKey, readEscalationIdsKey]);
+
+  useEffect(() => {
+    if (activeTab !== "opportunities" || !unresolvedOpportunityIdsKey) {
+      return;
+    }
+
+    const unresolvedOpportunityIds = unresolvedOpportunityIdsKey.split("|").filter(Boolean);
+    const readIds = new Set(readOpportunityIdsKey.split("|").filter(Boolean));
+    const unreadOpportunityIds = unresolvedOpportunityIds.filter((opportunityId) => !readIds.has(opportunityId));
+
+    if (unreadOpportunityIds.length === 0) {
+      return;
+    }
+
+    void saveOpportunityWorkflowStateToDatabase({ readIds: unreadOpportunityIds }).catch((error) => {
+      console.error("Lead read state save error:", error);
+    });
+  }, [activeTab, unresolvedOpportunityIdsKey, readOpportunityIdsKey]);
 
   useEffect(() => {
     if (!hasLoadedAccountProfileRef.current) {
@@ -623,8 +802,8 @@ function DashboardContent() {
         profile={accountProfile}
         navigationCounts={{
           inbox: creatorSummary.totalConversationCount,
-          opportunities: creatorSummary.opportunityCount,
-          escalations: creatorSummary.escalationCount,
+          opportunities: unreadOpportunityCount > 0 ? unreadOpportunityCount : null,
+          escalations: unreadEscalationCount > 0 ? unreadEscalationCount : null,
         }}
       />
 
@@ -633,17 +812,18 @@ function DashboardContent() {
       ) : activeTab === "dashboard" ? (
         <DashboardOverview
           profile={accountProfile}
-          summary={creatorSummary}
+          summary={creatorSummaryForDisplay}
           isLoading={isLoadingCreatorData}
           error={creatorDataError}
           dateRangePreset={creatorDateRangePreset}
           isAutoRefreshOn={creatorAutoRefreshOn}
           onDateRangeChange={setCreatorDateRangePreset}
           onAutoRefreshChange={setCreatorAutoRefreshOn}
+          onNavigate={handleTabChange}
         />
       ) : activeTab === "opportunities" ? (
         <OpportunitiesPage
-          summary={creatorSummary}
+          summary={creatorSummaryForDisplay}
           isLoading={isLoadingCreatorData}
           error={creatorDataError}
           dateRangePreset={creatorDateRangePreset}
@@ -662,7 +842,7 @@ function DashboardContent() {
       ) : activeTab === "knowledge" ? (
         <KnowledgeBasePage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
       ) : activeTab === "escalations" ? (
-        <EscalationsPage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
+        <EscalationsPage summary={creatorSummaryForDisplay} isLoading={isLoadingCreatorData} error={creatorDataError} />
       ) : activeTab === "analytics" ? (
         <AnalyticsPage />
       ) : activeTab === "settings" ? (

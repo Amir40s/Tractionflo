@@ -42,6 +42,8 @@ type WorkflowPayload = {
   forceRefresh?: boolean;
 };
 
+const maxCachedLeadQualifications = 12;
+
 function formatConversationLine(message: WorkflowMessage) {
   const sender = message.from === 'me' ? 'Business' : message.from === 'note' ? 'Internal note' : 'Instagram user';
   const text = typeof message.text === 'string' && message.text.trim() ? message.text.trim() : '';
@@ -130,6 +132,31 @@ function normalizeText(value: unknown, fallback: string, maxLength = 500) {
 
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, maxLength) : fallback;
+}
+
+function normalizeLeadQualificationCache(value: unknown): Record<string, AiLeadInsight> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key, lead]) => key.trim().length > 0 && lead && typeof lead === 'object')
+      .slice(-maxCachedLeadQualifications)
+  ) as Record<string, AiLeadInsight>;
+}
+
+function withCachedLeadQualification(
+  currentCache: Record<string, AiLeadInsight>,
+  participantId: string,
+  lead: AiLeadInsight
+) {
+  return Object.fromEntries(
+    Object.entries({
+      ...currentCache,
+      [participantId]: lead,
+    }).slice(-maxCachedLeadQualifications)
+  );
 }
 
 function extractJsonObject(value: string) {
@@ -227,7 +254,7 @@ export async function POST(request: Request) {
     const userMessageCount = (payload.messages || []).filter((msg) => msg.from === 'user').length;
 
     // Load lead qualifications cache
-    const leadQualifications = (metadata.lead_qualifications || {}) as Record<string, AiLeadInsight>;
+    const leadQualifications = normalizeLeadQualificationCache(metadata.lead_qualifications);
     const cachedLead = leadQualifications[participantId];
 
     const messages = payload.messages || [];
@@ -428,10 +455,7 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
 
     // Save generated qualification to user metadata cache
     if (shouldQualifyLeads && participantId) {
-      const nextQualifications = {
-        ...leadQualifications,
-        [participantId]: workflowResult.lead,
-      };
+      const nextQualifications = withCachedLeadQualification(leadQualifications, participantId, workflowResult.lead);
 
       try {
         const { error: updateError } = await supabase.auth.updateUser({

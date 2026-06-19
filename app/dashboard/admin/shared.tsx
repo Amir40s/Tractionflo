@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, TrendingUp } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, MoreHorizontal, TrendingUp } from "lucide-react";
 
 export type SuperAdminMetric = {
   label: string;
@@ -77,10 +77,11 @@ export function CreatorDateRangeSelect({
 }) {
   return (
     <label
-      className={`relative flex min-w-0 cursor-pointer items-center justify-between rounded-[8px] border border-[#e0e4ef] bg-white text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] ${className}`}
+      className={`relative flex min-w-0 cursor-pointer items-center gap-3 rounded-[8px] border border-[#e0e4ef] bg-white text-[12px] font-extrabold text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] ${className}`}
     >
+      <CalendarDays size={16} strokeWidth={2.4} className="shrink-0 text-[#1f2937]" />
       <span className="min-w-0 truncate">{getAdminDateRangeLabel(dateRangePreset)}</span>
-      <CalendarDays size={16} strokeWidth={2.4} className="shrink-0" />
+      <ChevronDown size={15} strokeWidth={2.4} className="ml-auto shrink-0 text-[#1f2937]" />
       <select
         aria-label="Dashboard date range"
         value={dateRangePreset}

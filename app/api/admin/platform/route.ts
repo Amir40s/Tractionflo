@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { User } from "@supabase/supabase-js";
+import { isEmailConfigured } from "@/lib/mailer";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 
@@ -175,7 +176,7 @@ export async function GET() {
     const metaConfigured = Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET && process.env.META_VERIFY_TOKEN);
     const webhookConfigured = Boolean(process.env.META_VERIFY_TOKEN);
     const openAiConfigured = Boolean(process.env.OPENAI_API_KEY);
-    const emailConfigured = Boolean(process.env.RESEND_API_KEY || process.env.SMTP_HOST);
+    const emailConfigured = isEmailConfigured();
     const paymentConfigured = Boolean(process.env.STRIPE_SECRET_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
     const serviceRows: ServiceRow[] = [
       {
