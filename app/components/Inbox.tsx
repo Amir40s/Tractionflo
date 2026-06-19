@@ -456,6 +456,15 @@ function getConversationsSignature(conversations: IGConversation[]) {
     .join("||");
 }
 
+function getInstagramOAuthErrorFromLocation() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const error = new URLSearchParams(window.location.search).get("ig_error")?.trim();
+  return error || null;
+}
+
 function getConversationAiMessages(conv: IGConversation) {
   return [...conv.messages]
     .reverse()
@@ -562,6 +571,7 @@ function ConvList({
   loading,
   refreshing,
   error,
+  oauthError,
   account,
   onRefresh,
   onDisconnect,
@@ -576,6 +586,7 @@ function ConvList({
   loading: boolean;
   refreshing: boolean;
   error: string | null;
+  oauthError: string | null;
   account: IGAccount | null;
   onRefresh: () => void;
   onDisconnect: () => void;
@@ -584,7 +595,8 @@ function ConvList({
   connectingNew: boolean;
 }) {
   const isConnected = Boolean(account || convs.length > 0 || (error && error !== "No Instagram account connected"));
-  const needsConnection = error === "No Instagram account connected";
+  const showOAuthError = Boolean(oauthError && !account && convs.length === 0);
+  const needsConnection = error === "No Instagram account connected" || showOAuthError;
   const needsReconnect = Boolean(error && /access token|session has expired|oauth/i.test(error));
 
   return (
@@ -642,10 +654,19 @@ function ConvList({
               <div className="absolute h-3.5 w-3.5 rounded-full border-[3px] border-white" />
               <div className="absolute right-3 top-3 h-1.5 w-1.5 rounded-full bg-white" />
             </div>
-            <p className="text-[13px] font-bold text-black">Instagram disconnected</p>
-            <p className="text-[11px] font-medium leading-[1.5] text-[#596175]">
-              Connect an Instagram Business account to load conversations.
+            <p className="text-[13px] font-bold text-black">
+              {showOAuthError ? "Instagram not connected" : "Instagram disconnected"}
             </p>
+            {showOAuthError ? (
+              <div className="max-w-[240px] rounded-[9px] border border-[#ffd5dd] bg-[#fff7f9] px-3 py-2">
+                <TriangleAlert size={16} className="mx-auto mb-1.5 text-[#df405b]" />
+                <p className="text-[11px] font-semibold leading-[1.45] text-[#df405b]">{oauthError}</p>
+              </div>
+            ) : (
+              <p className="text-[11px] font-medium leading-[1.5] text-[#596175]">
+                Connect an Instagram Business account to load conversations.
+              </p>
+            )}
             <a
               href="/api/auth/instagram?next=/conversations"
               className="mt-1 flex h-8 items-center justify-center rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-semibold text-white"
@@ -2276,6 +2297,7 @@ export default function Inbox() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [connectingNew, setConnectingNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [composerStatus, setComposerStatus] = useState<ComposerStatus>({
     sending: false,
@@ -2297,6 +2319,14 @@ export default function Inbox() {
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setOauthError(getInstagramOAuthErrorFromLocation());
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   const fetchConvs = useCallback(async (options?: { showLoader?: boolean }) => {
     const showLoader = options?.showLoader ?? !hasLoadedInboxRef.current;
@@ -2378,6 +2408,7 @@ export default function Inbox() {
   const connectNewInstagram = useCallback(async () => {
     setConnectingNew(true);
     setError(null);
+    setOauthError(null);
 
     window.location.href = "/api/auth/instagram?next=/conversations";
   }, []);
@@ -2772,6 +2803,7 @@ export default function Inbox() {
         loading={loading}
         refreshing={refreshing}
         error={error}
+        oauthError={oauthError}
         account={account}
         onRefresh={() => {
           void fetchConvs({ showLoader: false });
