@@ -53,6 +53,7 @@ import {
 import type {
   AccountProfile,
   AccountProfileResponse,
+  CommerceOrdersResponse,
   DashboardTab,
   InstagramConversationsResponse,
   NavigationCounts,
@@ -269,10 +270,6 @@ function isOpportunityCardInTab(card: OpportunityPageCard, label: string) {
   return true;
 }
 
-function getOpportunityCardEstimatedValue(card: OpportunityPageCard) {
-  return Number((card.value || "").replace(/[^\d.-]/g, "")) || 0;
-}
-
 function formatDashboardMoney(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -299,8 +296,8 @@ function buildDisplayOpportunityMetrics(
   metrics: ReturnType<typeof buildCreatorLiveSummary>["opportunityMetrics"],
   cards: OpportunityPageCard[],
   totalConversationCount: number,
+  revenueTotal: number,
 ) {
-  const estimatedRevenue = cards.reduce((total, card) => total + getOpportunityCardEstimatedValue(card), 0);
   const hotLeadCount = cards.filter((card) => card.classification === "Hot").length;
 
   return metrics.map((metric) => {
@@ -315,7 +312,7 @@ function buildDisplayOpportunityMetrics(
     }
 
     if (normalizedLabel.includes("revenue")) {
-      return { ...metric, value: formatDashboardMoney(estimatedRevenue) };
+      return { ...metric, value: formatDashboardMoney(revenueTotal) };
     }
 
     if (normalizedLabel.includes("rate")) {
@@ -509,6 +506,10 @@ function DashboardContent() {
     conversations: [],
     conversation_count: 0,
   });
+  const [creatorOrderResponse, setCreatorOrderResponse] = useState<CommerceOrdersResponse>({
+    orders: [],
+    tableReady: true,
+  });
   const [isLoadingCreatorData, setIsLoadingCreatorData] = useState(true);
   const [creatorDataError, setCreatorDataError] = useState("");
   const [creatorDateRangePreset, setCreatorDateRangePreset] = useState<AdminDateRangePreset>("7d");
@@ -523,6 +524,8 @@ function DashboardContent() {
     creatorConversationResponse.account,
     creatorDateRangePreset,
     creatorEscalationRules,
+    creatorOrderResponse.orders || [],
+    creatorOrderResponse.tableReady !== false,
   );
   const resolvedEscalationIdSet = new Set(escalationWorkflowState.resolvedIds);
   const readEscalationIdSet = new Set(escalationWorkflowState.readIds);
@@ -539,9 +542,16 @@ function DashboardContent() {
   const creatorSummaryForDisplay = {
     ...creatorSummary,
     dashboardOpportunities: creatorSummary.dashboardOpportunities.filter((opportunity) => !opportunity.id || !resolvedOpportunityIdSet.has(opportunity.id)),
+    estimatedRevenue: creatorSummary.estimatedRevenue,
+    estimatedPipelineRevenue: creatorSummary.estimatedPipelineRevenue,
     opportunityCount: unresolvedOpportunityCards.length,
     opportunityTabs: buildDisplayOpportunityTabs(creatorSummary.opportunityTabs, unresolvedOpportunityCards),
-    opportunityMetrics: buildDisplayOpportunityMetrics(creatorSummary.opportunityMetrics, unresolvedOpportunityCards, creatorSummary.totalConversationCount),
+    opportunityMetrics: buildDisplayOpportunityMetrics(
+      creatorSummary.opportunityMetrics,
+      unresolvedOpportunityCards,
+      creatorSummary.totalConversationCount,
+      creatorSummary.estimatedRevenue,
+    ),
     opportunityCards: unresolvedOpportunityCards,
     escalations: unresolvedEscalations,
     escalationCount: unresolvedEscalations.length,
@@ -705,25 +715,38 @@ function DashboardContent() {
 
     async function loadCreatorConversations() {
       try {
-        const response = await fetch("/api/instagram/conversations", {
-          headers: { Accept: "application/json" },
-          cache: "no-store",
-        });
-        const data: InstagramConversationsResponse = await response.json();
+        const [conversationResponse, orderResponse] = await Promise.all([
+          fetch("/api/instagram/conversations", {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          }),
+          fetch("/api/commerce/orders", {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          }),
+        ]);
+        const data: InstagramConversationsResponse = await conversationResponse.json();
+        const orderData: CommerceOrdersResponse = await orderResponse.json().catch(() => ({ orders: [], tableReady: false }));
 
         if (!isMounted) {
           return;
         }
 
-        if (!response.ok || (data.error && data.error !== "No Instagram account connected")) {
+        if (!conversationResponse.ok || (data.error && data.error !== "No Instagram account connected")) {
           throw new Error(data.error || "Could not load Instagram conversations");
         }
 
         setCreatorConversationResponse(data);
+        setCreatorOrderResponse({
+          orders: orderResponse.ok && !orderData.error ? orderData.orders || [] : [],
+          tableReady: orderData.tableReady !== false,
+          error: orderData.error,
+        });
         setCreatorDataError(data.error || "");
       } catch (error) {
         if (isMounted) {
           setCreatorConversationResponse({ conversations: [], conversation_count: 0 });
+          setCreatorOrderResponse({ orders: [], tableReady: false });
           setCreatorDataError(error instanceof Error ? error.message : "Could not load Instagram conversations");
         }
       } finally {

@@ -290,8 +290,10 @@ export async function GET(request: Request) {
     });
 
     const response = NextResponse.redirect(
-      getSoftwareRedirect(redirectBaseUrl, nextPath, {
+      getSoftwareRedirect(redirectBaseUrl, '/onboarding', {
         ig_connected: 'true',
+        ig_scan: 'true',
+        from: nextPath.replace(/^\//, '') || 'instagram',
       })
     );
     

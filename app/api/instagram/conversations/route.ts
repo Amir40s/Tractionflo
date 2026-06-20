@@ -114,6 +114,11 @@ export async function GET(request: Request) {
   try {
     const requestUrl = new URL(request.url);
     const countOnly = requestUrl.searchParams.get('countOnly') === '1';
+    const scanMode = requestUrl.searchParams.get('scan') === '1';
+    const conversationLimit = scanMode ? 25 : 10;
+    const messageField = scanMode
+      ? 'messages.limit(25){id,message,from,to,created_time,attachments,reply_to}'
+      : 'messages{id,message,from,to,created_time,attachments,reply_to}';
     const authSupabase = await createClient();
     const {
       data: { user },
@@ -176,6 +181,7 @@ export async function GET(request: Request) {
     const convsUrl = new URL(`https://graph.instagram.com/v21.0/me/conversations`);
     convsUrl.searchParams.set('platform', 'instagram');
     convsUrl.searchParams.set('fields', 'id,participants,updated_time,message_count');
+    convsUrl.searchParams.set('limit', scanMode ? '50' : '25');
     convsUrl.searchParams.set('access_token', access_token);
 
     const convsRes = await fetch(convsUrl.toString());
@@ -199,16 +205,16 @@ export async function GET(request: Request) {
       });
     }
 
-    // 4. Fetch messages for each conversation (up to 10 convs)
+    // 4. Fetch messages for the recent conversations shown in onboarding/inbox.
     const conversations = await Promise.all(
-      visibleConversations.slice(0, 10).map(async (conv) => {
+      visibleConversations.slice(0, conversationLimit).map(async (conv) => {
         const participants = conv.participants?.data || [];
         const ownParticipant = participants.find(
           (p) => p.username && meData.username && p.username === meData.username
         );
         const ownParticipantId = ownParticipant?.id || real_ig_user_id;
         const msgsUrl = new URL(`https://graph.instagram.com/v21.0/${conv.id}`);
-        msgsUrl.searchParams.set('fields', 'messages{id,message,from,to,created_time,attachments,reply_to}');
+        msgsUrl.searchParams.set('fields', messageField);
         msgsUrl.searchParams.set('access_token', access_token);
 
         const msgsRes = await fetch(msgsUrl.toString());

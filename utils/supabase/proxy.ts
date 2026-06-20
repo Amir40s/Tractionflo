@@ -15,6 +15,7 @@ const PUBLIC_PATHS = [
   '/terms',
   '/contact',
   '/auth',
+  '/checkout',
   '/tractionflo-notifications-sw.js',
   '/api/messages',
   '/api/auth',

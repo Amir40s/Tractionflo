@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 async function getInstagramProfile(account: StoredInstagramAccount) {
   try {
     const meUrl = new URL('https://graph.instagram.com/v21.0/me');
-    meUrl.searchParams.set('fields', 'id,username,name');
+    meUrl.searchParams.set('fields', 'id,username,name,profile_picture_url');
     meUrl.searchParams.set('access_token', account.access_token);
 
     const response = await fetch(meUrl.toString(), { cache: 'no-store' });
@@ -22,6 +22,8 @@ async function getInstagramProfile(account: StoredInstagramAccount) {
       id: data.id || account.ig_user_id,
       username: data.username,
       name: data.name,
+      profilePictureUrl: data.profile_picture_url || '',
+      profile_picture_url: data.profile_picture_url || '',
       connectedAt: account.created_at || undefined,
     };
   } catch (err) {

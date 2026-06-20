@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
-import { detectConversationEscalation, escalationRulesMetadataKey } from '@/lib/conversation-escalation';
+import {
+  detectConversationEscalation,
+  escalationRulesMetadataKey,
+  shouldPauseAiForEscalation,
+} from '@/lib/conversation-escalation';
 import {
   defaultAiLeadInsight,
   getEnabledWorkflowMap,
@@ -10,9 +14,14 @@ import {
   type AiLeadInsight,
   type AiWorkflowRunResult,
 } from '@/lib/ai-integration';
-import { shouldUseConversationAwareReply } from '@/lib/conversation-context';
+import {
+  buildCatalogOfferReply,
+  findBestCatalogOffer,
+  formatCatalogForPrompt,
+  getInstagramProductCatalogForUser,
+} from '@/lib/instagram-product-catalog';
+import { isCommerceOrderConfirmationText } from '@/lib/commerce-orders';
 import { runAssistantThread } from '@/lib/openai-assistants';
-import { recordOpenAiUsage } from '@/lib/openai-usage';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
@@ -275,9 +284,30 @@ export async function POST(request: Request) {
       } satisfies AiWorkflowRunResult);
     }
 
+    if (lastMessage?.from === 'user' && isCommerceOrderConfirmationText(lastMessage.text || '')) {
+      logger.info("Skipping OpenAI Assistant run because the latest user message is an order confirmation.");
+      return NextResponse.json({
+        assistantId,
+        assistant_id: assistantId,
+        autoSend: false,
+        starter: '',
+        reply: '',
+        cta: '',
+        lead: cachedLead || {
+          ...defaultAiLeadInsight,
+          stage: 'Order confirmation',
+          summary: 'Customer confirmed the order and should receive the payment step.',
+          recommendedAction: 'Checkout is handled automatically. Revenue updates after payment succeeds.',
+        },
+        enabledWorkflows,
+        knowledge: summarizeKnowledgeForResponse({ mode: 'none', matches: [] }, assistantId),
+      });
+    }
+
     const escalation = detectConversationEscalation(messages, {
       rules: metadata[escalationRulesMetadataKey],
     });
+    const pauseForEscalation = shouldPauseAiForEscalation(escalation);
 
     if (escalation) {
       await triggerRealtimeNotification(getUserChannel(user.id), {
@@ -295,6 +325,15 @@ export async function POST(request: Request) {
         logger.error('Realtime workflow escalation notification error:', { error: notificationError });
       });
 
+      if (!pauseForEscalation) {
+        logger.info('Workflow escalation is sales-related; continuing AI auto-reply.', {
+          intent: escalation.intent,
+          urgency: escalation.urgency,
+        });
+      }
+    }
+
+    if (escalation && pauseForEscalation) {
       return NextResponse.json({
         assistantId,
         assistant_id: assistantId,
@@ -347,7 +386,6 @@ export async function POST(request: Request) {
 
     const newInboundLead = isNewInboundLead(payload.messages);
     const latestUserQuestion = getLatestUserQuestion(payload.messages);
-    const useConversationAwareReply = shouldUseConversationAwareReply(payload.messages);
     const serviceSupabase = createSupabaseServiceClient();
 
     const assistantIdFromMetadata = metadata.openai_assistant_id as string | undefined;
@@ -370,6 +408,13 @@ export async function POST(request: Request) {
       .slice(-16)
       .map(formatConversationLine)
       .join('\n');
+    const catalogQuery = `${latestUserQuestion}\n${conversationLines}`;
+    const productCatalog = await getInstagramProductCatalogForUser(serviceSupabase, user.id).catch((catalogError) => {
+      logger.warn('Instagram catalog unavailable during AI workflow:', { error: catalogError });
+      return [];
+    });
+    const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogQuery);
+    const catalogOffer = findBestCatalogOffer(catalogQuery, productCatalog);
     const leadSchema = runWorkflows.qualifyLeads
       ? `"lead": {
     "score": 0-100,
@@ -397,6 +442,9 @@ ${getAiBehaviorPrompt(integration.behavior)}
 
 Lead qualification rules: ${integration.leadQualificationRules}
 Preferred CTA: ${integration.ctaMessage}
+
+Auto-detected Instagram product catalog:
+${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
 
 Return only valid JSON. No markdown. No commentary.
 Never ask again for booking details that the customer already gave earlier in the conversation.
@@ -440,6 +488,12 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
         }
         : normalizedWorkflowResult;
 
+    if (catalogOffer) {
+      workflowResult.reply = buildCatalogOfferReply(workflowResult.reply, catalogOffer);
+      workflowResult.starter = buildCatalogOfferReply(workflowResult.starter, catalogOffer);
+      workflowResult.cta = buildCatalogOfferReply(workflowResult.cta, catalogOffer);
+    }
+
     // Apply mock or cached lead details if we did not run qualification
     if (enabledWorkflows.qualifyLeads) {
       if (qualificationMocked) {
@@ -451,6 +505,20 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       } else if (cachedLead && !shouldQualifyLeads) {
         workflowResult.lead = cachedLead;
       }
+    }
+
+    if (escalation && !pauseForEscalation) {
+      workflowResult.lead = {
+        ...workflowResult.lead,
+        score: Math.max(workflowResult.lead.score, escalation.urgency === 'High' ? 92 : 78),
+        stage: workflowResult.lead.stage === defaultAiLeadInsight.stage ? 'Ready for CTA' : workflowResult.lead.stage,
+        urgency: escalation.urgency,
+        intent: escalation.label,
+        summary: escalation.summary,
+        signals: Array.from(new Set([...escalation.signals, ...workflowResult.lead.signals])).slice(0, 5),
+        recommendedAction: escalation.recommendedAction,
+        cta: workflowResult.lead.cta || integration.ctaMessage || defaultAiLeadInsight.cta,
+      };
     }
 
     // Save generated qualification to user metadata cache
@@ -494,7 +562,10 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       assistantId,
       assistant_id: assistantId,
       autoSend: integration.autoSend,
+      handoff: false,
+      escalation: escalation || undefined,
       ...workflowResult,
+      catalogOffer,
       enabledWorkflows, // Return original workflows configurations to frontend
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
     });

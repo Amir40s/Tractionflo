@@ -449,10 +449,13 @@ function buildIntentSnapshot(summary: CreatorLiveSummary) {
   );
   const readyToBuyCount = highIntentCards.length;
   const needFollowUpCount = countNeedsFollowUp(summary.conversations);
+  const waitingPaymentOrderCount = summary.orders.filter(
+    (order) => order.status === "pending_confirmation" || (order.status === "confirmed" && order.paymentStatus !== "paid")
+  ).length;
   const waitingPaymentCount = countConversationsMatching(
     summary.conversations,
     /\b(pay|payment|checkout|invoice|paid|card|deposit|transfer)\b/i
-  );
+  ) + waitingPaymentOrderCount;
   const offersSentCount = countConversationsMatching(summary.conversations, /\b(proposal|offer|pricing|price|package|plan|link|book|call)\b/i, "me");
   const activeContacts = summary.conversations.filter((conversation) => conversation.messages.some((message) => message.from === "user")).length;
   const buyingSignalCount = summary.opportunityCards.reduce((total, card) => total + (card.signals?.length || 0), 0);
@@ -472,6 +475,32 @@ function buildRevenueTrendSeries(summary: CreatorLiveSummary, points: number) {
   const buckets = Array.from({ length: points }, () => 0);
   const now = Date.now();
   const dayMs = 86_400_000;
+
+  if (summary.revenueMode === "paid") {
+    summary.orders.forEach((order) => {
+      if (order.status !== "paid" && order.paymentStatus !== "paid") {
+        return;
+      }
+
+      const timestamp = new Date(order.paidAt || order.updatedAt || order.createdAt).getTime();
+
+      if (!Number.isFinite(timestamp)) {
+        return;
+      }
+
+      const dayOffset = Math.floor((now - timestamp) / dayMs);
+
+      if (dayOffset >= 0 && dayOffset < points) {
+        buckets[points - 1 - dayOffset] += order.amount || 0;
+      }
+    });
+
+    let runningTotal = 0;
+    return buckets.map((value) => {
+      runningTotal += value;
+      return runningTotal;
+    });
+  }
 
   summary.conversations.forEach((conversation) => {
     const opportunity = classifyCreatorOpportunity(conversation, summary.escalationRules);
@@ -782,6 +811,23 @@ function getOpportunitySourceLabel(badge: string) {
 
 function buildRevenueSources(summary: CreatorLiveSummary) {
   const toneOrder: ToneName[] = ["pink", "orange", "purple", "blue"];
+
+  if (summary.revenueMode === "paid") {
+    const orderSources = [
+      {
+        label: "Paid orders",
+        amount: summary.paidRevenue,
+        tone: "green" as ToneName,
+      },
+    ].filter((source) => source.amount > 0);
+    const total = orderSources.reduce((sum, source) => sum + source.amount, 0);
+
+    return orderSources.map((source) => ({
+      ...source,
+      percentLabel: total > 0 ? `${Math.round((source.amount / total) * 100)}%` : "0%",
+    }));
+  }
+
   const groupedSources = summary.conversations.reduce<Record<string, number>>((sources, conversation) => {
     const opportunity = classifyCreatorOpportunity(conversation, summary.escalationRules);
 
@@ -818,8 +864,8 @@ function RevenueSources({
     <article className={`${panelClass} p-5`}>
       <div className="mb-5">
         <div>
-          <h2 className="text-[15px] font-extrabold text-black">Top Revenue Signals</h2>
-          <p className="mt-1 text-[11px] font-bold text-[#687083]">Grouped from detected Instagram opportunities</p>
+          <h2 className="text-[15px] font-extrabold text-black">Top Revenue Sources</h2>
+          <p className="mt-1 text-[11px] font-bold text-[#687083]">Grouped from completed Stripe payments</p>
         </div>
       </div>
       {sources.length > 0 ? (
@@ -843,8 +889,8 @@ function RevenueSources({
         </div>
       ) : (
         <div className="rounded-[8px] border border-dashed border-[#e4e7f0] p-6 text-center">
-          <p className="text-[13px] font-extrabold text-black">No revenue signals yet.</p>
-          <p className="mt-2 text-[12px] font-semibold text-[#687083]">Buying, partnership, or community intent will appear here.</p>
+          <p className="text-[13px] font-extrabold text-black">No paid revenue yet.</p>
+          <p className="mt-2 text-[12px] font-semibold text-[#687083]">Completed Stripe payments will appear here.</p>
         </div>
       )}
       <CardPagination
@@ -872,6 +918,11 @@ function RealDataNote({ summary }: { summary: CreatorLiveSummary }) {
       <span className="rounded-full bg-white/10 px-3 py-1.5 text-white/70">
         {formatCreatorInteger(summary.totalMessageCount)} messages
       </span>
+      {summary.orderCount > 0 ? (
+        <span className="rounded-full bg-white/10 px-3 py-1.5 text-white/70">
+          {formatCreatorInteger(summary.orderCount)} orders
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -921,17 +972,20 @@ function RevenueHero({
     tone: ToneName;
   }[];
 }) {
+  const revenueTitle = "Revenue Collected";
+  const revenueDetail = `${formatCreatorInteger(summary.paidOrderCount)} paid order${summary.paidOrderCount === 1 ? "" : "s"} from Instagram checkout.`;
+
   return (
     <article className="relative overflow-hidden rounded-[8px] bg-black p-5 text-white shadow-[0_24px_70px_rgba(0,0,0,0.16)] sm:p-7">
       <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-[#ff6b00] via-[#e81f72] to-[#7548ff]" />
       <div className="relative grid gap-6 lg:grid-cols-[minmax(240px,0.78fr)_minmax(0,1.22fr)] lg:items-center">
         <div>
-          <h2 className="text-[15px] font-extrabold text-white">Revenue Waiting For You</h2>
+          <h2 className="text-[15px] font-extrabold text-white">{revenueTitle}</h2>
           <p className="mt-6 max-w-full break-words bg-gradient-to-r from-[#ff6b00] via-[#e81f72] to-[#8b35ff] bg-clip-text text-[44px] font-extrabold leading-none text-transparent sm:text-[56px]">
             {isLoading ? "..." : formatCreatorMoney(revenueTotal)}
           </p>
           <p className="mt-5 max-w-[300px] text-[13px] font-semibold leading-relaxed text-white/80">
-            Estimated potential from {formatCreatorInteger(summary.opportunityCount)} active opportunities.
+            {revenueDetail}
           </p>
           <RealDataNote summary={summary} />
         </div>
@@ -969,15 +1023,17 @@ export function DashboardOverview({
   const [revenueTrendRange, setRevenueTrendRange] = useState<DashboardChartRange>("30d");
   const intent = buildIntentSnapshot(summary);
   const revenueTotal = summary.estimatedRevenue;
+  const revenueLabel = "Collected Revenue";
+  const revenueTrendLabel = revenueTotal > 0 ? "from paid orders" : "waiting for paid Stripe orders";
   const revenueSeries = isLoading
     ? Array.from({ length: getDashboardChartPointCount(revenueTrendRange) }, () => 0)
     : buildRevenueTrendSeries(summary, getDashboardChartPointCount(revenueTrendRange));
   const totalForTrends = Math.max(1, summary.totalConversationCount);
   const statItems = [
     {
-      label: "Estimated Revenue",
+      label: revenueLabel,
       value: isLoading ? "..." : formatCreatorMoney(revenueTotal),
-      trend: revenueTotal > 0 ? "from detected intent" : "waiting for signals",
+      trend: revenueTrendLabel,
       icon: DollarSign,
       tone: "green" as ToneName,
     },
@@ -1158,7 +1214,7 @@ export function DashboardOverview({
                   <h2 className="text-[15px] font-extrabold text-black">Revenue Trend</h2>
                   <div className="mt-4 flex flex-wrap items-center gap-3">
                     <p className="text-[25px] font-extrabold leading-none text-black">{isLoading ? "..." : formatCreatorMoney(revenueTotal)}</p>
-                    <TrendText>{revenueTotal > 0 ? "from detected intent" : "waiting for signals"}</TrendText>
+                    <TrendText>{revenueTrendLabel}</TrendText>
                   </div>
                 </div>
                 <DashboardCardRangeSelect value={revenueTrendRange} onChange={setRevenueTrendRange} ariaLabel="Revenue trend range" />

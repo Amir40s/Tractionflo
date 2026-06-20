@@ -335,3 +335,16 @@ export function detectConversationEscalation(
 
   return buildEscalationsForText(normalized, rules)[0] || null;
 }
+
+export function shouldPauseAiForEscalation(escalation: ConversationEscalation | null | undefined) {
+  if (!escalation) {
+    return false;
+  }
+
+  return (
+    escalation.intent === "human_handoff" ||
+    escalation.intent === "refund_request" ||
+    escalation.intent === "complaint" ||
+    escalation.intent === "complex_question"
+  );
+}

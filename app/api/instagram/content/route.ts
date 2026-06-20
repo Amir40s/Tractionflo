@@ -23,6 +23,7 @@ type InstagramProfileResponse = {
   media_count?: number;
   followers_count?: number;
   follows_count?: number;
+  profile_picture_url?: string;
   error?: InstagramGraphError;
 };
 
@@ -118,8 +119,11 @@ function normalizeFollowerHistory(insights?: InstagramInsightsResponse) {
     .sort((first, second) => new Date(first.date).getTime() - new Date(second.date).getTime());
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const requestUrl = new URL(request.url);
+    const scanMode = requestUrl.searchParams.get("scan") === "1";
+    const mediaLimit = scanMode ? "50" : "18";
     const authSupabase = await createClient();
     const {
       data: { user },
@@ -158,13 +162,19 @@ export async function GET() {
 
     try {
       profile = await fetchInstagramGraph<InstagramProfileResponse>("me", accessToken, {
-        fields: "id,username,name,account_type,media_count,followers_count,follows_count",
+        fields: "id,username,name,account_type,media_count,followers_count,follows_count,profile_picture_url",
       });
     } catch (profileError) {
       profileMetricError = profileError instanceof Error ? profileError.message : "Could not load follower counts.";
-      profile = await fetchInstagramGraph<InstagramProfileResponse>("me", accessToken, {
-        fields: "id,username,name,account_type,media_count",
-      });
+      try {
+        profile = await fetchInstagramGraph<InstagramProfileResponse>("me", accessToken, {
+          fields: "id,username,name,account_type,media_count,profile_picture_url",
+        });
+      } catch {
+        profile = await fetchInstagramGraph<InstagramProfileResponse>("me", accessToken, {
+          fields: "id,username,name,account_type,media_count",
+        });
+      }
     }
 
     const insightWindow = getFollowerInsightWindow();
@@ -172,11 +182,11 @@ export async function GET() {
     const [postsResult, storiesResult, followerInsightsResult] = await Promise.allSettled([
       fetchInstagramGraph<InstagramGraphListResponse<InstagramMediaResponse>>("me/media", accessToken, {
         fields: "id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,comments_count,like_count",
-        limit: "18",
+        limit: mediaLimit,
       }),
       fetchInstagramGraph<InstagramGraphListResponse<InstagramMediaResponse>>("me/stories", accessToken, {
         fields: "id,caption,media_type,media_url,permalink,thumbnail_url,timestamp",
-        limit: "18",
+        limit: mediaLimit,
       }),
       fetchInstagramGraph<InstagramInsightsResponse>("me/insights", accessToken, {
         metric: "follower_count",
@@ -199,6 +209,8 @@ export async function GET() {
         username: profile.username,
         name: profile.name,
         accountType: profile.account_type,
+        profilePictureUrl: profile.profile_picture_url || "",
+        profile_picture_url: profile.profile_picture_url || "",
         mediaCount: profile.media_count,
         followersCount: typeof profile.followers_count === "number" ? profile.followers_count : null,
         followingCount: typeof profile.follows_count === "number" ? profile.follows_count : null,

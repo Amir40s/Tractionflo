@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { canAccessConversation, canAccessPage, getUserPermissionProfile } from '@/lib/agent-permissions';
+import { createPendingCommerceOrder, normalizeCommerceOrderDraft, type CommerceOrderDraft } from '@/lib/commerce-orders';
 import { getFreshInstagramAccount } from '@/lib/instagram-token';
 import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -10,8 +11,29 @@ export const dynamic = 'force-dynamic';
 const ATTACHMENT_BUCKET = 'instagram-attachments';
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
+type RemoteInstagramAttachmentInput = {
+  type?: string;
+  url?: string;
+  name?: string;
+  mime_type?: string;
+  preview_url?: string;
+};
+
+type NormalizedInstagramAttachment = {
+  type: 'image' | 'video';
+  url: string;
+  name: string;
+  mime_type: string;
+};
+
+type InstagramQuickReply = {
+  content_type: 'text';
+  title: string;
+  payload: string;
+};
+
 type InstagramMessagePayload =
-  | { text: string }
+  | { text: string; quick_replies?: InstagramQuickReply[] }
   | {
       attachment: {
         type: 'image' | 'video';
@@ -28,10 +50,18 @@ type InstagramSendResult = {
   attachment?: {
     type: 'image' | 'video';
     url: string;
-    name: string;
-    mime_type: string;
+    name?: string;
+    mime_type?: string;
   };
 };
+
+const confirmOrderQuickReplies: InstagramQuickReply[] = [
+  {
+    content_type: 'text',
+    title: 'Confirm order',
+    payload: 'CONFIRM_ORDER',
+  },
+];
 
 type InstagramGraphError = {
   message?: string;
@@ -86,6 +116,81 @@ function getSafeFileName(fileName: string) {
   return fileName.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-').slice(0, 120) || 'attachment';
 }
 
+function parseRemoteAttachmentInput(value: unknown): RemoteInstagramAttachmentInput[] {
+  if (!value) {
+    return [];
+  }
+
+  if (typeof value === 'string') {
+    if (!value.trim()) {
+      return [];
+    }
+
+    try {
+      return parseRemoteAttachmentInput(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter((item): item is RemoteInstagramAttachmentInput => Boolean(item && typeof item === 'object'));
+  }
+
+  if (typeof value === 'object') {
+    return [value as RemoteInstagramAttachmentInput];
+  }
+
+  return [];
+}
+
+function inferRemoteAttachmentType(input: RemoteInstagramAttachmentInput): 'image' | 'video' {
+  if (input.type === 'image' || input.type === 'video') {
+    return input.type;
+  }
+
+  const url = input.url || '';
+
+  if (/\.(mp4|mov|m4v)(?:[?#]|$)/i.test(url) || input.mime_type?.startsWith('video/')) {
+    return 'video';
+  }
+
+  return 'image';
+}
+
+function normalizeRemoteAttachments(value: unknown): NormalizedInstagramAttachment[] {
+  return parseRemoteAttachmentInput(value)
+    .slice(0, 5)
+    .map((input) => {
+      const rawUrl = String(input.url || '').trim();
+
+      if (!rawUrl) {
+        throw new Error('Catalog attachment is missing a media URL.');
+      }
+
+      let url: URL;
+
+      try {
+        url = new URL(rawUrl);
+      } catch {
+        throw new Error('Catalog attachment URL is invalid.');
+      }
+
+      if (url.protocol !== 'https:') {
+        throw new Error('Instagram can only send catalog attachments from secure public HTTPS URLs.');
+      }
+
+      const type = inferRemoteAttachmentType(input);
+
+      return {
+        type,
+        url: url.toString(),
+        name: String(input.name || `catalog-${type}`).slice(0, 120),
+        mime_type: input.mime_type || (type === 'video' ? 'video/mp4' : 'image/jpeg'),
+      };
+    });
+}
+
 async function sendInstagramMessage(
   accessToken: string,
   recipientId: string,
@@ -132,6 +237,27 @@ async function sendInstagramMessage(
   return data;
 }
 
+async function sendInstagramTextWithOptionalQuickReplies(
+  accessToken: string,
+  recipientId: string,
+  text: string,
+  quickReplies: InstagramQuickReply[] = []
+) {
+  if (quickReplies.length === 0) {
+    return sendInstagramMessage(accessToken, recipientId, { text });
+  }
+
+  try {
+    return await sendInstagramMessage(accessToken, recipientId, {
+      text,
+      quick_replies: quickReplies,
+    });
+  } catch (error) {
+    console.warn('Instagram quick reply send failed; retrying as plain text.', error);
+    return sendInstagramMessage(accessToken, recipientId, { text });
+  }
+}
+
 async function ensureAttachmentBucket(supabase: ReturnType<typeof createSupabaseServiceClient>) {
   const { data: bucket } = await supabase.storage.getBucket(ATTACHMENT_BUCKET);
 
@@ -153,7 +279,7 @@ async function ensureAttachmentBucket(supabase: ReturnType<typeof createSupabase
 async function uploadAttachment(
   supabase: ReturnType<typeof createSupabaseServiceClient>,
   file: File
-) {
+): Promise<NormalizedInstagramAttachment> {
   if (file.size > MAX_ATTACHMENT_BYTES) {
     throw new Error(`${file.name} is too large. Keep Instagram attachments under 20MB.`);
   }
@@ -220,6 +346,8 @@ export async function POST(request: NextRequest) {
     let conversationId = '';
     let text = '';
     let files: File[] = [];
+    let remoteAttachments: NormalizedInstagramAttachment[] = [];
+    let orderDraft: CommerceOrderDraft | null = null;
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData();
@@ -227,18 +355,28 @@ export async function POST(request: NextRequest) {
       conversationId = String(formData.get('conversationId') || '').trim();
       text = String(formData.get('text') || '').trim();
       files = formData.getAll('files').filter(isUploadFile);
+      remoteAttachments = normalizeRemoteAttachments(formData.get('attachmentUrls'));
+      orderDraft = normalizeCommerceOrderDraft(formData.get('orderDraft'));
     } else {
-      const body = (await request.json()) as { recipientId?: string; conversationId?: string; text?: string };
+      const body = (await request.json()) as {
+        recipientId?: string;
+        conversationId?: string;
+        text?: string;
+        attachmentUrls?: unknown;
+        orderDraft?: unknown;
+      };
       recipientId = String(body.recipientId || '').trim();
       conversationId = String(body.conversationId || '').trim();
       text = String(body.text || '').trim();
+      remoteAttachments = normalizeRemoteAttachments(body.attachmentUrls);
+      orderDraft = normalizeCommerceOrderDraft(body.orderDraft);
     }
 
     if (!recipientId) {
       return NextResponse.json({ error: 'A recipient is required.' }, { status: 400 });
     }
 
-    if (!text && files.length === 0) {
+    if (!text && files.length === 0 && remoteAttachments.length === 0) {
       return NextResponse.json({ error: 'Type a message or attach an image/video.' }, { status: 400 });
     }
 
@@ -247,9 +385,29 @@ export async function POST(request: NextRequest) {
     }
 
     const sent: InstagramSendResult[] = [];
+    let orderId = '';
+    let order: Awaited<ReturnType<typeof createPendingCommerceOrder>> = null;
+    const sendOrderTextLast = Boolean(orderDraft && text && (files.length > 0 || remoteAttachments.length > 0));
 
-    if (text) {
-      const result = await sendInstagramMessage(accessToken, recipientId, { text });
+    if (orderDraft) {
+      order = await createPendingCommerceOrder(supabase, user.id, {
+        ...orderDraft,
+        conversationId: orderDraft.conversationId || conversationId,
+        instagramSenderId: orderDraft.instagramSenderId || recipientId,
+      }).catch((orderError) => {
+        console.error('Commerce order creation before Instagram confirm send failed:', orderError);
+        return null;
+      });
+      orderId = order?.id || '';
+    }
+
+    if (text && !sendOrderTextLast) {
+      const result = await sendInstagramTextWithOptionalQuickReplies(
+        accessToken,
+        recipientId,
+        text,
+        order ? confirmOrderQuickReplies : []
+      );
       sent.push({
         recipient_id: result.recipient_id,
         message_id: result.message_id,
@@ -279,20 +437,62 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    for (const attachment of remoteAttachments) {
+      try {
+        const result = await sendInstagramMessage(accessToken, recipientId, {
+          attachment: {
+            type: attachment.type,
+            payload: {
+              url: attachment.url,
+            },
+          },
+        });
+
+        sent.push({
+          recipient_id: result.recipient_id,
+          message_id: result.message_id,
+          attachment,
+        });
+      } catch (attachmentError) {
+        if (!sendOrderTextLast) {
+          throw attachmentError;
+        }
+
+        console.warn('Instagram order attachment could not be sent; continuing with confirm text.', attachmentError);
+      }
+    }
+
+    if (text && sendOrderTextLast) {
+      const result = await sendInstagramTextWithOptionalQuickReplies(
+        accessToken,
+        recipientId,
+        text,
+        order ? confirmOrderQuickReplies : []
+      );
+      sent.push({
+        recipient_id: result.recipient_id,
+        message_id: result.message_id,
+        text,
+      });
+    }
+
     await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
       type: 'message',
       title: 'Instagram reply sent',
-      body: text ? text.slice(0, 120) : `${files.length} attachment${files.length === 1 ? '' : 's'} sent.`,
+      body: text
+        ? text.slice(0, 120)
+        : `${files.length + remoteAttachments.length} attachment${files.length + remoteAttachments.length === 1 ? '' : 's'} sent.`,
       url: '/conversations',
       metadata: {
         sentCount: sent.length,
         conversationId,
+        orderId,
       },
     }).catch((notificationError) => {
       console.error('Realtime Instagram send notification error:', notificationError);
     });
 
-    return NextResponse.json({ ok: true, sent });
+    return NextResponse.json({ ok: true, sent, order });
   } catch (err) {
     if (err instanceof InstagramSendError) {
       console.error('Instagram send error:', err.graphError || err);
