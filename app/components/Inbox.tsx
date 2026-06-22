@@ -36,6 +36,7 @@ import {
   detectConversationEscalations,
   normalizeEscalationRuleSettings,
   type ConversationEscalation,
+  type ConversationEscalationIntent,
   type EscalationRuleSetting,
 } from "@/lib/conversation-escalation";
 import { settingsStateStorageKey } from "@/lib/notification-preferences";
@@ -51,6 +52,11 @@ import {
   type SavedReplySetting,
   type WelcomeMessageSetting,
 } from "@/lib/quick-replies";
+import {
+  escalationWorkflowStateChangedEvent,
+  loadEscalationWorkflowStateFromDatabase,
+  readStoredEscalationWorkflowState,
+} from "../dashboard/escalation-resolution";
 import NotificationBell from "./NotificationBell";
 
 const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
@@ -853,8 +859,41 @@ function getConversationAiMessages(conv: IGConversation) {
     }));
 }
 
-function getInboxEscalations(conv: IGConversation | null): ConversationEscalation[] {
-  return conv ? detectConversationEscalations(getConversationAiMessages(conv), { rules: readEscalationRulesFromStorage() }) : [];
+const inboxEscalationIntentCategories: Record<ConversationEscalationIntent, string> = {
+  refund_request: "refund",
+  complaint: "complaint",
+  partnership: "brand_deal",
+  high_ticket_lead: "vip_lead",
+  bulk_order: "custom_bulk",
+  urgent_order: "urgent_order",
+  human_handoff: "human",
+  complex_question: "complex",
+};
+
+const knownConversationEscalationIntents = new Set<ConversationEscalationIntent>(
+  Object.keys(inboxEscalationIntentCategories) as ConversationEscalationIntent[]
+);
+
+function getInboxEscalationIntent(intent: unknown): ConversationEscalationIntent {
+  return knownConversationEscalationIntents.has(intent as ConversationEscalationIntent)
+    ? (intent as ConversationEscalationIntent)
+    : "complex_question";
+}
+
+function getInboxEscalationId(conversationId: string, escalation: ConversationEscalation) {
+  return `${conversationId}-${inboxEscalationIntentCategories[escalation.intent] || escalation.intent}`;
+}
+
+function getInboxEscalations(conv: IGConversation | null, resolvedEscalationIds: string[] = []): ConversationEscalation[] {
+  if (!conv) {
+    return [];
+  }
+
+  const resolvedIdSet = new Set(resolvedEscalationIds);
+
+  return detectConversationEscalations(getConversationAiMessages(conv), { rules: readEscalationRulesFromStorage() }).filter(
+    (escalation) => !resolvedIdSet.has(getInboxEscalationId(conv.id, escalation))
+  );
 }
 
 function normalizeWorkflowEscalation(escalation?: AiWorkflowResponse["escalation"]): ConversationEscalation | null {
@@ -863,7 +902,7 @@ function normalizeWorkflowEscalation(escalation?: AiWorkflowResponse["escalation
   }
 
   return {
-    intent: "complex_question",
+    intent: getInboxEscalationIntent(escalation.intent),
     label: escalation.label,
     reply: "",
     summary: escalation.summary || "This conversation needs creator attention.",
@@ -940,6 +979,7 @@ function ConvList({
   convs,
   activeId,
   starredConversationIds,
+  resolvedEscalationIds,
   onSelect,
   loading,
   refreshing,
@@ -955,6 +995,7 @@ function ConvList({
   convs: IGConversation[];
   activeId: string | null;
   starredConversationIds: string[];
+  resolvedEscalationIds: string[];
   onSelect: (id: string) => void;
   loading: boolean;
   refreshing: boolean;
@@ -1101,7 +1142,7 @@ function ConvList({
             const lastMsg = conv.messages.find((message) => message.from !== "note");
             const name = conv.participant.username || conv.participant.name || `User ${conv.participant.id.slice(-6)}`;
             const avatarSrc = conv.participant.profile_pic || "";
-            const escalations = getInboxEscalations(conv);
+            const escalations = getInboxEscalations(conv, resolvedEscalationIds);
             const escalation = escalations[0];
             const isStarred = starredConversationIds.includes(conv.id);
 
@@ -2039,6 +2080,7 @@ function SummaryPanel({
   onToggleAgentAssignment,
   commerceOrder,
   confirmingOrderId,
+  resolvedEscalationIds,
   onConfirmPendingOrder,
   onConfirmLatestInboundOrder,
 }: {
@@ -2059,6 +2101,7 @@ function SummaryPanel({
   onToggleAgentAssignment: (agent: AgentAccount) => Promise<void>;
   commerceOrder: CommerceOrder | null;
   confirmingOrderId: string;
+  resolvedEscalationIds: string[];
   onConfirmPendingOrder: (order: CommerceOrder) => Promise<void>;
   onConfirmLatestInboundOrder: (conversationId: string) => Promise<void>;
 }) {
@@ -2093,9 +2136,14 @@ function SummaryPanel({
   const lastUserMsgPreview = getMessagePreview(lastUserMsg);
   const knowledgeSummary = aiWorkflow?.knowledge;
   const hasKnowledgeReply = knowledgeSummary?.mode === "direct" || knowledgeSummary?.mode === "context";
-  const localEscalations = getInboxEscalations(conv);
+  const localEscalations = getInboxEscalations(conv, resolvedEscalationIds);
   const workflowEscalation = normalizeWorkflowEscalation(aiWorkflow?.escalation);
-  const escalationCards = localEscalations.length > 0 ? localEscalations : workflowEscalation ? [workflowEscalation] : [];
+  const resolvedEscalationIdSet = new Set(resolvedEscalationIds);
+  const visibleWorkflowEscalation =
+    conv && workflowEscalation && !resolvedEscalationIdSet.has(getInboxEscalationId(conv.id, workflowEscalation))
+      ? workflowEscalation
+      : null;
+  const escalationCards = localEscalations.length > 0 ? localEscalations : visibleWorkflowEscalation ? [visibleWorkflowEscalation] : [];
   const suggestedReply = isHumanTakeover
     ? ""
     : aiWorkflow?.reply ||
@@ -2407,7 +2455,7 @@ function SummaryPanel({
             </button>
           </div>
         ) : (
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 overflow-hidden">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
             {conv && profileUrl ? (
               <a
                 href={profileUrl}
@@ -2877,6 +2925,7 @@ export default function Inbox() {
   const [starredConversationIds, setStarredConversationIds] = useState<string[]>([]);
   const [commerceOrders, setCommerceOrders] = useState<CommerceOrder[]>([]);
   const [confirmingOrderId, setConfirmingOrderId] = useState("");
+  const [resolvedEscalationIds, setResolvedEscalationIds] = useState<string[]>(() => readStoredEscalationWorkflowState().resolvedIds);
   const hasLoadedInboxRef = useRef(false);
   const activeIdRef = useRef<string | null>(null);
   const activeTakeoverModeRef = useRef<ConversationTakeoverMode>("ai");
@@ -2884,6 +2933,24 @@ export default function Inbox() {
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+
+  useEffect(() => {
+    const syncResolvedEscalations = () => {
+      setResolvedEscalationIds(readStoredEscalationWorkflowState().resolvedIds);
+    };
+
+    syncResolvedEscalations();
+    void loadEscalationWorkflowStateFromDatabase().catch((error) => {
+      console.error("Escalation workflow state load error:", error);
+    });
+    window.addEventListener("storage", syncResolvedEscalations);
+    window.addEventListener(escalationWorkflowStateChangedEvent, syncResolvedEscalations);
+
+    return () => {
+      window.removeEventListener("storage", syncResolvedEscalations);
+      window.removeEventListener(escalationWorkflowStateChangedEvent, syncResolvedEscalations);
+    };
+  }, []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -3543,6 +3610,7 @@ export default function Inbox() {
         convs={convs}
         activeId={activeId}
         starredConversationIds={starredConversationIds}
+        resolvedEscalationIds={resolvedEscalationIds}
         onSelect={setActiveId}
         loading={loading}
         refreshing={refreshing}
@@ -3589,6 +3657,7 @@ export default function Inbox() {
         onToggleAgentAssignment={toggleAgentAssignment}
         commerceOrder={activeCommerceOrder}
         confirmingOrderId={confirmingOrderId}
+        resolvedEscalationIds={resolvedEscalationIds}
         onConfirmPendingOrder={confirmPendingOrder}
         onConfirmLatestInboundOrder={confirmLatestInboundOrder}
       />

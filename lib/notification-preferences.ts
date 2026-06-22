@@ -124,6 +124,20 @@ function getSettingValue(settings: NotificationSetting[], id: string) {
   );
 }
 
+export function shouldSuppressRealtimeNotification(
+  notification: Pick<RealtimeNotificationPayload, "title" | "body"> & {
+    metadata?: RealtimeNotificationPayload["metadata"];
+  }
+) {
+  const metadata = notification.metadata || {};
+  const category = typeof metadata.category === "string" ? metadata.category.toLowerCase() : "";
+  const title = notification.title.toLowerCase();
+  const body = notification.body.toLowerCase();
+  const refundPattern = /\b(refund|money back|money-back|chargeback|cancell?ation|cancelled|canceling|return my money)\b/;
+
+  return category === "refund_request" || category.includes("refund") || refundPattern.test(`${title} ${body}`);
+}
+
 function isUrgentNotification(notification: RealtimeNotificationPayload) {
   const metadata = notification.metadata || {};
   const urgency = typeof metadata.urgency === "string" ? metadata.urgency.toLowerCase() : "";
@@ -181,6 +195,10 @@ export function shouldDeliverRealtimeNotification({
 }) {
   const push = getSettingValue(settings, "push");
   const escalation = getSettingValue(settings, "escalation");
+
+  if (shouldSuppressRealtimeNotification(notification)) {
+    return { deliver: false, lastEscalationAt };
+  }
 
   if (!push.enabled || push.value === "Off") {
     return { deliver: false, lastEscalationAt };

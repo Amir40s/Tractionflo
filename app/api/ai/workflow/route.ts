@@ -21,6 +21,7 @@ import {
   getInstagramProductCatalogForUser,
 } from '@/lib/instagram-product-catalog';
 import { isCommerceOrderConfirmationText } from '@/lib/commerce-orders';
+import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
 import { runAssistantThread } from '@/lib/openai-assistants';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import {
@@ -337,20 +338,26 @@ export async function POST(request: Request) {
     const pauseForEscalation = shouldPauseAiForEscalation(escalation);
 
     if (escalation) {
-      await triggerRealtimeNotification(getUserChannel(user.id), {
-        type: 'escalation',
-        title: `${escalation.label} detected`,
-        body: escalation.summary,
-        url: '/conversations',
-        metadata: {
-          assistantId,
-          category: escalation.intent,
-          urgency: escalation.urgency,
-          urgent: escalation.urgency === 'High',
-        },
-      }).catch((notificationError) => {
-        logger.error('Realtime workflow escalation notification error:', { error: notificationError });
-      });
+      const notificationTitle = `${escalation.label} detected`;
+      const notificationBody = escalation.summary;
+      const notificationMetadata = {
+        assistantId,
+        category: escalation.intent,
+        urgency: escalation.urgency,
+        urgent: escalation.urgency === 'High',
+      };
+
+      if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
+        await triggerRealtimeNotification(getUserChannel(user.id), {
+          type: 'escalation',
+          title: notificationTitle,
+          body: notificationBody,
+          url: '/conversations',
+          metadata: notificationMetadata,
+        }).catch((notificationError) => {
+          logger.error('Realtime workflow escalation notification error:', { error: notificationError });
+        });
+      }
 
       if (!pauseForEscalation) {
         logger.info('Workflow escalation is sales-related; continuing AI auto-reply.', {

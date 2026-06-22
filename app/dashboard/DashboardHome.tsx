@@ -58,7 +58,6 @@ import type {
   CommerceOrdersResponse,
   DashboardTab,
   InstagramConversationsResponse,
-  NavigationCounts,
   NavItem,
   OpportunityPageCard,
 } from "./creator/types";
@@ -353,12 +352,10 @@ function Sidebar({
   activeTab,
   onChangeTab,
   profile,
-  navigationCounts,
 }: {
   activeTab: string;
   onChangeTab: (tab: DashboardTab) => void;
   profile: AccountProfile;
-  navigationCounts: NavigationCounts;
 }) {
   const initials = profile.name
     .split(" ")
@@ -379,7 +376,6 @@ function Sidebar({
           const Icon = item.icon;
           const isActive = item.tab === activeTab;
           const isAfterDivider = item.label === "Analytics" || item.label === "Settings";
-          const count = item.tab ? navigationCounts[item.tab] : null;
 
           return (
             <div key={item.label} className={isAfterDivider ? "border-t border-[#d7dbe6] pt-4" : ""}>
@@ -398,11 +394,6 @@ function Sidebar({
                   className={isActive ? "text-[#4b3cff]" : "text-black"}
                 />
                 <span className="flex-1">{item.label}</span>
-                {typeof count === "number" ? (
-                  <span className={`min-w-7 rounded-full bg-[#f0f1f5] px-2 py-0.5 text-center text-[12px] font-extrabold ${isActive ? "text-[#4b3cff]" : "text-black"}`}>
-                    {count}
-                  </span>
-                ) : null}
               </button>
             </div>
           );
@@ -542,13 +533,9 @@ function DashboardContent() {
     creatorOrderResponse.tableReady !== false,
   );
   const resolvedEscalationIdSet = new Set(escalationWorkflowState.resolvedIds);
-  const readEscalationIdSet = new Set(escalationWorkflowState.readIds);
   const resolvedOpportunityIdSet = new Set(opportunityWorkflowState.resolvedIds);
-  const readOpportunityIdSet = new Set(opportunityWorkflowState.readIds);
   const unresolvedEscalations = creatorSummary.escalations.filter((escalation) => !resolvedEscalationIdSet.has(escalation.id));
   const unresolvedOpportunityCards = creatorSummary.opportunityCards.filter((opportunity) => !resolvedOpportunityIdSet.has(opportunity.id));
-  const unreadEscalationCount = unresolvedEscalations.filter((escalation) => !readEscalationIdSet.has(escalation.id)).length;
-  const unreadOpportunityCount = unresolvedOpportunityCards.filter((opportunity) => !readOpportunityIdSet.has(opportunity.id)).length;
   const unresolvedEscalationIdsKey = unresolvedEscalations.map((escalation) => escalation.id).join("|");
   const unresolvedOpportunityIdsKey = unresolvedOpportunityCards.map((opportunity) => opportunity.id).join("|");
   const readEscalationIdsKey = escalationWorkflowState.readIds.join("|");
@@ -837,11 +824,6 @@ function DashboardContent() {
         activeTab={activeTab}
         onChangeTab={handleTabChange}
         profile={accountProfile}
-        navigationCounts={{
-          inbox: creatorSummary.totalConversationCount,
-          opportunities: unreadOpportunityCount > 0 ? unreadOpportunityCount : null,
-          escalations: unreadEscalationCount > 0 ? unreadEscalationCount : null,
-        }}
       />
 
       {!canOpenDashboardTab(accountProfile, activeTab) ? (

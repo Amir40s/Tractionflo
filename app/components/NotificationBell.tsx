@@ -19,6 +19,7 @@ import {
   showBrowserOsNotification,
   type BrowserNotificationPermission,
 } from "@/lib/browser-os-notifications";
+import { shouldSuppressRealtimeNotification } from "@/lib/notification-preferences";
 import type { RealtimeNotificationPayload, RealtimeNotificationType } from "@/lib/pusher";
 import {
   mergeRealtimeNotificationHistory,
@@ -72,7 +73,7 @@ function readNotificationHistory() {
   try {
     return normalizeRealtimeNotificationHistory(
       JSON.parse(window.localStorage.getItem(realtimeNotificationHistoryStorageKey) || "[]")
-    );
+    ).filter((notification) => !shouldSuppressRealtimeNotification(notification));
   } catch {
     return [];
   }
@@ -183,6 +184,10 @@ export default function NotificationBell({
         return;
       }
 
+      if (shouldSuppressRealtimeNotification(notification)) {
+        return;
+      }
+
       setNotifications((current) => {
         const alreadyExists = current.some((item) => item.id === notification.id);
         const nextNotifications = mergeRealtimeNotificationHistory(current, notification);
@@ -199,7 +204,7 @@ export default function NotificationBell({
     function handleHistory(event: Event) {
       const history = normalizeRealtimeNotificationHistory(
         (event as CustomEvent<RealtimeNotificationPayload[]>).detail
-      );
+      ).filter((notification) => !shouldSuppressRealtimeNotification(notification));
 
       setNotifications(history);
     }

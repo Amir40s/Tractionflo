@@ -9,6 +9,7 @@ import {
   formatCatalogForPrompt,
   getInstagramProductCatalogForUser,
 } from '@/lib/instagram-product-catalog';
+import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
 import { runAssistantThread } from '@/lib/openai-assistants';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -121,20 +122,26 @@ export async function POST(request: Request) {
     });
 
     if (escalation) {
-      await triggerRealtimeNotification(getUserChannel(user.id), {
-        type: 'escalation',
-        title: `${escalation.label} detected`,
-        body: escalation.summary,
-        url: '/conversations',
-        metadata: {
-          assistantId,
-          category: escalation.intent,
-          urgency: escalation.urgency,
-          urgent: escalation.urgency === 'High',
-        },
-      }).catch((notificationError) => {
-        logger.error('Realtime handoff reply notification error:', { error: notificationError });
-      });
+      const notificationTitle = `${escalation.label} detected`;
+      const notificationBody = escalation.summary;
+      const notificationMetadata = {
+        assistantId,
+        category: escalation.intent,
+        urgency: escalation.urgency,
+        urgent: escalation.urgency === 'High',
+      };
+
+      if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
+        await triggerRealtimeNotification(getUserChannel(user.id), {
+          type: 'escalation',
+          title: notificationTitle,
+          body: notificationBody,
+          url: '/conversations',
+          metadata: notificationMetadata,
+        }).catch((notificationError) => {
+          logger.error('Realtime handoff reply notification error:', { error: notificationError });
+        });
+      }
 
       return NextResponse.json({
         assistantId,

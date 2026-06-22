@@ -39,6 +39,7 @@ import {
   renderInstagramWelcomeMessage,
 } from '@/lib/instagram-welcome-automation';
 import { sendInstagramCommercePaymentMessage } from '@/lib/instagram-send-api';
+import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
 import { runAssistantThread } from '@/lib/openai-assistants';
 import {
   buildFallbackRevenueOperatingSnapshot,
@@ -779,23 +780,29 @@ async function processInstagramAutomations(
       });
 
       if (escalation) {
-        await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
-          type: 'escalation',
-          title: `${escalation.label} detected`,
-          body: escalation.summary,
-          url: '/conversations',
-          metadata: {
-            source: 'instagram-webhook',
-            userId: user.id,
-            senderId: event.senderId,
-            messageId: event.mid,
-            category: escalation.intent,
-            urgency: escalation.urgency,
-            urgent: escalation.urgency === 'High',
-          },
-        }).catch((notificationError) => {
-          logger.error('Realtime Instagram escalation notification error:', { error: notificationError });
-        });
+        const notificationTitle = `${escalation.label} detected`;
+        const notificationBody = escalation.summary;
+        const notificationMetadata = {
+          source: 'instagram-webhook',
+          userId: user.id,
+          senderId: event.senderId,
+          messageId: event.mid,
+          category: escalation.intent,
+          urgency: escalation.urgency,
+          urgent: escalation.urgency === 'High',
+        };
+
+        if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
+          await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
+            type: 'escalation',
+            title: notificationTitle,
+            body: notificationBody,
+            url: '/conversations',
+            metadata: notificationMetadata,
+          }).catch((notificationError) => {
+            logger.error('Realtime Instagram escalation notification error:', { error: notificationError });
+          });
+        }
 
         if (shouldPauseAiForEscalation(escalation)) {
           logger.info("processInstagramAutomations: Escalation detected, pausing webhook auto-reply.", {
@@ -1076,27 +1083,44 @@ export async function POST(request: Request) {
         }
 
         const messagesForNotification = messagesToInsert.filter(m => insertedMids.has(m.mid));
-        if (messagesForNotification.length > 0) {
-          const firstMsgText = messagesForNotification[0].text;
+        const notificationMessages = messagesForNotification.filter((message) => {
+          const cleanText = message.text.startsWith('__STORY_REPLY__:') && message.text.includes('__TEXT__:')
+            ? message.text.split('__TEXT__:', 2)[1]
+            : message.text;
+
+          return !shouldSuppressRealtimeNotification({
+            title: 'New Instagram message',
+            body: cleanText.slice(0, 120) || 'A new Instagram DM arrived.',
+            metadata: { source: 'meta-webhook' },
+          });
+        });
+
+        if (notificationMessages.length > 0) {
+          const firstMsgText = notificationMessages[0].text;
           const cleanText = firstMsgText.startsWith('__STORY_REPLY__:') && firstMsgText.includes('__TEXT__:')
             ? firstMsgText.split('__TEXT__:', 2)[1]
             : firstMsgText;
+          const notificationTitle = notificationMessages.length === 1 ? 'New Instagram message' : 'New Instagram messages';
+          const notificationBody =
+            notificationMessages.length === 1
+              ? cleanText.slice(0, 120) || 'A new Instagram DM arrived.'
+              : `${notificationMessages.length} new Instagram DMs arrived.`;
+          const notificationMetadata = {
+            count: notificationMessages.length,
+            source: 'meta-webhook',
+          };
 
-          await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
-            type: 'message',
-            title: messagesForNotification.length === 1 ? 'New Instagram message' : 'New Instagram messages',
-            body:
-              messagesForNotification.length === 1
-                ? cleanText.slice(0, 120) || 'A new Instagram DM arrived.'
-                : `${messagesForNotification.length} new Instagram DMs arrived.`,
-            url: '/conversations',
-            metadata: {
-              count: messagesForNotification.length,
-              source: 'meta-webhook',
-            },
-          }).catch((notificationError) => {
-            logger.error('Realtime webhook notification error:', { error: notificationError });
-          });
+          if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
+            await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+              type: 'message',
+              title: notificationTitle,
+              body: notificationBody,
+              url: '/conversations',
+              metadata: notificationMetadata,
+            }).catch((notificationError) => {
+              logger.error('Realtime webhook notification error:', { error: notificationError });
+            });
+          }
         }
       }
       const filteredEvents = automationEvents.filter(event => insertedMids.has(event.mid));
