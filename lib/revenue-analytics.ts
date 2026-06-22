@@ -120,32 +120,168 @@ async function selectRows(
   return normalizeRows(data);
 }
 
-function uniqueStrings(values: string[]) {
-  return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean))).slice(0, 8);
+const knowledgeFieldLabels = [
+  "Product name",
+  "Service name",
+  "Plan or package",
+  "Business name",
+  "Knowledge Base Category",
+  "Category",
+  "Price",
+  "Pricing",
+  "Description",
+  "What is included",
+  "Payment methods",
+  "Deposit or advance payment",
+  "Delivery charges",
+  "Refund or exchange note",
+  "Location",
+  "Opening hours",
+  "Contact",
+  "Offer",
+  "Discount",
+  "Bonus",
+];
+
+function normalizeInsightFingerprint(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(yes|please|share|provide|customer|customers|can|will|also|the|and|with|for|your|our|their|this|that)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function collectKnowledgeLines(sources: KnowledgeSourceIndex[], pattern: RegExp) {
-  return uniqueStrings(
-    sources.flatMap((source) => [
-      ...source.categories.filter((category) => pattern.test(category)),
-      ...source.qaPairs
-        .filter((pair) => pattern.test(`${pair.question} ${pair.answer}`))
-        .map((pair) => pair.answer.slice(0, 180)),
-      ...source.chunks
-        .filter((chunk) => pattern.test(chunk.text))
-        .map((chunk) => chunk.text.replace(/\s+/g, " ").slice(0, 180)),
-    ])
-  );
+function cleanInsightText(value: string, maxLength = 150) {
+  const cleaned = value
+    .replace(/\s+/g, " ")
+    .replace(/^(yes|sure|please)[,.\s]+/i, "")
+    .replace(/^manual update:\s*/i, "")
+    .trim();
+
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  return `${cleaned.slice(0, maxLength - 1).trim()}…`;
+}
+
+function uniqueStrings(values: string[], limit = 8) {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+
+  for (const value of values) {
+    const cleaned = cleanInsightText(value);
+    const fingerprint = normalizeInsightFingerprint(cleaned);
+
+    if (!cleaned || !fingerprint || seen.has(fingerprint)) {
+      continue;
+    }
+
+    seen.add(fingerprint);
+    unique.push(cleaned);
+
+    if (unique.length >= limit) {
+      break;
+    }
+  }
+
+  return unique;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getKnowledgeField(text: string, label: string) {
+  const otherLabels = knowledgeFieldLabels.filter((item) => item !== label).map(escapeRegExp).join("|");
+  const pattern = new RegExp(`${escapeRegExp(label)}\\s*:\\s*([\\s\\S]*?)(?=\\s+(?:${otherLabels})\\s*:|$)`, "i");
+  const match = text.match(pattern);
+
+  return cleanInsightText(match?.[1] || "", 120);
+}
+
+function getSentenceMatches(text: string, pattern: RegExp) {
+  return text
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 8 && pattern.test(sentence))
+    .map((sentence) => cleanInsightText(sentence, 140));
+}
+
+function collectKnowledgeFacts(sources: KnowledgeSourceIndex[], pattern: RegExp, fields: string[], limit = 8) {
+  const facts: string[] = [];
+
+  for (const source of sources) {
+    const sourceText = [
+      source.title,
+      ...source.categories,
+      ...source.qaPairs.flatMap((pair) => [pair.question, pair.answer]),
+      ...source.chunks.map((chunk) => chunk.text),
+    ].join("\n");
+
+    if (!pattern.test(sourceText)) {
+      continue;
+    }
+
+    for (const text of [source.title, ...source.qaPairs.map((pair) => pair.answer), ...source.chunks.map((chunk) => chunk.text)]) {
+      const normalizedText = text.replace(/\s+/g, " ").trim();
+
+      for (const field of fields) {
+        const value = getKnowledgeField(normalizedText, field);
+
+        if (value) {
+          facts.push(value);
+        }
+      }
+
+      facts.push(...getSentenceMatches(normalizedText, pattern));
+    }
+  }
+
+  return uniqueStrings(facts, limit);
 }
 
 function buildBusinessProfileFromKnowledge(sources: KnowledgeSourceIndex[]): RosBusinessProfile {
   const activeSources = sources.filter((source) => source.active !== false);
-  const products = collectKnowledgeLines(activeSources, /\b(product|package|course|program|plan|kit|item)\b/i);
-  const services = collectKnowledgeLines(activeSources, /\b(service|coaching|consult|booking|call|session|done for you)\b/i);
-  const pricingLines = collectKnowledgeLines(activeSources, /\b(price|pricing|cost|fee|\$|usd|pkr|rs|payment)\b/i);
-  const guarantees = collectKnowledgeLines(activeSources, /\b(guarantee|refund|warranty|risk[- ]free)\b/i);
-  const policies = collectKnowledgeLines(activeSources, /\b(policy|policies|cancel|reschedule|terms|delivery|shipping)\b/i);
-  const offers = collectKnowledgeLines(activeSources, /\b(offer|bonus|discount|deal|checkout|trial|newsletter|testimonial)\b/i);
+  const products = collectKnowledgeFacts(
+    activeSources,
+    /\b(product|products|package|course|program|plan|kit|item|collection|catalog)\b/i,
+    ["Product name", "Plan or package"],
+    6
+  );
+  const services = collectKnowledgeFacts(
+    activeSources,
+    /\b(service|services|coaching|consult|booking|call|session|done for you|styling|recommendation)\b/i,
+    ["Service name", "What is included"],
+    6
+  );
+  const pricingLines = collectKnowledgeFacts(
+    activeSources,
+    /\b(price|pricing|cost|fee|\$|usd|pkr|rs|payment|deposit|checkout)\b/i,
+    ["Price", "Pricing", "Payment methods", "Deposit or advance payment"],
+    6
+  );
+  const guarantees = collectKnowledgeFacts(
+    activeSources,
+    /\b(guarantee|refund|warranty|risk[- ]free|exchange|return)\b/i,
+    ["Refund or exchange note"],
+    5
+  );
+  const policies = collectKnowledgeFacts(
+    activeSources,
+    /\b(policy|policies|cancel|reschedule|terms|delivery|shipping|hours|location)\b/i,
+    ["Delivery charges", "Location", "Opening hours"],
+    6
+  );
+  const offers = collectKnowledgeFacts(
+    activeSources,
+    /\b(offer|bonus|discount|deal|checkout|trial|newsletter|testimonial|bundle|occasion)\b/i,
+    ["Offer", "Discount", "Bonus", "Product name", "Plan or package"],
+    6
+  );
   const sourceTitles = activeSources.map((source) => source.title).slice(0, 5);
   const confidence = Math.min(100, Math.max(20, activeSources.length * 18 + pricingLines.length * 6 + products.length * 4));
 
@@ -163,7 +299,7 @@ function buildBusinessProfileFromKnowledge(sources: KnowledgeSourceIndex[]): Ros
       sources: sourceTitles,
     },
     offers,
-    successStories: collectKnowledgeLines(activeSources, /\b(case study|testimonial|result|success|before|after)\b/i),
+    successStories: collectKnowledgeFacts(activeSources, /\b(case study|testimonial|result|success|before|after)\b/i, ["Description"], 5),
     sourceSummary:
       activeSources.length > 0
         ? `${activeSources.length} knowledge source${activeSources.length === 1 ? "" : "s"} indexed: ${sourceTitles.join(", ")}`
