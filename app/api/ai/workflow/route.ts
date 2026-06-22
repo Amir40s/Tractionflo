@@ -23,6 +23,11 @@ import {
 import { isCommerceOrderConfirmationText } from '@/lib/commerce-orders';
 import { runAssistantThread } from '@/lib/openai-assistants';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
+import {
+  buildFallbackRevenueOperatingSnapshot,
+  normalizeRevenueOperatingSnapshot,
+  persistRevenueOperatingSnapshot,
+} from '@/lib/revenue-intelligence';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 
@@ -48,6 +53,8 @@ type WorkflowPayload = {
   accountName?: string;
   takeoverMode?: 'ai' | 'human';
   messages?: WorkflowMessage[];
+  conversationId?: string;
+  conversation_id?: string;
   forceRefresh?: boolean;
 };
 
@@ -71,6 +78,16 @@ function getLatestUserQuestion(messages: WorkflowMessage[] = []) {
     .reverse()
     .map((message) => message.text?.trim() || '')
     .join('\n');
+}
+
+function hasImmediateLeadQualificationSignal(messages: WorkflowMessage[] = []) {
+  const userText = messages
+    .filter((message) => message.from === 'user' && typeof message.text === 'string')
+    .map((message) => message.text || '')
+    .join(' ')
+    .toLowerCase();
+
+  return /\b(price|pricing|cost|expensive|budget|payment|checkout|confirm|order|buy|purchase|book|booking|call|program|package|this month|today|tomorrow|asap|urgent)\b/.test(userText);
 }
 
 function resolveAssistantId(payload: WorkflowPayload, authenticatedUserId: string) {
@@ -204,6 +221,20 @@ function normalizeLeadInsight(value: unknown): AiLeadInsight {
 function normalizeWorkflowResult(value: string, enabledWorkflows: AiWorkflowRunResult['enabledWorkflows']) {
   const parsed = extractJsonObject(value);
   const lead = normalizeLeadInsight(parsed.lead);
+  const resultLead = enabledWorkflows.qualifyLeads
+    ? lead
+    : {
+      ...defaultAiLeadInsight,
+      summary: 'AI Qualifies Leads is turned off.',
+      recommendedAction: 'Turn on lead qualification in AI Integration.',
+    };
+  const resultCta = enabledWorkflows.moveToCta
+    ? normalizeText(parsed.cta, lead.cta, 500)
+    : '';
+  const fallbackRos = buildFallbackRevenueOperatingSnapshot({
+    lead: resultLead,
+    cta: resultCta,
+  });
 
   return {
     starter: enabledWorkflows.startConversation
@@ -213,15 +244,10 @@ function normalizeWorkflowResult(value: string, enabledWorkflows: AiWorkflowRunR
       ? normalizeText(parsed.reply, '', 500)
       : '',
     cta: enabledWorkflows.moveToCta
-      ? normalizeText(parsed.cta, lead.cta, 500)
+      ? resultCta
       : '',
-    lead: enabledWorkflows.qualifyLeads
-      ? lead
-      : {
-        ...defaultAiLeadInsight,
-        summary: 'AI Qualifies Leads is turned off.',
-        recommendedAction: 'Turn on lead qualification in AI Integration.',
-      },
+    lead: resultLead,
+    ros: normalizeRevenueOperatingSnapshot(parsed.ros ?? parsed.revenue_operating_system, fallbackRos),
     enabledWorkflows,
   } satisfies AiWorkflowRunResult;
 }
@@ -267,6 +293,7 @@ export async function POST(request: Request) {
     const cachedLead = leadQualifications[participantId];
 
     const messages = payload.messages || [];
+    const serviceSupabase = createSupabaseServiceClient();
     const lastMessage = messages[messages.length - 1];
 
     if (lastMessage?.from === 'me') {
@@ -355,6 +382,22 @@ export async function POST(request: Request) {
           recommendedAction: escalation.recommendedAction,
           cta: 'Take over in inbox',
         },
+        ros: buildFallbackRevenueOperatingSnapshot({
+          lead: {
+            ...defaultAiLeadInsight,
+            score: escalation.urgency === 'High' ? 92 : 78,
+            stage: 'Needs human',
+            urgency: escalation.urgency,
+            intent: escalation.label,
+            summary: escalation.summary,
+            signals: escalation.signals,
+            missing: [],
+            recommendedAction: escalation.recommendedAction,
+            cta: 'Take over in inbox',
+          },
+          cta: 'Take over in inbox',
+          escalation,
+        }),
         enabledWorkflows,
         knowledge: summarizeKnowledgeForResponse({ mode: 'none', matches: [] }, assistantId),
       });
@@ -364,9 +407,12 @@ export async function POST(request: Request) {
     let shouldQualifyLeads = false;
     let qualificationMocked = false;
     let qualificationReason = '';
+    const immediateQualificationSignal = hasImmediateLeadQualificationSignal(payload.messages);
 
     if (enabledWorkflows.qualifyLeads) {
-      if (userMessageCount < 15) {
+      if (forceRefresh || immediateQualificationSignal) {
+        shouldQualifyLeads = true;
+      } else if (userMessageCount < 15) {
         shouldQualifyLeads = false;
         qualificationMocked = true;
         qualificationReason = `Qualification will run once 15 messages are exchanged (currently at ${userMessageCount} user messages).`;
@@ -386,7 +432,6 @@ export async function POST(request: Request) {
 
     const newInboundLead = isNewInboundLead(payload.messages);
     const latestUserQuestion = getLatestUserQuestion(payload.messages);
-    const serviceSupabase = createSupabaseServiceClient();
 
     const assistantIdFromMetadata = metadata.openai_assistant_id as string | undefined;
     if (!assistantIdFromMetadata) {
@@ -432,7 +477,7 @@ export async function POST(request: Request) {
     const rawResult = await runAssistantThread({
       apiKey,
       assistantId: assistantIdFromMetadata,
-      maxTokens: 700,
+      maxTokens: 1100,
       responseFormat: "json_object",
       additionalInstructions: `${integration.systemPrompt}
 
@@ -448,12 +493,67 @@ ${catalogPrompt || 'No relevant catalog product was detected for this conversati
 
 Return only valid JSON. No markdown. No commentary.
 Never ask again for booking details that the customer already gave earlier in the conversation.
+Always include a "ros" object. The ROS object is the Revenue Operating System decision layer and must choose the highest-probability next action that advances a business outcome.
 JSON shape:
 {
   "starter": "first response to send when AI Starts Conversation is on and this is a new inbound lead; empty when not needed",
   "reply": "best next answer to the latest user message; use exact attached file_search knowledge when provided instead of vague ranges",
   "cta": "short CTA message that moves a ready lead forward",
-  ${leadSchema}
+  ${leadSchema},
+  "ros": {
+    "conversationIntelligence": {
+      "intent": "short intent label",
+      "sentiment": "positive | neutral | negative | mixed",
+      "emotion": "curious | hesitant | ready | frustrated | unknown",
+      "objection": "cost | trust | timing | fit | none",
+      "buyingSignal": "detected buying signal or empty string",
+      "urgencySignal": "detected urgency signal or empty string",
+      "stage": "new | awareness | consideration | qualified | ready_for_cta | needs_human",
+      "questions": ["questions the user asked"],
+      "signals": ["up to five important conversation signals"]
+    },
+    "buyerIntelligence": {
+      "goal": "known goal or empty string",
+      "problem": "known problem or empty string",
+      "budget": "known budget or empty string",
+      "authority": "known authority or empty string",
+      "need": "known need or empty string",
+      "timeline": "known timeline or empty string",
+      "behavior": "short behavior summary",
+      "readiness": "low | medium | high",
+      "missing": ["missing qualification facts"]
+    },
+    "revenueIntelligence": {
+      "framework": "BANT, SPIN, MEDDIC, consultative selling, or other useful framework",
+      "method": "ask | explain | handle_objection | present_offer | escalate | follow_up",
+      "nextQuestion": "one qualification question if needed",
+      "objection": "current objection or empty string",
+      "salesStage": "current revenue stage",
+      "recommendation": "specific next action for the business"
+    },
+    "outcomeProbabilities": {
+      "follow_creator": 0-100,
+      "join_newsletter": 0-100,
+      "book_call": 0-100,
+      "start_trial": 0-100,
+      "purchase_product": 0-100,
+      "upgrade_plan": 0-100,
+      "recover_abandoned_cart": 0-100,
+      "renew_subscription": 0-100,
+      "collect_testimonial": 0-100
+    },
+    "decision": {
+      "bestNextAction": "single best next action",
+      "confidence": 0-100,
+      "rationale": "short reason for this decision"
+    },
+    "memory": {
+      "objections": ["objections to remember"],
+      "questionsAsked": ["important questions already asked"],
+      "offersPresented": ["offers or CTAs already presented"],
+      "followUpNeeded": true
+    }
+  }
 }`,
       messages: [
         {
@@ -521,6 +621,15 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       };
     }
 
+    workflowResult.ros = normalizeRevenueOperatingSnapshot(
+      workflowResult.ros,
+      buildFallbackRevenueOperatingSnapshot({
+        lead: workflowResult.lead,
+        cta: workflowResult.cta || workflowResult.lead.cta || integration.ctaMessage,
+        escalation,
+      })
+    );
+
     // Save generated qualification to user metadata cache
     if (shouldQualifyLeads && participantId) {
       const nextQualifications = withCachedLeadQualification(leadQualifications, participantId, workflowResult.lead);
@@ -542,15 +651,30 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       }
     }
 
+    await persistRevenueOperatingSnapshot({
+      supabase: serviceSupabase,
+      userId: user.id,
+      participant: payload.participant,
+      conversationId: payload.conversationId || payload.conversation_id || participantId,
+      messages,
+      snapshot: workflowResult.ros,
+      escalation,
+      source: 'ai_workflow',
+    }).catch((persistError) => {
+      logger.warn('ROS decision persistence skipped or failed:', { error: persistError });
+    });
+
     await triggerRealtimeNotification(getUserChannel(user.id), {
       type: 'ai',
       title: 'AI workflow completed',
-      body: `Lead score ${workflowResult.lead.score}/100: ${workflowResult.lead.intent}`,
+      body: `Lead score ${workflowResult.lead.score}/100: ${workflowResult.ros.decision.bestNextAction}`,
       url: '/conversations',
       metadata: {
         assistantId,
         score: workflowResult.lead.score,
         urgency: workflowResult.lead.urgency,
+        bestNextAction: workflowResult.ros.decision.bestNextAction,
+        decisionConfidence: workflowResult.ros.decision.confidence,
         knowledgeMode: knowledge.mode,
         sourceTitle: knowledge.sourceTitle || '',
       },

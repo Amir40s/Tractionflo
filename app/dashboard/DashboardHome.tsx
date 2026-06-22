@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   BookOpen,
+  BrainCircuit,
   ChevronDown,
   Heart,
   Home,
@@ -38,6 +39,7 @@ import { DashboardOverview } from "./creator/DashboardOverview";
 import { KnowledgeBasePage } from "./creator/KnowledgeBasePage";
 import { BrandMark } from "./creator/BrandMark";
 import { OpportunitiesPage } from "./creator/LeadsPage";
+import { RosPage } from "./creator/RosPage";
 import {
   escalationWorkflowStateChangedEvent,
   loadEscalationWorkflowStateFromDatabase,
@@ -126,6 +128,7 @@ const dashboardTabUrlValues: Record<DashboardTab, string> = {
   inbox: "/conversations",
   "instagram-content": "/instagram-content",
   opportunities: "/opportunities",
+  ros: "/ros",
   audience: "/audience",
   knowledge: "/knowledge-base",
   escalations: "/escalations",
@@ -156,6 +159,10 @@ function getDashboardTabFromUrl(): DashboardTab {
 
   if (pathname === "/opportunities" || pathname === "/opporunies") {
     return "opportunities";
+  }
+
+  if (pathname === "/ros" || pathname === "/revenue-operating-system") {
+    return "ros";
   }
 
   if (pathname === "/audience") {
@@ -190,6 +197,10 @@ function getDashboardTabFromUrl(): DashboardTab {
 
   if (view === "opportunities" || view === "opporunies") {
     return "opportunities";
+  }
+
+  if (view === "ros" || view === "revenue-operating-system") {
+    return "ros";
   }
 
   if (view === "audience") {
@@ -235,6 +246,7 @@ const navItems: NavItem[] = [
   { label: "Conversations", icon: MessageSquare, tab: "inbox" },
   { label: "Posts & Stories", icon: Heart, tab: "instagram-content" },
   { label: "Leads", icon: Target, tab: "opportunities" },
+  { label: "ROS", icon: BrainCircuit, tab: "ros" },
   { label: "Audience", icon: Users, tab: "audience" },
   { label: "Knowledge Base", icon: BookOpen, tab: "knowledge" },
   { label: "Escalations", icon: TriangleAlert, tab: "escalations" },
@@ -442,7 +454,7 @@ function MobileNavigation({
   );
 
   return (
-    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-5 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur sm:grid-cols-9 lg:hidden">
+    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-5 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur sm:grid-cols-10 lg:hidden">
       {mobileItems.map((item) => {
         const Icon = item.icon;
         const isActive = item.tab === activeTab;
@@ -453,8 +465,10 @@ function MobileNavigation({
             ? "Chats"
             : item.label === "Posts & Stories"
             ? "Posts"
-            : item.label === "Opportunities"
-              ? "Opps"
+            : item.label === "Leads"
+              ? "Leads"
+              : item.label === "ROS"
+                ? "ROS"
               : item.label === "Knowledge Base"
                 ? "KB"
                 : item.label === "Escalations"
@@ -852,6 +866,8 @@ function DashboardContent() {
           dateRangePreset={creatorDateRangePreset}
           onDateRangeChange={setCreatorDateRangePreset}
         />
+      ) : activeTab === "ros" ? (
+        <RosPage />
       ) : activeTab === "instagram-content" ? (
         <InstagramContentPage />
       ) : activeTab === "audience" ? (

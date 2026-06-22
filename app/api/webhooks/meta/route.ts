@@ -17,6 +17,7 @@ import {
   detectConversationEscalation,
   escalationRulesMetadataKey,
   shouldPauseAiForEscalation,
+  type ConversationEscalation,
 } from '@/lib/conversation-escalation';
 import {
   getAiBehaviorPrompt,
@@ -39,6 +40,12 @@ import {
 } from '@/lib/instagram-welcome-automation';
 import { sendInstagramCommercePaymentMessage } from '@/lib/instagram-send-api';
 import { runAssistantThread } from '@/lib/openai-assistants';
+import {
+  buildFallbackRevenueOperatingSnapshot,
+  normalizeRevenueOperatingSnapshot,
+  persistRevenueOperatingSnapshot,
+  recordRevenueConversionEvent,
+} from '@/lib/revenue-intelligence';
 
 import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -264,6 +271,110 @@ async function sendInstagramAttachmentMessage(
 function formatWebhookConversationLine(message: { from?: 'me' | 'user' | 'note'; text?: string }) {
   const sender = message.from === 'me' ? 'Business' : message.from === 'note' ? 'Internal note' : 'Instagram user';
   return `${sender}: ${message.text?.trim() || 'Sent an attachment'}`;
+}
+
+function buildWebhookRevenueOperatingSnapshot({
+  latestText,
+  catalogOffer,
+  pendingOrderId,
+  escalation,
+}: {
+  latestText: string;
+  catalogOffer?: InstagramCatalogOffer | null;
+  pendingOrderId?: string;
+  escalation?: ConversationEscalation | null;
+}) {
+  const normalizedText = latestText.toLowerCase();
+  const hasPriceSignal = /\b(price|pricing|cost|expensive|budget|how much|payment)\b/.test(normalizedText);
+  const hasTimelineSignal = /\b(this month|today|tonight|tomorrow|asap|urgent|now|soon|start)\b/.test(normalizedText);
+  const hasConversionSignal = /\b(confirm|order|checkout|payment|book|call|buy|purchase|works)\b/.test(normalizedText);
+  const offerScore = catalogOffer
+    ? Math.round((catalogOffer.confidence + Math.min(100, catalogOffer.matchScore)) / 2)
+    : 0;
+  const score =
+    escalation?.urgency === 'High'
+      ? 92
+      : catalogOffer
+        ? Math.max(78, Math.min(94, offerScore || catalogOffer.confidence))
+        : hasPriceSignal || hasConversionSignal
+          ? 68
+          : 45;
+  const urgency =
+    escalation?.urgency ||
+    (catalogOffer && (hasTimelineSignal || hasConversionSignal) ? 'High' : hasPriceSignal ? 'Medium' : 'Low');
+  const signals = [
+    ...(escalation?.signals || []),
+    catalogOffer ? `Catalog product matched: ${catalogOffer.title}` : '',
+    hasPriceSignal ? 'Asked about price or payment' : '',
+    hasTimelineSignal ? 'Mentioned purchase timeline' : '',
+    hasConversionSignal ? 'Used booking, order, or checkout language' : '',
+    pendingOrderId ? 'Pending order created' : '',
+  ].filter(Boolean);
+  const missing = [
+    !hasTimelineSignal ? 'purchase timeline' : '',
+    !catalogOffer && !hasPriceSignal ? 'budget or price range' : '',
+    catalogOffer && !hasConversionSignal ? 'confirmation or checkout preference' : '',
+  ].filter(Boolean);
+  const cta = pendingOrderId
+    ? 'Confirm order'
+    : catalogOffer
+      ? `Confirm interest in ${catalogOffer.title}`
+      : 'Ask one clear follow-up question';
+  const recommendedAction = pendingOrderId
+    ? 'Get confirmation, then send checkout/payment link.'
+    : catalogOffer
+      ? 'Confirm fit and move the lead toward booking, checkout, or payment.'
+      : escalation?.recommendedAction || 'Answer the question and ask one concise qualification question.';
+  const summary =
+    escalation?.summary ||
+    (catalogOffer
+      ? `Customer showed pricing interest and received the ${catalogOffer.title} offer.`
+      : 'Customer received an automated Instagram reply.');
+
+  const fallback = buildFallbackRevenueOperatingSnapshot({
+    lead: {
+      score,
+      stage: pendingOrderId ? 'pending_order_confirmation' : catalogOffer ? 'pricing_offer_presented' : 'automated_reply',
+      urgency,
+      intent: escalation?.label || (catalogOffer ? 'High-ticket pricing interest' : 'Instagram DM inquiry'),
+      summary,
+      signals,
+      missing,
+      recommendedAction,
+      cta,
+    },
+    cta,
+    escalation,
+  });
+
+  return normalizeRevenueOperatingSnapshot(
+    {
+      ...fallback,
+      outcomeProbabilities: {
+        ...fallback.outcomeProbabilities,
+        book_call: Math.max(fallback.outcomeProbabilities.book_call || 0, catalogOffer ? 84 : 35),
+        purchase_product: Math.max(fallback.outcomeProbabilities.purchase_product || 0, pendingOrderId ? 92 : catalogOffer ? 86 : 25),
+      },
+      decision: {
+        ...fallback.decision,
+        bestNextAction: pendingOrderId
+          ? 'confirm_order_then_send_checkout'
+          : catalogOffer
+            ? 'present_offer_and_confirm_interest'
+            : fallback.decision.bestNextAction,
+        confidence: score,
+        rationale: summary,
+      },
+      memory: {
+        ...fallback.memory,
+        objections: hasPriceSignal ? ['price'] : fallback.memory.objections,
+        offersPresented: catalogOffer
+          ? [catalogOffer.title, catalogOffer.priceText].filter(Boolean)
+          : fallback.memory.offersPresented,
+      },
+    },
+    fallback
+  );
 }
 
 async function generateWebhookAiReply({
@@ -579,6 +690,55 @@ async function processInstagramAutomations(
             }
           }
 
+          await recordRevenueConversionEvent({
+            supabase,
+            userId: user.id,
+            instagramSenderId: event.senderId,
+            conversationId: event.senderId,
+            eventType: alreadyConfirmedOrder ? 'order_confirmation_replayed' : 'order_confirmed',
+            outcomeType: 'purchase_product',
+            status: 'pending',
+            value: payableOrder.amount,
+            currency: payableOrder.currency,
+            commerceOrder: payableOrder,
+            metadata: {
+              checkoutCreated: checkout.checkoutCreated,
+              checkoutConfigured: checkout.checkoutConfigured,
+              source: 'instagram_webhook_confirmation',
+            },
+          }).catch((rosError) => {
+            logger.warn('Could not record ROS commerce confirmation event.', {
+              error: rosError,
+              orderId: payableOrder.id,
+              userId: user.id,
+            });
+          });
+
+          if (checkout.checkoutUrl) {
+            await recordRevenueConversionEvent({
+              supabase,
+              userId: user.id,
+              instagramSenderId: event.senderId,
+              conversationId: event.senderId,
+              eventType: 'checkout_created',
+              outcomeType: 'purchase_product',
+              status: 'pending',
+              value: payableOrder.amount,
+              currency: payableOrder.currency,
+              commerceOrder: payableOrder,
+              metadata: {
+                checkoutUrl: customerCheckoutUrl,
+                source: 'instagram_webhook_confirmation',
+              },
+            }).catch((rosError) => {
+              logger.warn('Could not record ROS checkout event.', {
+                error: rosError,
+                orderId: payableOrder.id,
+                userId: user.id,
+              });
+            });
+          }
+
           await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
             type: 'message',
             title: checkout.checkoutUrl ? 'Instagram checkout link sent' : 'Instagram order confirmed',
@@ -750,6 +910,37 @@ async function processInstagramAutomations(
         pendingOrder ? confirmOrderQuickReplies : []
       );
       logger.info("processInstagramAutomations: Instagram text message sent successfully", { message_id: sent.message_id });
+
+      const rosSnapshot = buildWebhookRevenueOperatingSnapshot({
+        latestText: event.text,
+        catalogOffer,
+        pendingOrderId: orderId,
+        escalation,
+      });
+      await persistRevenueOperatingSnapshot({
+        supabase,
+        userId: user.id,
+        participant: {
+          id: event.senderId,
+          username: participant.username,
+          name: participant.name,
+        },
+        conversationId: event.senderId,
+        messages: [
+          { from: 'user', text: event.text },
+          { from: 'me', text: reply.trim() },
+        ],
+        snapshot: rosSnapshot,
+        escalation,
+        source: isFirstInboundDm && welcome.enabled ? 'instagram_webhook_welcome' : 'instagram_webhook_ai',
+      }).catch((rosError) => {
+        logger.warn('processInstagramAutomations: Could not persist ROS decision for webhook reply.', {
+          error: rosError,
+          userId: user.id,
+          senderId: event.senderId,
+          orderId,
+        });
+      });
 
       logger.info("processInstagramAutomations: Triggering realtime pusher notification for sent reply...");
       await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {

@@ -433,24 +433,18 @@ function DevicePreview({
   activeId: string;
   compact?: boolean;
 }) {
-  const [renderTrigger, setRenderTrigger] = useState(0);
-
-  useEffect(() => {
-    setRenderTrigger((prev) => prev + 1);
-  }, [activeId]);
-
   const renderContent = () => {
     switch (activeId) {
       case "comment-dm":
-        return <CommentToDmPreview key={`comment-dm-${renderTrigger}`} />;
+        return <CommentToDmPreview key="comment-dm" />;
       case "faq-replies":
-        return <FaqRepliesPreview key={`faq-replies-${renderTrigger}`} />;
+        return <FaqRepliesPreview key="faq-replies" />;
       case "broadcasts":
-        return <BroadcastsPreview key={`broadcasts-${renderTrigger}`} />;
+        return <BroadcastsPreview key="broadcasts" />;
       case "followups":
-        return <FollowupsPreview key={`followups-${renderTrigger}`} />;
+        return <FollowupsPreview key="followups" />;
       default:
-        return <CommentToDmPreview key={`default-${renderTrigger}`} />;
+        return <CommentToDmPreview key="default" />;
     }
   };
 

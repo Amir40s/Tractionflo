@@ -6,6 +6,7 @@ import {
 } from "@/lib/commerce-orders";
 import logger from "@/lib/logger";
 import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from "@/lib/pusher";
+import { recordRevenueConversionEvent } from "@/lib/revenue-intelligence";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -160,6 +161,26 @@ export async function GET(request: NextRequest) {
     });
 
     if (paidOrder?.userId) {
+      await recordRevenueConversionEvent({
+        supabase,
+        userId: paidOrder.userId,
+        instagramSenderId: paidOrder.instagramSenderId,
+        conversationId: paidOrder.conversationId,
+        eventType: "payment_paid",
+        outcomeType: "purchase_product",
+        status: "won",
+        value: paidOrder.amount,
+        currency: paidOrder.currency,
+        commerceOrder: paidOrder,
+        metadata: {
+          source: "stripe-return",
+          checkoutSessionId: session.id || "",
+          paymentIntentId,
+        },
+      }).catch((rosError) => {
+        logger.warn("Could not record ROS paid checkout return event.", { error: rosError, orderId: paidOrder.id });
+      });
+
       await sendCommerceOrderPaymentThankYou(supabase, paidOrder, "stripe-return-payment-complete");
       await triggerRealtimeNotification([getUserChannel(paidOrder.userId), getSuperAdminChannel()], {
         type: "billing",

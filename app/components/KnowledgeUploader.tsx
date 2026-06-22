@@ -1,16 +1,13 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
   CheckCircle2,
-  FolderOpen,
-  HelpCircle,
   CircleDollarSign,
   Briefcase,
   HelpCircle as FaqIcon,
-  ChevronRight,
   BookOpen,
   Send
 } from "lucide-react";
@@ -34,18 +31,16 @@ const initialFiles: FileItem[] = [
 
 export default function KnowledgeUploader() {
   const [files, setFiles] = useState<FileItem[]>(initialFiles);
-  const [uploadIndex, setUploadIndex] = useState(-1);
   const [chatStep, setChatStep] = useState(0); // 0: idle, 1: question, 2: thinking, 3: answered
   
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const loopRef = useRef<NodeJS.Timeout | null>(null);
 
-  const startUploadSequence = () => {
+  const startUploadSequence = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     
     // Reset states
     setFiles(initialFiles.map(f => ({ ...f, status: 'idle' })));
-    setUploadIndex(0);
     setChatStep(0);
 
     // Scan files one-by-one
@@ -53,7 +48,6 @@ export default function KnowledgeUploader() {
     
     const scanNext = () => {
       if (currentIdx < initialFiles.length) {
-        setUploadIndex(currentIdx);
         // Scans for 500ms then turns done
         setFiles(prev => prev.map((f, i) => i === currentIdx ? { ...f, status: 'scanning' } : f));
         
@@ -63,7 +57,6 @@ export default function KnowledgeUploader() {
           scanNext();
         }, 550);
       } else {
-        setUploadIndex(-1);
         // Start Q&A chat preview on the right
         timerRef.current = setTimeout(() => {
           setChatStep(1); // Follower question
@@ -80,20 +73,22 @@ export default function KnowledgeUploader() {
     };
 
     scanNext();
-  };
+  }, []);
 
   useEffect(() => {
-    startUploadSequence();
+    const startTimer = setTimeout(startUploadSequence, 0);
 
     loopRef.current = setInterval(() => {
       startUploadSequence();
     }, 15000); // Replay every 15s
 
     return () => {
+      clearTimeout(startTimer);
       if (loopRef.current) clearInterval(loopRef.current);
-      if (timerRef.current) clearTimeout(timerRef.current);
+      const timer = timerRef.current;
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [startUploadSequence]);
 
   const handleManualSync = () => {
     if (loopRef.current) clearInterval(loopRef.current);

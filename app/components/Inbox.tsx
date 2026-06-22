@@ -662,8 +662,14 @@ function getInstagramProfileUrl(conv: IGConversation | null) {
   return `https://www.instagram.com/${conv.participant.username}/`;
 }
 
+function getLatestUserMessage(conv: IGConversation | null, igUserId?: string) {
+  return [...(conv?.messages || [])]
+    .filter((message) => message.from === "user" && (!igUserId || message.sender_id !== igUserId))
+    .sort((first, second) => new Date(second.time || 0).getTime() - new Date(first.time || 0).getTime())[0];
+}
+
 function getSuggestedReply(conv: IGConversation | null) {
-  const lastUserMsg = conv?.messages.find((m) => m.from === "user");
+  const lastUserMsg = getLatestUserMessage(conv);
   const preview = getMessagePreview(lastUserMsg).toLowerCase();
   const participantName = getParticipantHandle(conv);
 
@@ -2083,7 +2089,7 @@ function SummaryPanel({
         ].filter(Boolean).join(" ").toLowerCase().includes(trimmedMessageSearch)
       )
     : [];
-  const lastUserMsg = conv?.messages.find(m => m.from === "user" && m.sender_id !== igUserId);
+  const lastUserMsg = getLatestUserMessage(conv, igUserId);
   const lastUserMsgPreview = getMessagePreview(lastUserMsg);
   const knowledgeSummary = aiWorkflow?.knowledge;
   const hasKnowledgeReply = knowledgeSummary?.mode === "direct" || knowledgeSummary?.mode === "context";

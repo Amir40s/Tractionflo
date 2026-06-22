@@ -73,6 +73,15 @@ type InstagramComment = {
   replies: InstagramComment[];
 };
 
+type InstagramStoryReply = {
+  id: string;
+  text: string;
+  username: string;
+  name?: string;
+  profilePic?: string;
+  timestamp: string;
+};
+
 type InstagramContentResponse = {
   account?: InstagramAccount | null;
   posts?: InstagramContentItem[];
@@ -796,12 +805,12 @@ function StoryDetailPanel({
   loadingReplies,
   repliesError,
   onRefreshReplies,
-}: {
-  story?: InstagramContentItem;
-  replies: any[];
-  loadingReplies: boolean;
-  repliesError: string;
-  onRefreshReplies: () => void;
+	}: {
+	  story?: InstagramContentItem;
+	  replies: InstagramStoryReply[];
+	  loadingReplies: boolean;
+	  repliesError: string;
+	  onRefreshReplies: () => void;
 }) {
   if (!story) {
     return (
@@ -1457,7 +1466,7 @@ export default function InstagramContentPage() {
   const [detailPostId, setDetailPostId] = useState("");
   const [comments, setComments] = useState<InstagramComment[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftState>>({});
-  const [storyReplies, setStoryReplies] = useState<any[]>([]);
+  const [storyReplies, setStoryReplies] = useState<InstagramStoryReply[]>([]);
   const [loadingStoryReplies, setLoadingStoryReplies] = useState(false);
   const [storyRepliesError, setStoryRepliesError] = useState("");
   const [activeModal, setActiveModal] = useState<"details" | "publish" | null>(null);

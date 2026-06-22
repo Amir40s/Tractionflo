@@ -1,3 +1,5 @@
+import type { RevenueOperatingSnapshot } from "@/lib/revenue-intelligence";
+
 export type AiWorkflowId = "startConversation" | "answerQuestions" | "qualifyLeads" | "moveToCta";
 
 export type AiWorkflowSetting = {
@@ -32,6 +34,7 @@ export type AiWorkflowRunResult = {
   reply: string;
   cta: string;
   lead: AiLeadInsight;
+  ros?: RevenueOperatingSnapshot;
   enabledWorkflows: Record<AiWorkflowId, boolean>;
 };
 

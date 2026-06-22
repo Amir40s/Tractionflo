@@ -14,6 +14,7 @@ import {
 import { sendInstagramCommercePaymentMessage } from "@/lib/instagram-send-api";
 import { getFreshInstagramAccount } from "@/lib/instagram-token";
 import { findBestCatalogOffer, getInstagramProductCatalogForUser } from "@/lib/instagram-product-catalog";
+import { recordRevenueConversionEvent } from "@/lib/revenue-intelligence";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 
@@ -192,6 +193,47 @@ export async function PATCH(request: Request) {
         !hasCommerceOrderCheckoutButtonMessage(order)
     );
     const customerCheckoutUrl = checkout.checkoutUrl ? getCommerceOrderPublicCheckoutUrl(order) : "";
+
+    await recordRevenueConversionEvent({
+      supabase: serviceSupabase,
+      userId: user.id,
+      instagramSenderId,
+      conversationId,
+      eventType: alreadyConfirmed ? "order_confirmation_replayed" : "order_confirmed",
+      outcomeType: "purchase_product",
+      status: "pending",
+      value: order.amount,
+      currency: order.currency,
+      commerceOrder: order,
+      metadata: {
+        checkoutCreated: checkout.checkoutCreated,
+        checkoutConfigured: checkout.checkoutConfigured,
+        source: "commerce_orders_patch",
+      },
+    }).catch((rosError) => {
+      console.error("Commerce order ROS event error:", rosError);
+    });
+
+    if (checkout.checkoutUrl) {
+      await recordRevenueConversionEvent({
+        supabase: serviceSupabase,
+        userId: user.id,
+        instagramSenderId,
+        conversationId,
+        eventType: "checkout_created",
+        outcomeType: "purchase_product",
+        status: "pending",
+        value: order.amount,
+        currency: order.currency,
+        commerceOrder: order,
+        metadata: {
+          checkoutUrl: customerCheckoutUrl,
+          source: "commerce_orders_patch",
+        },
+      }).catch((rosError) => {
+        console.error("Commerce checkout ROS event error:", rosError);
+      });
+    }
 
     if (shouldSendConfirmationText || shouldSendCheckoutButton) {
       const account = await getFreshInstagramAccount(serviceSupabase, user.id).catch((accountError) => {

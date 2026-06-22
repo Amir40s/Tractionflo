@@ -8,6 +8,7 @@ export type DashboardTab =
   | "inbox"
   | "instagram-content"
   | "opportunities"
+  | "ros"
   | "audience"
   | "knowledge"
   | "escalations"

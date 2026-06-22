@@ -7,6 +7,7 @@ import {
 } from "@/lib/commerce-orders";
 import logger from "@/lib/logger";
 import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from "@/lib/pusher";
+import { recordRevenueConversionEvent } from "@/lib/revenue-intelligence";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -160,6 +161,27 @@ export async function POST(request: Request) {
         });
 
         if (order?.userId) {
+          await recordRevenueConversionEvent({
+            supabase,
+            userId: order.userId,
+            instagramSenderId: order.instagramSenderId,
+            conversationId: order.conversationId,
+            eventType: "payment_paid",
+            outcomeType: "purchase_product",
+            status: "won",
+            value: order.amount,
+            currency: order.currency,
+            commerceOrder: order,
+            metadata: {
+              source: "stripe-webhook",
+              stripeEventId: event.id || "",
+              checkoutSessionId: session.id || "",
+              paymentIntentId,
+            },
+          }).catch((rosError) => {
+            logger.warn("Could not record ROS paid payment event.", { error: rosError, orderId: order.id });
+          });
+
           await sendCommerceOrderPaymentThankYou(supabase, order, "stripe-webhook-payment-complete");
           await triggerRealtimeNotification([getUserChannel(order.userId), getSuperAdminChannel()], {
             type: "billing",
@@ -181,23 +203,66 @@ export async function POST(request: Request) {
 
     if (event.type === "checkout.session.expired" && object) {
       const session = object as StripeCheckoutSession;
-      await markCommerceOrderPaymentFailed(supabase, {
+      const failedOrder = await markCommerceOrderPaymentFailed(supabase, {
         orderId: getOrderIdFromStripeObject(session),
         userId: getUserIdFromStripeObject(session),
         stripeCheckoutSessionId: session.id || "",
         stripePaymentIntentId: getPaymentIntentId(session),
         reason: "Checkout session expired before payment.",
       });
+
+      if (failedOrder?.userId) {
+        await recordRevenueConversionEvent({
+          supabase,
+          userId: failedOrder.userId,
+          instagramSenderId: failedOrder.instagramSenderId,
+          conversationId: failedOrder.conversationId,
+          eventType: "checkout_expired",
+          outcomeType: "purchase_product",
+          status: "failed",
+          value: failedOrder.amount,
+          currency: failedOrder.currency,
+          commerceOrder: failedOrder,
+          metadata: {
+            source: "stripe-webhook",
+            checkoutSessionId: session.id || "",
+          },
+        }).catch((rosError) => {
+          logger.warn("Could not record ROS checkout expired event.", { error: rosError, orderId: failedOrder.id });
+        });
+      }
     }
 
     if (event.type === "payment_intent.payment_failed" && object) {
       const paymentIntent = object as StripePaymentIntent;
-      await markCommerceOrderPaymentFailed(supabase, {
+      const failedOrder = await markCommerceOrderPaymentFailed(supabase, {
         orderId: getOrderIdFromStripeObject(paymentIntent),
         userId: getUserIdFromStripeObject(paymentIntent),
         stripePaymentIntentId: paymentIntent.id || "",
         reason: paymentIntent.last_payment_error?.message || "Payment failed.",
       });
+
+      if (failedOrder?.userId) {
+        await recordRevenueConversionEvent({
+          supabase,
+          userId: failedOrder.userId,
+          instagramSenderId: failedOrder.instagramSenderId,
+          conversationId: failedOrder.conversationId,
+          eventType: "payment_failed",
+          outcomeType: "purchase_product",
+          status: "failed",
+          value: failedOrder.amount,
+          currency: failedOrder.currency,
+          commerceOrder: failedOrder,
+          metadata: {
+            source: "stripe-webhook",
+            paymentIntentId: paymentIntent.id || "",
+            reason: paymentIntent.last_payment_error?.message || "Payment failed.",
+          },
+        }).catch((rosError) => {
+          logger.warn("Could not record ROS payment failed event.", { error: rosError, orderId: failedOrder.id });
+        });
+      }
     }
 
     return NextResponse.json({ received: true });

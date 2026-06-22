@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "migration:up": "node scripts/run-commerce-migration.cjs"
+    "migration:up": "node scripts/run-commerce-migration.cjs",
+    "migration:ros": "node scripts/run-ros-migration.cjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
