@@ -80,6 +80,12 @@ type InstagramWebhookMessageEvent = {
     quick_reply?: {
       payload?: string;
     };
+    attachments?: {
+      type?: string;
+      payload?: {
+        url?: string;
+      };
+    }[];
     reply_to?: {
       story?: {
         id?: string;
@@ -102,6 +108,8 @@ type InstagramParticipantProfile = {
   id?: string;
   username?: string;
   name?: string;
+  profile_pic?: string;
+  picture?: string | { data?: { url?: string }; url?: string };
 };
 
 type InstagramGraphError = {
@@ -160,10 +168,35 @@ async function getSenderMessageCount(supabase: SupabaseServiceClient, senderId: 
   return count || 0;
 }
 
+function getWebhookAttachmentText(message?: InstagramWebhookMessageEvent['message']) {
+  const attachment = message?.attachments?.find((item) => item.payload?.url);
+
+  if (!attachment?.payload?.url) {
+    return '';
+  }
+
+  const type = attachment.type?.trim() || 'attachment';
+  return `[${type} attachment] ${attachment.payload.url}`;
+}
+
+function getProfilePictureUrl(value: unknown) {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as { data?: { url?: unknown }; url?: unknown };
+  const url = record.data?.url || record.url;
+  return typeof url === 'string' && url.trim() ? url.trim() : undefined;
+}
+
 async function fetchParticipantProfile(accessToken: string, participantId: string) {
   try {
     const profileUrl = new URL(`https://graph.instagram.com/v21.0/${participantId}`);
-    profileUrl.searchParams.set('fields', 'id,username,name');
+    profileUrl.searchParams.set('fields', 'id,username,name,profile_pic');
     profileUrl.searchParams.set('access_token', accessToken);
 
     const response = await fetch(profileUrl.toString(), { cache: 'no-store' });
@@ -175,9 +208,17 @@ async function fetchParticipantProfile(accessToken: string, participantId: strin
       throw new Error(data.error?.message || 'Could not load Instagram participant profile');
     }
 
-    return data;
+    return {
+      id: typeof data.id === 'string' && data.id.trim() ? data.id.trim() : participantId,
+      username: typeof data.username === 'string' && data.username.trim() ? data.username.trim() : undefined,
+      name: typeof data.name === 'string' && data.name.trim() ? data.name.trim() : undefined,
+      profile_pic: getProfilePictureUrl(data.profile_pic) || getProfilePictureUrl(data.picture),
+    } satisfies InstagramParticipantProfile;
   } catch (error) {
-    console.error('Instagram webhook participant profile error:', error);
+    logger.warn('Instagram webhook participant profile unavailable.', {
+      error,
+      participantId,
+    });
     return { id: participantId } satisfies InstagramParticipantProfile;
   }
 }
@@ -1090,8 +1131,10 @@ export async function POST(request: Request) {
       for (const entry of body.entry || []) {
         for (const msg of (entry.messaging || []) as InstagramWebhookMessageEvent[]) {
           const quickReplyPayload = msg.message?.quick_reply?.payload?.trim() || '';
+          const attachmentText = getWebhookAttachmentText(msg.message);
           const displayText =
             msg.message?.text?.trim() ||
+            attachmentText ||
             (quickReplyPayload === 'CONFIRM_ORDER' ? 'Confirm order' : quickReplyPayload);
           const automationText = quickReplyPayload || displayText;
           const mid = msg.message?.mid || '';
@@ -1111,12 +1154,33 @@ export async function POST(request: Request) {
             if (story) {
               dbText = `__STORY_REPLY__:${JSON.stringify(story)}__TEXT__:${displayText}`;
             }
+            const connectedAccount = await getFreshInstagramAccountByIgUserId(supabase, recipientId).catch((accountError) => {
+              logger.warn('Could not resolve connected Instagram account while storing inbound webhook message.', {
+                error: accountError,
+                recipientId,
+              });
+              return null;
+            });
+            const participant = connectedAccount?.access_token
+              ? await fetchParticipantProfile(connectedAccount.access_token, senderId).catch((participantError) => {
+                  logger.warn('Could not resolve Instagram participant while storing inbound webhook message.', {
+                    error: participantError,
+                    senderId,
+                  });
+                  return null;
+                })
+              : null;
 
             messagesToInsert.push({
               mid,
-              sender_id: senderId,
+              userId: connectedAccount?.user_id || null,
+              conversationId: senderId,
+              senderId,
+              recipientId,
               text: dbText,
               timestamp: msg.timestamp,
+              rawEvent: msg as Record<string, unknown>,
+              participant,
             });
 
             automationEvents.push({
@@ -1134,18 +1198,26 @@ export async function POST(request: Request) {
       const insertedMids = new Set<string>();
       if (messagesToInsert.length > 0) {
         for (const msgToInsert of messagesToInsert) {
-          const { error: insertError } = await supabase
-            .from('messages')
-            .insert(msgToInsert);
-
-          if (!insertError) {
+          try {
+            await storeInstagramMessage({
+              supabase,
+              mid: msgToInsert.mid,
+              userId: msgToInsert.userId,
+              conversationId: msgToInsert.conversationId,
+              senderId: msgToInsert.senderId,
+              recipientId: msgToInsert.recipientId,
+              direction: 'inbound',
+              text: msgToInsert.text,
+              timestamp: msgToInsert.timestamp,
+              rawEvent: msgToInsert.rawEvent,
+              metadata: {
+                source: 'meta-webhook',
+                participant: msgToInsert.participant || undefined,
+              },
+            });
             insertedMids.add(msgToInsert.mid);
-          } else {
-            if (insertError.code === '23505') {
-              logger.info('Duplicate message received concurrently, skipping processing:', { mid: msgToInsert.mid });
-            } else {
-              logger.error('Failed to insert message into Supabase:', { error: insertError, mid: msgToInsert.mid });
-            }
+          } catch (insertError) {
+            logger.error('Failed to insert message into Supabase:', { error: insertError, mid: msgToInsert.mid });
           }
         }
 

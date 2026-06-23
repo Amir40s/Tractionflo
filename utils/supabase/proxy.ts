@@ -36,6 +36,20 @@ function createApiAuthError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
 }
 
+function clearSupabaseAuthCookies(request: NextRequest, response: NextResponse) {
+  request.cookies
+    .getAll()
+    .filter((cookie) => cookie.name.startsWith('sb-') || cookie.name.includes('supabase'))
+    .forEach((cookie) => {
+      response.cookies.set(cookie.name, '', {
+        path: '/',
+        maxAge: 0,
+      })
+    })
+
+  return response
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -79,7 +93,22 @@ export async function updateSession(request: NextRequest) {
 
   const {
     data: { user },
-  } = await supabase.auth.getUser()
+    error: authError,
+  } = await supabase.auth.getUser().catch((error) => ({
+    data: { user: null },
+    error,
+  }))
+
+  if (authError && !isPublicPath(request.nextUrl.pathname)) {
+    if (isApiPath(request.nextUrl.pathname)) {
+      return clearSupabaseAuthCookies(request, createApiAuthError('Please log in again.', 401))
+    }
+
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.searchParams.set('error', 'Please log in again.')
+    return clearSupabaseAuthCookies(request, NextResponse.redirect(url))
+  }
 
   if (!user && !isPublicPath(request.nextUrl.pathname)) {
     if (isApiPath(request.nextUrl.pathname)) {

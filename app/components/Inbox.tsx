@@ -957,7 +957,10 @@ function getLeadSummary(lead: AiLeadInsight | undefined) {
 
 function Avatar({ src, name, size = "h-10 w-10" }: { src: string; name: string; size?: string }) {
   const [failedSrc, setFailedSrc] = useState("");
-  const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const fallbackIdMatch = name.match(/^Instagram user (\d+)$/i);
+  const initials = fallbackIdMatch
+    ? fallbackIdMatch[1].slice(-2)
+    : name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
 
   if (!src || failedSrc === src) {
     return (

@@ -11,6 +11,7 @@ type InstagramParticipant = {
   name?: string;
   username?: string;
   profile_pic?: string;
+  picture?: string | { data?: { url?: string } };
 };
 
 type InstagramAttachment = {
@@ -55,6 +56,53 @@ type InstagramConversation = {
   updated_time?: string;
 };
 
+type NormalizedAttachment = {
+  type: string;
+  url: string;
+  preview_url: string | undefined;
+  width: number | undefined;
+  height: number | undefined;
+  name: string | undefined;
+  mime_type: string | undefined;
+};
+
+type StoredMessageRow = {
+  mid?: string | null;
+  user_id?: string | null;
+  conversation_id?: string | null;
+  sender_id?: string | null;
+  recipient_id?: string | null;
+  direction?: string | null;
+  text?: string | null;
+  timestamp?: number | string | null;
+  raw_event?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string | null;
+};
+
+type StoredConversation = {
+  id: string;
+  participant: { id: string; name: string; username?: string; profile_pic?: string };
+  updated_time: string;
+  messages: {
+    id: string;
+    text: string;
+    attachments: NormalizedAttachment[];
+    from: 'me' | 'user' | 'note';
+    sender_name: string;
+    sender_profile_pic?: string;
+    sender_id: string;
+    time: string;
+    reply_to?: {
+      mid?: string;
+      story?: {
+        id?: string;
+        url?: string;
+      };
+    };
+  }[];
+};
+
 function normalizeAttachments(attachments?: { data?: InstagramAttachment[] }) {
   return (attachments?.data || [])
     .map((attachment) => {
@@ -77,7 +125,7 @@ function normalizeAttachments(attachments?: { data?: InstagramAttachment[] }) {
         mime_type: attachment.mime_type,
       };
     })
-    .filter(Boolean);
+    .filter((attachment): attachment is NormalizedAttachment => Boolean(attachment));
 }
 
 async function getParticipantProfile(participant: InstagramParticipant | undefined, accessToken: string) {
@@ -102,12 +150,387 @@ async function getParticipantProfile(participant: InstagramParticipant | undefin
       id: data.id || participant.id,
       username: data.username || participant.username,
       name: data.name || participant.name,
-      profile_pic: data.profile_pic || participant.profile_pic,
+      profile_pic: getProfilePictureUrl(data.profile_pic) || getProfilePictureUrl(data.picture) || participant.profile_pic,
     };
   } catch (err) {
-    console.error('Instagram participant profile error:', err);
+    console.warn('Instagram participant profile unavailable:', err);
     return participant;
   }
+}
+
+function getMessageTimeMillis(message: Pick<StoredMessageRow, 'timestamp' | 'created_at'>) {
+  if (typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)) {
+    return Math.round(message.timestamp);
+  }
+
+  if (typeof message.timestamp === 'string') {
+    const numeric = Number(message.timestamp);
+    if (Number.isFinite(numeric)) {
+      return Math.round(numeric);
+    }
+
+    const parsed = Date.parse(message.timestamp);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  const createdAt = message.created_at ? Date.parse(message.created_at) : Number.NaN;
+  return Number.isFinite(createdAt) ? createdAt : Date.now();
+}
+
+function getMessageTimeIso(message: Pick<StoredMessageRow, 'timestamp' | 'created_at'>) {
+  return new Date(getMessageTimeMillis(message)).toISOString();
+}
+
+function getStoredConversationId(message: StoredMessageRow, ownIgUserId: string) {
+  const conversationId = String(message.conversation_id || '').trim();
+  const senderId = String(message.sender_id || '').trim();
+  const recipientId = String(message.recipient_id || '').trim();
+  const ownId = String(ownIgUserId || '').trim();
+
+  if (conversationId && conversationId !== ownId) {
+    return conversationId;
+  }
+
+  if (message.direction === 'outbound') {
+    return recipientId || conversationId || senderId || 'unknown';
+  }
+
+  if (senderId && senderId !== ownId) {
+    return senderId;
+  }
+
+  if (recipientId && recipientId !== ownId) {
+    return recipientId;
+  }
+
+  return conversationId || senderId || recipientId || 'unknown';
+}
+
+function parseStoredMessageText(text: string) {
+  if (!text.startsWith('__STORY_REPLY__:') || !text.includes('__TEXT__:')) {
+    return { text };
+  }
+
+  try {
+    const parts = text.split('__TEXT__:', 2);
+    const storyStr = parts[0].substring('__STORY_REPLY__:'.length);
+    const story = JSON.parse(storyStr) as { id?: string; url?: string };
+    return {
+      text: parts[1] || '',
+      reply_to: { story },
+    };
+  } catch (error) {
+    console.error('Failed to parse stored story reply:', error);
+    return { text };
+  }
+}
+
+function getUrlMimeType(url: string) {
+  const cleanUrl = url.split('?')[0].toLowerCase();
+
+  if (/\.(png|jpe?g|gif|webp|avif)$/.test(cleanUrl)) {
+    return 'image/jpeg';
+  }
+
+  if (/\.(mp4|mov|webm|m4v)$/.test(cleanUrl)) {
+    return 'video/mp4';
+  }
+
+  return '';
+}
+
+function getStoredAttachmentType(label: string, url: string) {
+  const lowerLabel = label.toLowerCase();
+  const mimeType = getUrlMimeType(url);
+
+  if (lowerLabel.includes('image') || mimeType.startsWith('image/')) {
+    return 'image';
+  }
+
+  if (lowerLabel.includes('video') || mimeType.startsWith('video/')) {
+    return 'video';
+  }
+
+  return 'file';
+}
+
+function parseStoredMessageContent(rawText: string) {
+  const storyParsed = parseStoredMessageText(rawText);
+  const text = storyParsed.text.trim();
+  const attachmentMatch = text.match(/^\[([^\]]+)\]\s+(https?:\/\/\S+)\s*$/i);
+  const plainUrlMatch = text.match(/^(https?:\/\/\S+)\s*$/i);
+  const attachmentUrl = attachmentMatch?.[2] || plainUrlMatch?.[1] || '';
+
+  if (!attachmentUrl) {
+    return { ...storyParsed, text: storyParsed.text, attachments: [] as NormalizedAttachment[] };
+  }
+
+  const type = getStoredAttachmentType(attachmentMatch?.[1] || '', attachmentUrl);
+
+  if (type === 'file' && !attachmentMatch) {
+    return { ...storyParsed, text: storyParsed.text, attachments: [] as NormalizedAttachment[] };
+  }
+
+  return {
+    ...storyParsed,
+    text: attachmentMatch ? '' : storyParsed.text,
+    attachments: [
+      {
+        type,
+        url: attachmentUrl,
+        preview_url: type === 'image' ? attachmentUrl : undefined,
+        width: undefined,
+        height: undefined,
+        name: type === 'image' ? 'Instagram image attachment' : type === 'video' ? 'Instagram video attachment' : 'Instagram attachment',
+        mime_type: getUrlMimeType(attachmentUrl),
+      },
+    ],
+  };
+}
+
+function getRecord(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function getStringValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getProfilePictureUrl(value: unknown) {
+  const directUrl = getStringValue(value);
+
+  if (directUrl) {
+    return directUrl;
+  }
+
+  const record = getRecord(value);
+  const data = getRecord(record.data);
+  return getStringValue(data.url) || getStringValue(record.url);
+}
+
+function getFallbackParticipantName(participantId: string) {
+  const id = participantId.trim();
+  const suffix = id && id !== 'unknown' ? id.slice(-6) : '';
+  return suffix ? `Instagram user ${suffix}` : 'Instagram user';
+}
+
+function getStoredParticipantCandidate(row: StoredMessageRow, conversationId: string) {
+  const metadataParticipant = getRecord(row.metadata?.participant);
+  const rawSender = getRecord(row.raw_event?.sender);
+  const rawFrom = getRecord(row.raw_event?.from);
+  const rawParticipant = getRecord(row.raw_event?.participant);
+
+  const id =
+    getStringValue(metadataParticipant.id) ||
+    getStringValue(rawParticipant.id) ||
+    getStringValue(rawSender.id) ||
+    getStringValue(rawFrom.id) ||
+    conversationId;
+  const username =
+    getStringValue(metadataParticipant.username) ||
+    getStringValue(rawParticipant.username) ||
+    getStringValue(rawSender.username) ||
+    getStringValue(rawFrom.username);
+  const name =
+    getStringValue(metadataParticipant.name) ||
+    getStringValue(rawParticipant.name) ||
+    getStringValue(rawSender.name) ||
+    getStringValue(rawFrom.name);
+  const profilePic =
+    getStringValue(metadataParticipant.profile_pic) ||
+    getProfilePictureUrl(metadataParticipant.picture) ||
+    getStringValue(rawParticipant.profile_pic) ||
+    getProfilePictureUrl(rawParticipant.picture) ||
+    getStringValue(rawSender.profile_pic) ||
+    getProfilePictureUrl(rawSender.picture) ||
+    getStringValue(rawFrom.profile_pic) ||
+    getProfilePictureUrl(rawFrom.picture);
+
+  return {
+    id,
+    username,
+    name,
+    profile_pic: profilePic,
+  };
+}
+
+function getStoredParticipant(rows: StoredMessageRow[], conversationId: string) {
+  for (const row of rows) {
+    const candidate = getStoredParticipantCandidate(row, conversationId);
+
+    if (candidate.username || candidate.name || candidate.profile_pic) {
+      return {
+        id: candidate.id,
+        username: candidate.username || undefined,
+        name: candidate.name || candidate.username || getFallbackParticipantName(candidate.id),
+        profile_pic: candidate.profile_pic || undefined,
+      };
+    }
+  }
+
+  return {
+    id: conversationId,
+    name: getFallbackParticipantName(conversationId),
+  };
+}
+
+function dedupeStoredMessages(rows: StoredMessageRow[]) {
+  const seen = new Set<string>();
+
+  return rows.filter((row, index) => {
+    const key =
+      row.mid ||
+      `${row.conversation_id || ''}:${row.sender_id || ''}:${row.recipient_id || ''}:${row.timestamp || ''}:${row.text || ''}:${index}`;
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+async function loadStoredMessagesForInbox({
+  supabase,
+  userId,
+  ownIgUserId,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  userId: string;
+  ownIgUserId: string;
+}) {
+  const selectFields =
+    'mid,user_id,conversation_id,sender_id,recipient_id,direction,text,timestamp,raw_event,metadata,created_at';
+  const rows: StoredMessageRow[] = [];
+
+  const { data: ownedRows, error: ownedError } = await supabase
+    .from('messages')
+    .select(selectFields)
+    .eq('user_id', userId)
+    .order('timestamp', { ascending: false })
+    .limit(250);
+
+  if (!ownedError && ownedRows) {
+    rows.push(...(ownedRows as StoredMessageRow[]));
+  } else if (ownedError) {
+    console.error('Stored Instagram messages lookup error:', ownedError);
+  }
+
+  const knownConversationIds = Array.from(
+    new Set(
+      rows
+        .map((row) => getStoredConversationId(row, ownIgUserId))
+        .filter((id) => id && id !== 'unknown' && id !== ownIgUserId)
+    )
+  ).slice(0, 100);
+
+  const legacyQueries = [];
+
+  if (ownIgUserId) {
+    legacyQueries.push(
+      supabase
+        .from('messages')
+        .select(selectFields)
+        .eq('recipient_id', ownIgUserId)
+        .order('timestamp', { ascending: false })
+        .limit(250)
+    );
+  }
+
+  if (knownConversationIds.length > 0) {
+    legacyQueries.push(
+      supabase
+        .from('messages')
+        .select(selectFields)
+        .in('sender_id', knownConversationIds)
+        .order('timestamp', { ascending: false })
+        .limit(250)
+    );
+  }
+
+  const legacyResults = await Promise.all(legacyQueries);
+  for (const result of legacyResults) {
+    if (!result.error && result.data) {
+      rows.push(...(result.data as StoredMessageRow[]));
+    }
+  }
+
+  return dedupeStoredMessages(rows);
+}
+
+async function buildStoredConversations({
+  supabase,
+  userId,
+  ownIgUserId,
+  permissions,
+  limit,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  userId: string;
+  ownIgUserId: string;
+  permissions: ReturnType<typeof getUserPermissionProfile>;
+  limit: number;
+}) {
+  const storedRows = await loadStoredMessagesForInbox({ supabase, userId, ownIgUserId });
+  const grouped = new Map<string, StoredMessageRow[]>();
+
+  for (const row of storedRows) {
+    const conversationId = getStoredConversationId(row, ownIgUserId);
+    if (!conversationId || conversationId === 'unknown') {
+      continue;
+    }
+
+    const existing = grouped.get(conversationId) || [];
+    existing.push(row);
+    grouped.set(conversationId, existing);
+  }
+
+  const storedConversations = await Promise.all(
+    Array.from(grouped.entries()).map(async ([conversationId, rows]) => {
+      const sortedRows = [...rows].sort((first, second) => getMessageTimeMillis(second) - getMessageTimeMillis(first));
+      const latest = sortedRows[0];
+      const participantProfile = getStoredParticipant(sortedRows, conversationId);
+
+      return {
+        id: conversationId,
+        participant: {
+          id: participantProfile.id || conversationId,
+          name: participantProfile.name || participantProfile.username || getFallbackParticipantName(conversationId),
+          username: participantProfile.username,
+          profile_pic: participantProfile.profile_pic,
+        },
+        updated_time: getMessageTimeIso(latest),
+        messages: sortedRows.map((message, index) => {
+          const parsed = parseStoredMessageContent(message.text || '');
+          const isMe =
+            message.direction === 'outbound' ||
+            (ownIgUserId && message.sender_id === ownIgUserId && message.direction !== 'inbound');
+
+          return {
+            id: message.mid || `${conversationId}-${message.timestamp || index}`,
+            text: parsed.text,
+            attachments: parsed.attachments,
+            from: isMe ? 'me' : 'user',
+            sender_name: isMe
+              ? 'You'
+              : participantProfile.name || participantProfile.username || getFallbackParticipantName(conversationId),
+            sender_profile_pic: isMe ? undefined : participantProfile.profile_pic,
+            sender_id: message.sender_id || (isMe ? ownIgUserId : conversationId),
+            time: getMessageTimeIso(message),
+            reply_to: parsed.reply_to,
+          };
+        }),
+      } satisfies StoredConversation;
+    })
+  );
+
+  return filterAssignedConversations(
+    storedConversations.sort((first, second) => Date.parse(second.updated_time) - Date.parse(first.updated_time)),
+    permissions
+  ).slice(0, limit);
 }
 
 export async function GET(request: Request) {
@@ -120,13 +543,24 @@ export async function GET(request: Request) {
       ? 'messages.limit(25){id,message,from,to,created_time,attachments,reply_to}'
       : 'messages{id,message,from,to,created_time,attachments,reply_to}';
     const authSupabase = await createClient();
+    const authResult = await authSupabase.auth.getUser().catch((error) => ({
+      data: { user: null },
+      error,
+    }));
     const {
       data: { user },
       error: authError,
-    } = await authSupabase.auth.getUser();
+    } = authResult;
 
     if (authError) {
-      throw authError;
+      return NextResponse.json(
+        {
+          error: 'Please log in again to load Instagram conversations.',
+          conversations: [],
+          conversation_count: 0,
+        },
+        { status: 401 }
+      );
     }
 
     if (!user) {
@@ -189,15 +623,54 @@ export async function GET(request: Request) {
 
     if (convsData.error) {
       console.error('Instagram Graph API error (conversations):', convsData.error);
-      return NextResponse.json({ error: convsData.error.message, conversations: [], conversation_count: 0 }, { status: 200 });
+      const storedConversations = await buildStoredConversations({
+        supabase,
+        userId: user.id,
+        ownIgUserId: real_ig_user_id,
+        permissions,
+        limit: conversationLimit,
+      });
+
+      return NextResponse.json(
+        {
+          error: storedConversations.length > 0 ? undefined : convsData.error.message,
+          conversations: countOnly ? [] : storedConversations,
+          conversation_count: storedConversations.length,
+          ig_user_id: real_ig_user_id,
+          account,
+          assistant_id: assistantId,
+          assistantId,
+        },
+        { status: 200 }
+      );
     }
 
     const rawConversations: InstagramConversation[] = convsData.data || [];
     const visibleConversations = filterAssignedConversations(rawConversations, permissions);
+    const storedConversations = visibleConversations.length === 0
+      ? await buildStoredConversations({
+          supabase,
+          userId: user.id,
+          ownIgUserId: real_ig_user_id,
+          permissions,
+          limit: conversationLimit,
+        })
+      : [];
 
     if (countOnly) {
       return NextResponse.json({
-        conversation_count: visibleConversations.length,
+        conversation_count: visibleConversations.length || storedConversations.length,
+        ig_user_id: real_ig_user_id,
+        account,
+        assistant_id: assistantId,
+        assistantId,
+      });
+    }
+
+    if (visibleConversations.length === 0 && storedConversations.length > 0) {
+      return NextResponse.json({
+        conversations: storedConversations,
+        conversation_count: storedConversations.length,
         ig_user_id: real_ig_user_id,
         account,
         assistant_id: assistantId,
@@ -243,12 +716,19 @@ export async function GET(request: Request) {
           (p) => p.id !== ownParticipantId && p.username !== meData.username
         );
         const otherParticipantProfile = await getParticipantProfile(otherParticipant, access_token);
-        const otherParticipantProfileId = otherParticipantProfile?.id;
+        const otherParticipantProfileId = otherParticipantProfile?.id || otherParticipant?.id || conv.id;
         const otherParticipantProfilePic = otherParticipantProfile?.profile_pic;
+        const participantFallbackName = getFallbackParticipantName(otherParticipantProfileId);
+        const participantProfile = otherParticipantProfile
+          ? {
+              ...otherParticipantProfile,
+              name: otherParticipantProfile.name || otherParticipantProfile.username || participantFallbackName,
+            }
+          : { id: otherParticipantProfileId, name: participantFallbackName };
 
         return {
           id: conv.id,
-          participant: otherParticipantProfile || { id: 'unknown', name: 'Instagram User' },
+          participant: participantProfile,
           updated_time: conv.updated_time,
           messages: messages.map((m) => {
             let text = m.message || '';
@@ -277,9 +757,9 @@ export async function GET(request: Request) {
               text,
               attachments: normalizeAttachments(m.attachments),
               from: m.from?.id === ownParticipantId || m.from?.username === meData.username ? 'me' : 'user',
-              sender_name: m.from?.name || m.from?.username,
+              sender_name: m.from?.name || m.from?.username || (m.from?.id === ownParticipantId ? 'You' : participantProfile.name),
               sender_profile_pic: m.from?.id === otherParticipantProfileId ? otherParticipantProfilePic : undefined,
-              sender_id: m.from?.id,
+              sender_id: m.from?.id || (m.from?.id === ownParticipantId ? ownParticipantId : otherParticipantProfileId),
               time: m.created_time,
               reply_to,
             };
