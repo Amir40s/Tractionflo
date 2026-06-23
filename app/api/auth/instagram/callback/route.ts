@@ -36,14 +36,14 @@ function isSafeNextPath(value: unknown): value is string {
 function isAllowedReturnOrigin(origin: string, callbackOrigin: string, appBaseUrl: string) {
   const allowedOrigins = new Set([callbackOrigin, new URL(appBaseUrl).origin]);
 
-  if (process.env.NODE_ENV !== 'production') {
-    allowedOrigins.add('http://localhost:3000');
-    allowedOrigins.add('http://localhost:3001');
-    allowedOrigins.add('http://localhost:3002');
-    allowedOrigins.add('http://127.0.0.1:3000');
-    allowedOrigins.add('http://127.0.0.1:3001');
-    allowedOrigins.add('http://127.0.0.1:3002');
-  }
+  // Always allow localhost so local dev OAuth flows redirect back correctly
+  // even when the callback runs on the production Vercel deployment
+  allowedOrigins.add('http://localhost:3000');
+  allowedOrigins.add('http://localhost:3001');
+  allowedOrigins.add('http://localhost:3002');
+  allowedOrigins.add('http://127.0.0.1:3000');
+  allowedOrigins.add('http://127.0.0.1:3001');
+  allowedOrigins.add('http://127.0.0.1:3002');
 
   return allowedOrigins.has(origin);
 }

@@ -6,7 +6,7 @@ export function getInstagramAppCredentials() {
 }
 
 export function getInstagramAuthorizeUrl() {
-  return process.env.INSTAGRAM_OAUTH_AUTHORIZE_URL?.trim() || "https://api.instagram.com/oauth/authorize";
+  return process.env.INSTAGRAM_OAUTH_AUTHORIZE_URL?.trim() || "https://www.instagram.com/oauth/authorize";
 }
 
 export function getNormalizedAppBaseUrl(origin: string) {
