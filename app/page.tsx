@@ -1282,7 +1282,7 @@ export default function LandingPage() {
                 transition={{ delay: 0.1 }}
                 className="text-3xl font-black leading-[1.0] tracking-tight text-black sm:text-4xl lg:text-5xl"
               >
-                Creators don't have <br />
+                Creators don&apos;t have <br />
                 an automation problem. <br />
                 They have a <span className="relative inline-block text-red-500">
                   setup

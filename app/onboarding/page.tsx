@@ -121,12 +121,12 @@ type OnboardingData = {
   partnerships: number;
   superfans: number;
   atRisk: number;
-  estimatedRevenue: number;
+  paidRevenue: number;
+  paidOrderCount: number;
   topOpportunityName: string;
   topOpportunityUsername: string;
   topOpportunityAvatar: string;
   topOpportunityScore: number;
-  topOpportunityValue: number;
   websiteHost: string;
   audienceTopics: {
     icon: LucideIcon;
@@ -160,12 +160,12 @@ const defaultOnboardingData: OnboardingData = {
   partnerships: 0,
   superfans: 0,
   atRisk: 0,
-  estimatedRevenue: 0,
+  paidRevenue: 0,
+  paidOrderCount: 0,
   topOpportunityName: "Instagram lead",
   topOpportunityUsername: "instagram_user",
   topOpportunityAvatar: fallbackLeadAvatar,
   topOpportunityScore: 0,
-  topOpportunityValue: 0,
   websiteHost: "your website",
   audienceTopics: [],
 };
@@ -181,6 +181,79 @@ function getString(value: unknown, fallback = "") {
 function getNumber(value: unknown, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, number) : fallback;
+}
+
+type OnboardingCommerceOrder = {
+  status?: string;
+  paymentStatus?: string;
+  amount?: number | string | null;
+  priceText?: string | null;
+};
+
+function normalizeCommerceOrders(value: unknown): OnboardingCommerceOrder[] {
+  const root = isRecord(value) ? value : {};
+  const orders = Array.isArray(root.orders) ? root.orders : [];
+
+  return orders.filter(isRecord).map((order) => ({
+    status: getString(order.status),
+    paymentStatus: getString(order.paymentStatus),
+    amount: typeof order.amount === "number" || typeof order.amount === "string" ? order.amount : null,
+    priceText: typeof order.priceText === "string" ? order.priceText : null,
+  }));
+}
+
+function getCommerceOrderAmount(order: OnboardingCommerceOrder) {
+  const directAmount = Number(order.amount);
+
+  if (Number.isFinite(directAmount) && directAmount > 0) {
+    return directAmount;
+  }
+
+  const parsedPrice = Number(String(order.priceText || "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(parsedPrice) && parsedPrice > 0 ? parsedPrice : 0;
+}
+
+function isPaidCommerceOrder(order: OnboardingCommerceOrder) {
+  return order.status === "paid" || order.paymentStatus === "paid";
+}
+
+function getProfileImageUrl(...accounts: Record<string, unknown>[]) {
+  for (const account of accounts) {
+    const profileImage =
+      getString(account.profilePictureUrl) ||
+      getString(account.profile_picture_url) ||
+      getString(account.profilePic) ||
+      getString(account.profile_pic) ||
+      getString(account.avatarUrl) ||
+      getString(account.avatar_url);
+
+    if (profileImage.startsWith("https://")) {
+      return profileImage;
+    }
+  }
+
+  return "";
+}
+
+function getFirstMediaImageUrl(content: Record<string, unknown>) {
+  const mediaItems = [
+    ...(Array.isArray(content.posts) ? content.posts : []),
+    ...(Array.isArray(content.stories) ? content.stories : []),
+  ];
+
+  for (const item of mediaItems) {
+    if (!isRecord(item)) {
+      continue;
+    }
+
+    const imageUrl = getString(item.mediaUrl) || getString(item.media_url) || getString(item.thumbnailUrl) || getString(item.thumbnail_url);
+
+    if (imageUrl.startsWith("https://")) {
+      return imageUrl;
+    }
+  }
+
+  return "";
 }
 
 function countMatches(messages: string[], pattern: RegExp) {
@@ -274,7 +347,12 @@ function normalizeConversations(value: unknown): OnboardingConversation[] {
   });
 }
 
-function buildOnboardingData(statusPayload: unknown, contentPayload: unknown, conversationsPayload: unknown): OnboardingData {
+function buildOnboardingData(
+  statusPayload: unknown,
+  contentPayload: unknown,
+  conversationsPayload: unknown,
+  ordersPayload: unknown,
+): OnboardingData {
   const status = isRecord(statusPayload) ? statusPayload : {};
   const content = isRecord(contentPayload) ? contentPayload : {};
   const conversationsRoot = isRecord(conversationsPayload) ? conversationsPayload : {};
@@ -282,6 +360,8 @@ function buildOnboardingData(statusPayload: unknown, contentPayload: unknown, co
   const contentAccount = isRecord(content.account) ? content.account : {};
   const conversationsAccount = isRecord(conversationsRoot.account) ? conversationsRoot.account : {};
   const conversations = normalizeConversations(conversationsRoot.conversations);
+  const paidOrders = normalizeCommerceOrders(ordersPayload).filter(isPaidCommerceOrder);
+  const paidRevenue = paidOrders.reduce((total, order) => total + getCommerceOrderAmount(order), 0);
   const connected = Boolean(status.connected || contentAccount.id || conversationsRoot.ig_user_id);
 
   const username =
@@ -289,6 +369,10 @@ function buildOnboardingData(statusPayload: unknown, contentPayload: unknown, co
     getString(statusAccount.username) ||
     getString(conversationsAccount.username);
   const accountName = getString(contentAccount.name) || getString(statusAccount.name) || username || "Instagram account";
+  const avatarUrl =
+    getProfileImageUrl(contentAccount, statusAccount, conversationsAccount) ||
+    getFirstMediaImageUrl(content) ||
+    fallbackAvatar;
   const followers = getNumber(contentAccount.followersCount);
   const following = getNumber(contentAccount.followingCount);
   const mediaCount = getNumber(contentAccount.mediaCount);
@@ -321,18 +405,13 @@ function buildOnboardingData(statusPayload: unknown, contentPayload: unknown, co
     ? Math.min(99, 45 + (topOpportunity.messages || []).length * 5 + (/price|pricing|booking|book|buy|rate/i.test(topMessageText) ? 18 : 0))
     : 0;
   const opportunityCount = Math.max(highIntentLeads + partnershipSignals + superfans + atRiskSignals, highIntentLeads);
-  const estimatedRevenue =
-    highIntentLeads * 2800 +
-    partnershipSignals * 5000 +
-    Math.min(superfans, 25) * 120 +
-    atRiskSignals * 297;
 
   return {
     connected,
     isLoading: false,
     accountName,
     username: username || "instagram",
-    avatarUrl: fallbackAvatar,
+    avatarUrl,
     followers,
     following,
     mediaCount: Math.max(mediaCount, posts + stories),
@@ -346,7 +425,8 @@ function buildOnboardingData(statusPayload: unknown, contentPayload: unknown, co
     partnerships: partnershipSignals,
     superfans,
     atRisk: atRiskSignals,
-    estimatedRevenue,
+    paidRevenue,
+    paidOrderCount: paidOrders.length,
     topOpportunityName:
       getString(topOpportunity?.participant?.name) ||
       getString(topOpportunity?.participant?.username) ||
@@ -354,7 +434,6 @@ function buildOnboardingData(statusPayload: unknown, contentPayload: unknown, co
     topOpportunityUsername: getString(topOpportunity?.participant?.username, "instagram_user"),
     topOpportunityAvatar: getString(topOpportunity?.participant?.profile_pic, fallbackLeadAvatar),
     topOpportunityScore,
-    topOpportunityValue: Math.max(0, Math.round(topOpportunityScore * 32)),
     websiteHost: username ? `${username}.instagram` : "your website",
     audienceTopics: buildAudienceTopics(userTexts.length ? userTexts : [allUserText].filter(Boolean)),
   };
@@ -695,9 +774,9 @@ function RevenueStep({ data }: { data: OnboardingData }) {
     <div className="space-y-7 text-center">
       <div>
         <p className="text-[64px] font-extrabold leading-none tracking-[-0.04em] text-[#4b3cff] sm:text-[78px]">
-          <AnimatedCounter value={data.estimatedRevenue} prefix="$" duration={1100} />
+          <AnimatedCounter value={data.paidRevenue} prefix="$" duration={1100} />
         </p>
-        <p className="mt-3 text-[16px] font-extrabold text-[#30384d]">Potential Revenue Found</p>
+        <p className="mt-3 text-[16px] font-extrabold text-[#30384d]">Paid Stripe Revenue</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -708,7 +787,7 @@ function RevenueStep({ data }: { data: OnboardingData }) {
       </div>
 
       <SecureNote>
-        Analysis based on {data.followers.toLocaleString()} followers and {data.conversationCount.toLocaleString()} recent conversations.
+        Based on {data.paidOrderCount.toLocaleString()} completed Stripe payment{data.paidOrderCount === 1 ? "" : "s"} and {data.conversationCount.toLocaleString()} recent conversations.
       </SecureNote>
     </div>
   );
@@ -744,22 +823,9 @@ function OpportunityStep({ data }: { data: OnboardingData }) {
               </span>
             </div>
           </div>
-          <div className="rounded-[10px] bg-[#f0edff] px-4 py-3 text-center">
-            <p className="text-[24px] font-extrabold leading-none text-[#4b3cff]">
-              <AnimatedCounter value={data.topOpportunityScore} duration={900} />
-            </p>
-            <p className="mt-1 text-[10px] font-bold text-[#697083]">Lead Score</p>
-          </div>
         </div>
 
-        <div className="mt-5 flex items-center justify-between border-t border-[#edf0f6] pt-4">
-          <span className="text-[13px] font-bold text-[#46506a]">Potential Value</span>
-          <span className="text-[22px] font-extrabold text-[#4b3cff]">
-            <AnimatedCounter value={data.topOpportunityValue} prefix="$" duration={950} />
-          </span>
-        </div>
-
-        <div className="mt-4 rounded-[10px] border border-[#e7eaf2] bg-[#fbfcff] p-4">
+        <div className="mt-5 rounded-[10px] border border-[#e7eaf2] bg-[#fbfcff] p-4">
           <p className="text-[12px] font-extrabold text-black">Why this person is interested:</p>
           <div className="mt-3 space-y-2">
             {reasons.map((item, index) => (
@@ -986,9 +1052,9 @@ function UnlockStep({ data, onFinish }: { data: OnboardingData; onFinish: () => 
         >
           <p className="text-[15px] font-bold text-[#dbe2ff]">Your Audience Contains</p>
           <p className="mt-5 text-[56px] font-extrabold leading-none tracking-[-0.04em] text-[#a999ff]">
-            <AnimatedCounter value={data.estimatedRevenue} prefix="$" duration={1200} />
+            <AnimatedCounter value={data.paidRevenue} prefix="$" duration={1200} />
           </p>
-          <p className="mt-4 text-[18px] font-bold text-[#dbe2ff]">Potential Revenue</p>
+          <p className="mt-4 text-[18px] font-bold text-[#dbe2ff]">Paid Stripe Revenue</p>
           <div className="mt-8 grid grid-cols-4 border-t border-white/10 pt-5 text-center">
             {[
               [data.highIntentLeads, "Hot Leads"],
@@ -1126,10 +1192,13 @@ export default function OnboardingPage() {
           headers: { Accept: "application/json" },
           cache: "no-store" as RequestCache,
         };
-        const [statusResult, contentResult, conversationsResult] = await Promise.allSettled([
+        const scanParams = new URLSearchParams();
+        scanParams.set("scan", "1");
+        const [statusResult, contentResult, conversationsResult, ordersResult] = await Promise.allSettled([
           fetch("/api/auth/instagram/status", requestOptions).then((response) => response.json() as Promise<unknown>),
-          fetch("/api/instagram/content", requestOptions).then((response) => response.json() as Promise<unknown>),
-          fetch("/api/instagram/conversations", requestOptions).then((response) => response.json() as Promise<unknown>),
+          fetch(`/api/instagram/content?${scanParams.toString()}`, requestOptions).then((response) => response.json() as Promise<unknown>),
+          fetch(`/api/instagram/conversations?${scanParams.toString()}`, requestOptions).then((response) => response.json() as Promise<unknown>),
+          fetch("/api/commerce/orders", requestOptions).then((response) => response.json() as Promise<unknown>),
         ]);
 
         if (!isMounted) {
@@ -1141,6 +1210,7 @@ export default function OnboardingPage() {
             statusResult.status === "fulfilled" ? statusResult.value : {},
             contentResult.status === "fulfilled" ? contentResult.value : {},
             conversationsResult.status === "fulfilled" ? conversationsResult.value : {},
+            ordersResult.status === "fulfilled" ? ordersResult.value : {},
           ),
         );
       } catch {

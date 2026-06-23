@@ -148,7 +148,7 @@ export async function runAssistantThread({
     messages: messages.map(m => ({ role: m.role, content: m.content })),
   });
 
-  let run = await openai.beta.threads.runs.createAndPoll(thread.id, {
+  const run = await openai.beta.threads.runs.createAndPoll(thread.id, {
     assistant_id: assistantId,
     additional_instructions: additionalInstructions,
     response_format: responseFormat === "json_object" ? { type: "json_object" } : "auto",
@@ -266,4 +266,3 @@ export async function syncVectorStoreWithStorage({
     logger.error('Error during syncVectorStoreWithStorage:', { error });
   }
 }
-

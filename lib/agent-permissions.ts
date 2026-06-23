@@ -3,6 +3,7 @@ export type PagePermissionId =
   | "inbox"
   | "instagram-content"
   | "opportunities"
+  | "ros"
   | "audience"
   | "knowledge"
   | "escalations"
@@ -24,6 +25,7 @@ export const pagePermissionOptions: { id: PagePermissionId; label: string; detai
   { id: "inbox", label: "Conversations", detail: "Assigned Instagram conversations" },
   { id: "instagram-content", label: "Posts & Stories", detail: "Instagram posts, stories, and comment replies" },
   { id: "opportunities", label: "Opportunities", detail: "Lead pipeline and review cards" },
+  { id: "ros", label: "ROS", detail: "Revenue decisions, outcomes, and learning" },
   { id: "audience", label: "Audience", detail: "Audience segments and insights" },
   { id: "knowledge", label: "Knowledge Base", detail: "Training sources and content" },
   { id: "escalations", label: "Escalations", detail: "Human escalation queue" },

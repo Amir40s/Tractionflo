@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createHmac } from 'crypto';
+import { getInstagramAppCredentials, getInstagramAuthorizeUrl, getNormalizedAppBaseUrl } from '@/lib/instagram-oauth';
 import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
 function getAppBaseUrl(request: NextRequest) {
-  return process.env.NEXT_PUBLIC_APP_URL?.trim() || request.nextUrl.origin;
+  return getNormalizedAppBaseUrl(request.nextUrl.origin);
 }
 
 function createStateSignature({
@@ -58,8 +59,7 @@ function getNextPath(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const appId = process.env.META_APP_ID;
-  const appSecret = process.env.META_APP_SECRET;
+  const { appId, appSecret } = getInstagramAppCredentials();
   const authSupabase = await createClient();
   const {
     data: { user },
@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
   const nextPath = getNextPath(request);
   
   if (!appId || !appSecret) {
-    return NextResponse.json({ error: 'META_APP_ID or META_APP_SECRET is not configured' }, { status: 500 });
+    return NextResponse.json({ error: 'Instagram app ID or app secret is not configured' }, { status: 500 });
   }
 
   if (authError || !user) {
@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
 
   const state = createOAuthState(nextPath, request.nextUrl.origin, user.id, appSecret);
 
-   const scopes = [
+  const scopes = [
     'instagram_business_basic',
     'instagram_business_manage_messages',
     'instagram_business_manage_comments',
@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
     'instagram_business_manage_insights'
   ].join(',');
 
-  const authUrl = new URL('https://www.instagram.com/oauth/authorize');
+  const authUrl = new URL(getInstagramAuthorizeUrl());
   authUrl.searchParams.append('enable_fb_login', '0');
   authUrl.searchParams.append('force_authentication', '1');
   authUrl.searchParams.append('client_id', appId);

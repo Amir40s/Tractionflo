@@ -2,9 +2,15 @@ import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
 import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
 import { detectConversationEscalation, escalationRulesMetadataKey } from '@/lib/conversation-escalation';
-import { buildBookingFollowUpReply, buildBookingMemoryPrompt, shouldUseConversationAwareReply } from '@/lib/conversation-context';
+import { buildBookingFollowUpReply, buildBookingMemoryPrompt } from '@/lib/conversation-context';
+import {
+  buildCatalogOfferReply,
+  findBestCatalogOffer,
+  formatCatalogForPrompt,
+  getInstagramProductCatalogForUser,
+} from '@/lib/instagram-product-catalog';
+import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
 import { runAssistantThread } from '@/lib/openai-assistants';
-import { recordOpenAiUsage } from '@/lib/openai-usage';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
@@ -116,20 +122,26 @@ export async function POST(request: Request) {
     });
 
     if (escalation) {
-      await triggerRealtimeNotification(getUserChannel(user.id), {
-        type: 'escalation',
-        title: `${escalation.label} detected`,
-        body: escalation.summary,
-        url: '/conversations',
-        metadata: {
-          assistantId,
-          category: escalation.intent,
-          urgency: escalation.urgency,
-          urgent: escalation.urgency === 'High',
-        },
-      }).catch((notificationError) => {
-        logger.error('Realtime handoff reply notification error:', { error: notificationError });
-      });
+      const notificationTitle = `${escalation.label} detected`;
+      const notificationBody = escalation.summary;
+      const notificationMetadata = {
+        assistantId,
+        category: escalation.intent,
+        urgency: escalation.urgency,
+        urgent: escalation.urgency === 'High',
+      };
+
+      if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
+        await triggerRealtimeNotification(getUserChannel(user.id), {
+          type: 'escalation',
+          title: notificationTitle,
+          body: notificationBody,
+          url: '/conversations',
+          metadata: notificationMetadata,
+        }).catch((notificationError) => {
+          logger.error('Realtime handoff reply notification error:', { error: notificationError });
+        });
+      }
 
       return NextResponse.json({
         assistantId,
@@ -143,7 +155,6 @@ export async function POST(request: Request) {
     }
 
     const latestUserQuestion = getLatestUserQuestion(payload.messages);
-    const useConversationAwareReply = shouldUseConversationAwareReply(payload.messages);
     const bookingMemoryPrompt = buildBookingMemoryPrompt(payload.messages);
     const bookingFollowUpReply = buildBookingFollowUpReply(payload.messages);
     const serviceSupabase = createSupabaseServiceClient();
@@ -193,6 +204,13 @@ export async function POST(request: Request) {
       .slice(-12)
       .map(formatConversationLine)
       .join('\n');
+    const catalogQuery = `${latestUserQuestion}\n${conversationLines}`;
+    const productCatalog = await getInstagramProductCatalogForUser(serviceSupabase, user.id).catch((catalogError) => {
+      logger.warn('Instagram catalog unavailable during AI reply generation:', { error: catalogError });
+      return [];
+    });
+    const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogQuery);
+    const catalogOffer = findBestCatalogOffer(catalogQuery, productCatalog);
     const reply = await runAssistantThread({
       apiKey,
       assistantId: assistantIdFromMetadata,
@@ -205,6 +223,9 @@ ${getAiBehaviorPrompt(integration.behavior)}
 
 Lead qualification rules: ${integration.leadQualificationRules}
 Preferred CTA: ${integration.ctaMessage}
+
+Auto-detected Instagram product catalog:
+${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
 
 Return only the Instagram DM reply text. Keep it natural, brief, and useful. Do not mention being an AI unless asked. If saved knowledge is provided, do not give a vague answer when an exact saved answer is available.
 Never ask again for booking details that the customer already gave earlier in the conversation.`,
@@ -224,11 +245,12 @@ Write the next best reply.`,
     });
 
 
+    const finalReply = buildCatalogOfferReply(reply, catalogOffer);
 
     await triggerRealtimeNotification(getUserChannel(user.id), {
       type: 'ai',
       title: 'AI reply drafted',
-      body: reply.slice(0, 120),
+      body: finalReply.slice(0, 120),
       url: '/conversations',
       metadata: {
         assistantId,
@@ -243,8 +265,9 @@ Write the next best reply.`,
     return NextResponse.json({
       assistantId,
       assistant_id: assistantId,
-      reply,
+      reply: finalReply,
       autoSend: integration.autoSend,
+      catalogOffer,
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
     });
   } catch (error) {

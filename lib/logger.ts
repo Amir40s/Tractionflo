@@ -1,9 +1,8 @@
 import winston from 'winston';
 
-function serializeMeta(value: any): any {
+function serializeMeta(value: unknown): unknown {
   if (value instanceof Error) {
     return {
-      ...value,
       name: value.name,
       message: value.message,
       stack: value.stack,
@@ -13,9 +12,10 @@ function serializeMeta(value: any): any {
     return value.map(serializeMeta);
   }
   if (value && typeof value === 'object') {
-    const clean: any = {};
+    const clean: Record<string, unknown> = {};
+    const record = value as Record<string, unknown>;
     for (const key of Object.getOwnPropertyNames(value)) {
-      clean[key] = serializeMeta(value[key]);
+      clean[key] = serializeMeta(record[key]);
     }
     return clean;
   }
@@ -32,7 +32,7 @@ const logger = winston.createLogger({
         try {
           const cleanMeta = serializeMeta(meta);
           metaString = `\n${JSON.stringify(cleanMeta, null, 2)}`;
-        } catch (e) {
+        } catch {
           metaString = `\n[Error serializing meta data]`;
         }
       }

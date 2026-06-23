@@ -13,12 +13,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import {
-  getBrowserNotificationPermission,
-  requestBrowserNotificationPermission,
-  showBrowserOsNotification,
-  type BrowserNotificationPermission,
-} from "@/lib/browser-os-notifications";
+import { shouldSuppressRealtimeNotification } from "@/lib/notification-preferences";
 import type { RealtimeNotificationPayload, RealtimeNotificationType } from "@/lib/pusher";
 import {
   mergeRealtimeNotificationHistory,
@@ -72,7 +67,7 @@ function readNotificationHistory() {
   try {
     return normalizeRealtimeNotificationHistory(
       JSON.parse(window.localStorage.getItem(realtimeNotificationHistoryStorageKey) || "[]")
-    );
+    ).filter((notification) => !shouldSuppressRealtimeNotification(notification));
   } catch {
     return [];
   }
@@ -114,46 +109,6 @@ function formatNotificationTime(createdAt: string) {
   return `${Math.round(hours / 24)}d`;
 }
 
-function getPermissionCopy(permission: BrowserNotificationPermission) {
-  if (permission === "granted") {
-    return {
-      label: "OS notifications enabled",
-      detail: "New realtime updates can appear as system notifications.",
-      tone: "bg-[#eafaf0] text-[#13a84f]",
-    };
-  }
-
-  if (permission === "denied") {
-    return {
-      label: "OS notifications blocked",
-      detail: "Allow notifications for localhost:3000 in Chrome and macOS settings.",
-      tone: "bg-[#fff0f3] text-[#df405b]",
-    };
-  }
-
-  if (permission === "unsupported") {
-    return {
-      label: "OS notifications unavailable",
-      detail: "This browser does not support system notifications.",
-      tone: "bg-[#fff3e6] text-[#c07800]",
-    };
-  }
-
-  return {
-    label: "OS notifications need permission",
-    detail: "Enable once, then new Pusher updates can show in the OS.",
-    tone: "bg-[#f0edff] text-[#4b3cff]",
-  };
-}
-
-async function sendPermissionTestNotification() {
-  return showBrowserOsNotification({
-    title: "TractionFlo OS notifications enabled",
-    body: "Realtime Pusher updates can now appear on your desktop.",
-    tag: `tractionflo-os-notifications-enabled-${Date.now()}`,
-  });
-}
-
 export default function NotificationBell({
   ariaLabel = "Notifications",
   className = "",
@@ -165,8 +120,6 @@ export default function NotificationBell({
   const [dropdownPosition, setDropdownPosition] = useState<DropdownPosition | null>(null);
   const [notifications, setNotifications] = useState<RealtimeNotificationPayload[]>(() => readNotificationHistory());
   const [unreadCount, setUnreadCount] = useState(0);
-  const [browserPermission, setBrowserPermission] = useState<BrowserNotificationPermission>(() => getBrowserNotificationPermission());
-  const [testStatus, setTestStatus] = useState("");
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const openRef = useRef(open);
@@ -180,6 +133,10 @@ export default function NotificationBell({
       const notification = (event as CustomEvent<RealtimeNotificationPayload>).detail;
 
       if (!notification?.id) {
+        return;
+      }
+
+      if (shouldSuppressRealtimeNotification(notification)) {
         return;
       }
 
@@ -199,7 +156,7 @@ export default function NotificationBell({
     function handleHistory(event: Event) {
       const history = normalizeRealtimeNotificationHistory(
         (event as CustomEvent<RealtimeNotificationPayload[]>).detail
-      );
+      ).filter((notification) => !shouldSuppressRealtimeNotification(notification));
 
       setNotifications(history);
     }
@@ -277,53 +234,6 @@ export default function NotificationBell({
     window.dispatchEvent(new CustomEvent(realtimeNotificationHistoryEventName, { detail: [] }));
   }
 
-  async function requestOsNotificationPermission() {
-    const nextPermission = await requestBrowserNotificationPermission();
-    setBrowserPermission(nextPermission);
-
-    if (nextPermission === "granted") {
-      await sendPermissionTestNotification();
-    }
-  }
-
-  async function sendRealtimeTestNotification() {
-    setTestStatus("Sending...");
-
-    try {
-      if (getBrowserNotificationPermission() === "default") {
-        await requestOsNotificationPermission();
-      }
-
-      const osNotificationResult = await showBrowserOsNotification({
-        title: "TractionFlo test notification",
-        body: "If you can see this, Chrome can show OS notifications for TractionFlo.",
-        tag: `tractionflo-os-test-${Date.now()}`,
-      });
-      const didSendLocalNotification = osNotificationResult.delivered;
-
-      if (!didSendLocalNotification) {
-        setBrowserPermission(getBrowserNotificationPermission());
-      }
-
-      const response = await fetch("/api/notifications/test", {
-        method: "POST",
-      });
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-
-      if (!response.ok || payload.error) {
-        throw new Error(payload.error || "Could not send test notification");
-      }
-
-      const osMethodLabel = osNotificationResult.method === "service-worker" ? "service worker" : "browser";
-      setTestStatus(didSendLocalNotification ? `OS test sent by ${osMethodLabel}` : "Pusher test sent");
-      window.setTimeout(() => setTestStatus(""), 2200);
-    } catch (error) {
-      setTestStatus(error instanceof Error ? error.message : "Could not send test");
-    }
-  }
-
-  const permissionCopy = getPermissionCopy(browserPermission);
-
   const dropdown = open && dropdownPosition && typeof document !== "undefined"
     ? createPortal(
         <div
@@ -350,35 +260,6 @@ export default function NotificationBell({
                 Clear
               </button>
             ) : null}
-          </div>
-
-          <div className="border-b border-[#edf0f6] px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-extrabold ${permissionCopy.tone}`}>
-                  {permissionCopy.label}
-                </span>
-                <p className="mt-1.5 text-[11px] font-semibold leading-relaxed text-[#697083]">{permissionCopy.detail}</p>
-                {testStatus ? <p className="mt-1 text-[10px] font-extrabold text-[#4b3cff]">{testStatus}</p> : null}
-              </div>
-              {browserPermission === "default" ? (
-                <button
-                  type="button"
-                  onClick={() => void requestOsNotificationPermission()}
-                  className="shrink-0 rounded-[8px] bg-[#3044ff] px-3 py-2 text-[11px] font-extrabold text-white shadow-[0_12px_24px_rgba(48,68,255,0.2)]"
-                >
-                  Enable
-                </button>
-              ) : browserPermission === "granted" ? (
-                <button
-                  type="button"
-                  onClick={() => void sendRealtimeTestNotification()}
-                  className="shrink-0 rounded-[8px] border border-[#dde3ee] bg-white px-3 py-2 text-[11px] font-extrabold text-black shadow-[0_12px_24px_rgba(20,28,53,0.04)] hover:bg-[#f6f7fb]"
-                >
-                  Send test
-                </button>
-              ) : null}
-            </div>
           </div>
 
           <div className="max-h-[360px] overflow-y-auto p-2">
@@ -436,8 +317,6 @@ export default function NotificationBell({
         aria-label={ariaLabel}
         aria-expanded={open}
         onClick={() => {
-          setBrowserPermission(getBrowserNotificationPermission());
-
           setOpen((current) => {
             const nextOpen = !current;
 

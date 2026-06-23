@@ -124,7 +124,9 @@ export default async function LoginPage({
                   <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-success focus:ring-success cursor-pointer" />
                   <span className="text-sm font-semibold text-foreground-muted">Remember Me</span>
                 </label>
-                <a href="#" className="text-sm font-bold text-success hover:underline">Forgot Password?</a>
+                <Link href="/forgot-password" className="text-sm font-bold text-success hover:underline">
+                  Forgot Password?
+                </Link>
               </div>
 
               {error && (

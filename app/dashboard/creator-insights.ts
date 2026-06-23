@@ -209,6 +209,36 @@ type RecentActivityItem = {
   meta?: string;
 };
 
+type CommerceOrderStatus = "pending_confirmation" | "confirmed" | "paid" | "cancelled";
+type CommercePaymentStatus = "unpaid" | "pending" | "paid" | "refunded" | "failed";
+
+type CommerceOrder = {
+  id: string;
+  userId: string;
+  conversationId: string;
+  instagramSenderId: string;
+  instagramUsername: string;
+  productId: string;
+  sourceMediaId: string;
+  productTitle: string;
+  productDescription: string;
+  productImageUrl: string;
+  productPermalink: string;
+  priceText: string;
+  amount: number | null;
+  currency: string;
+  status: CommerceOrderStatus;
+  paymentStatus: CommercePaymentStatus;
+  paymentMethod: string;
+  confirmationText: string;
+  source: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt: string;
+  paidAt: string;
+};
+
 type KnowledgeTabLabel =
   | "All Sources"
   | "FAQs"
@@ -307,6 +337,17 @@ type CreatorLiveSummary = {
   outboundMessageCount: number;
   dateRangeLabel: string;
   estimatedRevenue: number;
+  estimatedPipelineRevenue: number;
+  confirmedRevenue: number;
+  paidRevenue: number;
+  pendingRevenue: number;
+  revenueMode: "estimated" | "confirmed" | "paid";
+  orders: CommerceOrder[];
+  orderCount: number;
+  pendingOrderCount: number;
+  confirmedOrderCount: number;
+  paidOrderCount: number;
+  commerceTableReady: boolean;
   opportunityCount: number;
   escalationCount: number;
   dashboardOpportunities: Opportunity[];
@@ -695,6 +736,47 @@ function getCreatorConversationsForDateRange(
   });
 }
 
+function getCommerceOrderTimestamp(order: CommerceOrder) {
+  const timestamp =
+    order.paidAt ||
+    order.confirmedAt ||
+    order.updatedAt ||
+    order.createdAt;
+
+  return timestamp ? new Date(timestamp).getTime() : 0;
+}
+
+function getCommerceOrdersForDateRange(orders: CommerceOrder[] = [], dateRangePreset: AdminDateRangePreset) {
+  const { startTime, endTime } = getAdminDateRangeWindow(dateRangePreset);
+
+  return orders.filter((order) => {
+    const timestamp = getCommerceOrderTimestamp(order);
+    return Number.isFinite(timestamp) && timestamp >= startTime && timestamp <= endTime;
+  });
+}
+
+function getCommerceOrderAmount(order: CommerceOrder) {
+  return typeof order.amount === "number" && Number.isFinite(order.amount) ? Math.max(0, order.amount) : 0;
+}
+
+function getCommerceRevenueTotals(orders: CommerceOrder[]) {
+  const paidRevenue = orders
+    .filter((order) => order.status === "paid" || order.paymentStatus === "paid")
+    .reduce((total, order) => total + getCommerceOrderAmount(order), 0);
+  const confirmedRevenue = orders
+    .filter((order) => order.status === "confirmed" || order.status === "paid" || order.paymentStatus === "paid")
+    .reduce((total, order) => total + getCommerceOrderAmount(order), 0);
+  const pendingRevenue = orders
+    .filter((order) => order.status === "pending_confirmation" || (order.status === "confirmed" && order.paymentStatus !== "paid"))
+    .reduce((total, order) => total + getCommerceOrderAmount(order), 0);
+
+  return {
+    confirmedRevenue,
+    paidRevenue,
+    pendingRevenue,
+  };
+}
+
 function getCreatorSortedMessages(conversation: InstagramSettingsConversation) {
   return [...conversation.messages].sort((a, b) => getCreatorMessageTime(b) - getCreatorMessageTime(a));
 }
@@ -1067,11 +1149,15 @@ export function buildCreatorLiveSummary(
   instagramAccount?: ConnectedInstagramAccount | null,
   dateRangePreset: AdminDateRangePreset = "7d",
   rules: EscalationRuleSetting[] = defaultEscalationRuleSettings,
+  commerceOrders: CommerceOrder[] = [],
+  commerceTableReady = true,
 ): CreatorLiveSummary {
   const escalationRules = normalizeEscalationRuleSettings(rules);
   const dateRangeConversations = getCreatorConversationsForDateRange(conversations, dateRangePreset);
+  const dateRangeOrders = getCommerceOrdersForDateRange(commerceOrders, dateRangePreset);
   const totalCount = dateRangeConversations.length;
   const sortedConversations = [...dateRangeConversations].sort((a, b) => getCreatorConversationTime(b) - getCreatorConversationTime(a));
+  const sortedOrders = [...dateRangeOrders].sort((a, b) => getCommerceOrderTimestamp(b) - getCommerceOrderTimestamp(a));
   const allMessages = dateRangeConversations.flatMap((conversation) => conversation.messages);
   const inboundMessages = allMessages.filter((message) => message.from === "user");
   const outboundMessages = allMessages.filter((message) => message.from === "me");
@@ -1087,7 +1173,13 @@ export function buildCreatorLiveSummary(
     }))
   );
   const escalatedConversationCount = new Set(escalationRecords.map((record) => record.conversation.id)).size;
-  const estimatedRevenue = opportunityRecords.reduce((total, record) => total + record.opportunity.value, 0);
+  const estimatedPipelineRevenue = opportunityRecords.reduce((total, record) => total + record.opportunity.value, 0);
+  const { confirmedRevenue, paidRevenue, pendingRevenue } = getCommerceRevenueTotals(sortedOrders);
+  const revenueMode: CreatorLiveSummary["revenueMode"] = "paid";
+  const estimatedRevenue = paidRevenue;
+  const pendingOrderCount = sortedOrders.filter((order) => order.status === "pending_confirmation").length;
+  const confirmedOrderCount = sortedOrders.filter((order) => order.status === "confirmed" || order.status === "paid" || order.paymentStatus === "paid").length;
+  const paidOrderCount = sortedOrders.filter((order) => order.status === "paid" || order.paymentStatus === "paid").length;
   const buyerCount = opportunityRecords.filter((record) => record.opportunity.badge === "HIGH INTENT").length;
   const hotLeadCount = opportunityRecords.filter((record) => record.opportunity.classification === "Hot").length;
   const partnershipCount = opportunityRecords.filter((record) => record.opportunity.badge === "PARTNERSHIP").length;
@@ -1225,13 +1317,27 @@ export function buildCreatorLiveSummary(
     {
       label: "Est. value",
       value: formatCreatorMoney(estimatedRevenue),
-      detail: "based on\nreal intent",
+      detail: revenueMode === "paid" ? "from\npaid orders" : "based on\nreal intent",
       tone: "text-[#df405b] bg-[#fff0f3]",
       icon: Crown,
     },
   ];
 
-  const recentActivity: RecentActivityItem[] = sortedConversations.slice(0, 4).map((conversation) => {
+  const orderActivity: RecentActivityItem[] = sortedOrders.slice(0, 4).map((order) => ({
+    title:
+      order.status === "paid" || order.paymentStatus === "paid"
+        ? "Payment recorded"
+        : order.status === "confirmed"
+          ? "Payment pending"
+          : "Order awaiting confirmation",
+    subtitle: `${order.instagramUsername || order.instagramSenderId || "Instagram customer"}: ${truncateCreatorText(order.productTitle, 72)}`,
+    time: formatInstagramRelativeTime(order.paidAt || order.confirmedAt || order.updatedAt || order.createdAt),
+    icon: order.status === "pending_confirmation" ? Clock : ShoppingCart,
+    tone: order.status === "pending_confirmation" ? "text-[#ff850d] bg-[#fff3e6]" : "text-[#13a84f] bg-[#eafaf0]",
+    meta: order.priceText || (order.amount ? formatCreatorMoney(order.amount) : undefined),
+  }));
+
+  const conversationActivity: RecentActivityItem[] = sortedConversations.slice(0, 4).map((conversation) => {
     const opportunity = classifyCreatorOpportunity(conversation, escalationRules);
     const escalation = classifyCreatorEscalation(conversation, escalationRules);
     const preview = getCreatorConversationPreview(conversation);
@@ -1245,6 +1351,7 @@ export function buildCreatorLiveSummary(
       meta: opportunity ? `${formatCreatorMoney(opportunity.value)} est.` : undefined,
     };
   });
+  const recentActivity = [...orderActivity, ...conversationActivity].slice(0, 4);
 
   const audienceMetrics: AudienceMetric[] = [
     { label: "Total Audience", value: formatCreatorInteger(totalCount), change: "from Instagram", tone: "purple", icon: Users },
@@ -1369,6 +1476,17 @@ export function buildCreatorLiveSummary(
     outboundMessageCount: outboundMessages.length,
     dateRangeLabel: getAdminDateRangeLabel(dateRangePreset),
     estimatedRevenue,
+    estimatedPipelineRevenue,
+    confirmedRevenue,
+    paidRevenue,
+    pendingRevenue,
+    revenueMode,
+    orders: sortedOrders,
+    orderCount: sortedOrders.length,
+    pendingOrderCount,
+    confirmedOrderCount,
+    paidOrderCount,
+    commerceTableReady,
     opportunityCount: opportunityRecords.length,
     escalationCount: escalationRecords.length,
     dashboardOpportunities,
@@ -1385,7 +1503,12 @@ export function buildCreatorLiveSummary(
     opportunityMetrics: [
       { label: "Leads Generated", value: formatCreatorInteger(opportunityRecords.length), change: "from Instagram DMs", icon: Users },
       { label: "Hot Leads", value: formatCreatorInteger(hotLeadCount), change: "qualified score 75+", icon: ShoppingCart },
-      { label: "Estimated Revenue", value: formatCreatorMoney(estimatedRevenue), change: "from detected intent", icon: CircleDollarSign },
+      {
+        label: "Collected Revenue",
+        value: formatCreatorMoney(estimatedRevenue),
+        change: "from paid Stripe orders",
+        icon: CircleDollarSign,
+      },
       { label: "Lead Rate", value: formatCreatorPercent(opportunityRecords.length, Math.max(1, totalCount)), change: "of conversations", icon: ChartPie },
     ],
     opportunityCards,

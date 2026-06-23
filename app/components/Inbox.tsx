@@ -36,6 +36,7 @@ import {
   detectConversationEscalations,
   normalizeEscalationRuleSettings,
   type ConversationEscalation,
+  type ConversationEscalationIntent,
   type EscalationRuleSetting,
 } from "@/lib/conversation-escalation";
 import { settingsStateStorageKey } from "@/lib/notification-preferences";
@@ -51,6 +52,11 @@ import {
   type SavedReplySetting,
   type WelcomeMessageSetting,
 } from "@/lib/quick-replies";
+import {
+  escalationWorkflowStateChangedEvent,
+  loadEscalationWorkflowStateFromDatabase,
+  readStoredEscalationWorkflowState,
+} from "../dashboard/escalation-resolution";
 import NotificationBell from "./NotificationBell";
 
 const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
@@ -136,11 +142,54 @@ type SendAPIResponse = {
     message_id?: string;
     text?: string;
   }[];
+  order?: CommerceOrder | null;
+  error?: string;
+};
+
+type CatalogOffer = {
+  id?: string;
+  sourceMediaId?: string;
+  title?: string;
+  priceText?: string;
+  priceAmount?: number | null;
+  currency?: string;
+  description?: string;
+  imageUrl?: string;
+  thumbnailUrl?: string;
+  permalink?: string;
+  confidence?: number;
+  matchScore?: number;
+};
+
+type CommerceOrder = {
+  id: string;
+  conversationId: string;
+  instagramSenderId: string;
+  instagramUsername: string;
+  productTitle: string;
+  productImageUrl?: string;
+  productPermalink?: string;
+  priceText: string;
+  amount: number | null;
+  currency: string;
+  status: "pending_confirmation" | "confirmed" | "paid" | "cancelled";
+  paymentStatus: "unpaid" | "pending" | "paid" | "refunded" | "failed";
+  paymentMethod?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  confirmedAt: string;
+  paidAt: string;
+};
+
+type CommerceOrdersResponse = {
+  orders?: CommerceOrder[];
+  tableReady?: boolean;
   error?: string;
 };
 
 type AiReplyResponse = {
   reply?: string;
+  catalogOffer?: CatalogOffer | null;
   error?: string;
 };
 
@@ -148,6 +197,7 @@ type AiWorkflowResponse = Partial<AiWorkflowRunResult> & {
   error?: string;
   autoSend?: boolean;
   handoff?: boolean;
+  catalogOffer?: CatalogOffer | null;
   escalation?: {
     intent?: string;
     label?: string;
@@ -299,6 +349,16 @@ function shouldAttemptBookingExport(replyText: string) {
   );
 }
 
+function isCommerceConfirmationText(text = "") {
+  const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
+
+  return (
+    normalized === "confirm_order" ||
+    /^(confirm|confirmed|approve|approved|yes|ok|okay|go ahead|done|book it|order it|place order|place the order)$/i.test(normalized) ||
+    /\b(confirm order|confirmed order|approve order|approved order|go ahead|place order|book it|order it|yes confirm|yes please)\b/i.test(normalized)
+  );
+}
+
 type ComposerAttachment = {
   id: string;
   file: File;
@@ -314,6 +374,8 @@ type ComposerSubmitPayload = {
   text: string;
   files: File[];
   localAttachments: NonNullable<IGMessage["attachments"]>;
+  attachmentUrls?: NonNullable<IGMessage["attachments"]>;
+  orderDraft?: Record<string, unknown> | null;
   refreshAfter?: boolean;
   automated?: boolean;
 };
@@ -382,6 +444,215 @@ function getShortMessagePreview(msg: IGMessage | undefined): string {
   return `${words.slice(0, 3).join(" ")}...`;
 }
 
+function hasConfirmOrderPrompt(text = "") {
+  return /\bto confirm this order,\s*reply:\s*confirm order\b/i.test(text) || /\bconfirm this order\b/i.test(text);
+}
+
+const messageUrlRegex = /(https?:\/\/[^\s<>"']+)/g;
+
+function normalizeMessageUrlToken(value = "") {
+  return value.replace(/[)\].,;!?]+$/g, "");
+}
+
+function getMessageUrls(text = "") {
+  return Array.from(text.matchAll(messageUrlRegex))
+    .map((match) => normalizeMessageUrlToken(match[0]))
+    .filter(Boolean);
+}
+
+function isStripeCheckoutUrl(value = "") {
+  try {
+    const url = new URL(value);
+    return url.hostname === "checkout.stripe.com" || url.hostname.endsWith(".checkout.stripe.com");
+  } catch {
+    return false;
+  }
+}
+
+function isTractionFloOrderCheckoutUrl(value = "") {
+  try {
+    const url = new URL(value, typeof window !== "undefined" ? window.location.origin : "https://tractionflo.vercel.app");
+    return /^\/checkout\/order\/[^/]+/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isCommerceCheckoutUrl(value = "") {
+  return isStripeCheckoutUrl(value) || isTractionFloOrderCheckoutUrl(value);
+}
+
+function getStripeCheckoutUrlFromText(text = "") {
+  return getMessageUrls(text).find(isCommerceCheckoutUrl) || "";
+}
+
+function getOrderCheckoutPath(order?: CommerceOrder | null) {
+  return order?.id ? `/checkout/order/${encodeURIComponent(order.id)}?return_to=inbox` : "";
+}
+
+function getMetadataStringValue(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function hasCheckoutCardPrompt(text = "") {
+  return /\btap the stripe checkout button below\b/i.test(text) || /\bsecure checkout link\b/i.test(text);
+}
+
+function isEmptyOutboundTemplateMessage({
+  msg,
+  previousMsg,
+  isMe,
+  commerceOrder,
+  checkoutRedirectUrl,
+}: {
+  msg: IGMessage;
+  previousMsg?: IGMessage;
+  isMe: boolean;
+  commerceOrder?: CommerceOrder | null;
+  checkoutRedirectUrl?: string;
+}) {
+  if (!isMe || msg.text || msg.attachments?.length || !commerceOrder || !checkoutRedirectUrl) {
+    return false;
+  }
+
+  const checkoutButtonMessageId = getMetadataStringValue(commerceOrder.metadata, "checkoutButtonMessageId");
+
+  return checkoutButtonMessageId === msg.id || hasCheckoutCardPrompt(previousMsg?.text || "");
+}
+
+function MessageTextWithLinks({ text, checkoutRedirectUrl = "" }: { text: string; checkoutRedirectUrl?: string }) {
+  const parts = text.split(messageUrlRegex);
+
+  return (
+    <p className="whitespace-pre-wrap break-words">
+      {parts.map((part, index) => {
+        if (!/^https?:\/\//i.test(part)) {
+          return <span key={`${index}-text`}>{part}</span>;
+        }
+
+        const href = normalizeMessageUrlToken(part);
+        const trailingText = part.slice(href.length);
+        const stripeCheckout = isCommerceCheckoutUrl(href);
+        const displayHref = stripeCheckout && checkoutRedirectUrl ? checkoutRedirectUrl : href;
+
+        if (stripeCheckout && !checkoutRedirectUrl) {
+          return (
+            <span key={`${index}-link`}>
+              <span className="font-extrabold text-[#596175]">Stripe checkout link</span>
+              {trailingText}
+            </span>
+          );
+        }
+
+        return (
+          <span key={`${index}-link`}>
+            <a
+              href={displayHref}
+              target="_blank"
+              rel="noreferrer"
+              className="font-extrabold text-[#3044ff] underline decoration-[#3044ff]/30 underline-offset-2"
+            >
+              {stripeCheckout ? "Stripe checkout link" : href}
+            </a>
+            {trailingText}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
+
+function formatInboxPriceText(priceText = "", amount?: number | null, currency = "USD") {
+  const numericPriceText = Number(priceText.replace(/[^\d.-]/g, ""));
+
+  if (priceText && Number.isFinite(numericPriceText) && numericPriceText > 0 && !/[a-z$€£¥₨]/i.test(priceText)) {
+    return currency.toUpperCase() === "USD"
+      ? `$${numericPriceText.toLocaleString("en-US", { maximumFractionDigits: 2 })}`
+      : `${currency.toUpperCase()} ${numericPriceText.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  }
+
+  if (priceText) {
+    return priceText;
+  }
+
+  if (amount) {
+    return currency.toUpperCase() === "USD"
+      ? `$${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })}`
+      : `${currency.toUpperCase()} ${amount.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  }
+
+  return "Price pending";
+}
+
+function CheckoutTemplatePreview({
+  order,
+  checkoutUrl,
+}: {
+  order: CommerceOrder;
+  checkoutUrl: string;
+}) {
+  const price = formatInboxPriceText(order.priceText, order.amount, order.currency);
+
+  return (
+    <div className="overflow-hidden rounded-[12px] border border-[#dfe5f0] bg-white text-left shadow-[0_16px_35px_rgba(20,28,53,0.08)]">
+      {order.productImageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={order.productImageUrl}
+          alt={order.productTitle || "Order checkout"}
+          className="h-44 w-full min-w-[240px] object-cover"
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <div className="flex h-24 w-full min-w-[240px] items-center justify-center bg-[#f4fff7] text-[#14a947]">
+          <CircleDollarSign size={30} strokeWidth={2.35} />
+        </div>
+      )}
+      <div className="space-y-2 bg-[#20242c] p-3 text-white">
+        <div>
+          <p className="line-clamp-2 text-[12px] font-extrabold leading-snug">
+            {order.productTitle || "Instagram order"}
+          </p>
+          <p className="mt-0.5 text-[11px] font-semibold text-white/65">
+            {price} · Secure Stripe checkout
+          </p>
+        </div>
+        <a
+          href={checkoutUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="flex h-9 items-center justify-center gap-2 rounded-[8px] bg-[#14a947] px-3 text-[11px] font-extrabold text-white"
+        >
+          <ExternalLink size={13} strokeWidth={2.5} />
+          Pay with Stripe
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function getInboxCommerceCheckoutUrl(order?: CommerceOrder | null) {
+  const orderCheckoutPath = getOrderCheckoutPath(order);
+
+  if (orderCheckoutPath) {
+    return orderCheckoutPath;
+  }
+
+  const metadata = order?.metadata || {};
+  const keys = ["stripeCheckoutUrl", "checkoutUrl", "checkout_url", "paymentUrl", "payment_url"];
+
+  for (const key of keys) {
+    const value = metadata[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
 function getParticipantName(conv: IGConversation | null) {
   if (!conv) return "Instagram user";
   return conv.participant.username || conv.participant.name || `User ${conv.participant.id.slice(-6)}`;
@@ -397,8 +668,14 @@ function getInstagramProfileUrl(conv: IGConversation | null) {
   return `https://www.instagram.com/${conv.participant.username}/`;
 }
 
+function getLatestUserMessage(conv: IGConversation | null, igUserId?: string) {
+  return [...(conv?.messages || [])]
+    .filter((message) => message.from === "user" && (!igUserId || message.sender_id !== igUserId))
+    .sort((first, second) => new Date(second.time || 0).getTime() - new Date(first.time || 0).getTime())[0];
+}
+
 function getSuggestedReply(conv: IGConversation | null) {
-  const lastUserMsg = conv?.messages.find((m) => m.from === "user");
+  const lastUserMsg = getLatestUserMessage(conv);
   const preview = getMessagePreview(lastUserMsg).toLowerCase();
   const participantName = getParticipantHandle(conv);
 
@@ -433,6 +710,58 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function getCatalogOfferAttachments(offer?: CatalogOffer | null): NonNullable<IGMessage["attachments"]> {
+  const imageUrl = offer?.imageUrl?.trim();
+
+  if (!imageUrl?.startsWith("https://")) {
+    return [];
+  }
+
+  return [
+    {
+      type: "image",
+      url: imageUrl,
+      preview_url: offer?.thumbnailUrl || imageUrl,
+      name: offer?.title || "Instagram product",
+      mime_type: "image/jpeg",
+    },
+  ];
+}
+
+function getCatalogOfferOrderDraft(offer?: CatalogOffer | null) {
+  if (!offer) {
+    return null;
+  }
+
+  return {
+    productId: offer.id || offer.sourceMediaId || offer.title || "instagram-product",
+    sourceMediaId: offer.sourceMediaId || "",
+    productTitle: offer.title || "Instagram product",
+    productDescription: offer.description || "",
+    productImageUrl: offer.imageUrl || "",
+    productPermalink: offer.permalink || "",
+    priceText: offer.priceText || "",
+    amount: offer.priceAmount ?? null,
+    currency: offer.currency || "USD",
+    source: "instagram_ai",
+    metadata: {
+      confidence: offer.confidence || 0,
+      matchScore: offer.matchScore || 0,
+    },
+  };
+}
+
+function mergeCommerceOrders(current: CommerceOrder[], incoming: CommerceOrder[]) {
+  const byId = new Map<string, CommerceOrder>();
+
+  current.forEach((order) => byId.set(order.id, order));
+  incoming.forEach((order) => byId.set(order.id, order));
+
+  return Array.from(byId.values()).sort((first, second) => {
+    return new Date(second.createdAt || 0).getTime() - new Date(first.createdAt || 0).getTime();
+  });
+}
+
 function getConversationsSignature(conversations: IGConversation[]) {
   return conversations
     .map((conversation) =>
@@ -456,6 +785,80 @@ function getConversationsSignature(conversations: IGConversation[]) {
     .join("||");
 }
 
+function getInstagramOAuthErrorFromLocation() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const error = new URLSearchParams(window.location.search).get("ig_error")?.trim();
+  return error || null;
+}
+
+function clearInstagramOAuthErrorFromLocation() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+
+  if (!url.searchParams.has("ig_error")) {
+    return;
+  }
+
+  url.searchParams.delete("ig_error");
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+const instagramAutoSendStorageKey = "tractionflo.instagram.aiAutoSentKeys";
+
+function readInstagramAutoSendKeys() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const value = window.sessionStorage.getItem(instagramAutoSendStorageKey);
+    const parsed = value ? JSON.parse(value) : [];
+
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasInstagramAutoSendKey(key: string) {
+  return readInstagramAutoSendKeys().includes(key);
+}
+
+function rememberInstagramAutoSendKey(key: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const keys = readInstagramAutoSendKeys().filter((item) => item !== key);
+  keys.push(key);
+
+  try {
+    window.sessionStorage.setItem(instagramAutoSendStorageKey, JSON.stringify(keys.slice(-50)));
+  } catch {
+    // Session storage is best-effort; the in-memory ref still guards this render lifetime.
+  }
+}
+
+function forgetInstagramAutoSendKey(key: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const keys = readInstagramAutoSendKeys().filter((item) => item !== key);
+
+  try {
+    window.sessionStorage.setItem(instagramAutoSendStorageKey, JSON.stringify(keys));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function getConversationAiMessages(conv: IGConversation) {
   return [...conv.messages]
     .reverse()
@@ -471,8 +874,41 @@ function getConversationAiMessages(conv: IGConversation) {
     }));
 }
 
-function getInboxEscalations(conv: IGConversation | null): ConversationEscalation[] {
-  return conv ? detectConversationEscalations(getConversationAiMessages(conv), { rules: readEscalationRulesFromStorage() }) : [];
+const inboxEscalationIntentCategories: Record<ConversationEscalationIntent, string> = {
+  refund_request: "refund",
+  complaint: "complaint",
+  partnership: "brand_deal",
+  high_ticket_lead: "vip_lead",
+  bulk_order: "custom_bulk",
+  urgent_order: "urgent_order",
+  human_handoff: "human",
+  complex_question: "complex",
+};
+
+const knownConversationEscalationIntents = new Set<ConversationEscalationIntent>(
+  Object.keys(inboxEscalationIntentCategories) as ConversationEscalationIntent[]
+);
+
+function getInboxEscalationIntent(intent: unknown): ConversationEscalationIntent {
+  return knownConversationEscalationIntents.has(intent as ConversationEscalationIntent)
+    ? (intent as ConversationEscalationIntent)
+    : "complex_question";
+}
+
+function getInboxEscalationId(conversationId: string, escalation: ConversationEscalation) {
+  return `${conversationId}-${inboxEscalationIntentCategories[escalation.intent] || escalation.intent}`;
+}
+
+function getInboxEscalations(conv: IGConversation | null, resolvedEscalationIds: string[] = []): ConversationEscalation[] {
+  if (!conv) {
+    return [];
+  }
+
+  const resolvedIdSet = new Set(resolvedEscalationIds);
+
+  return detectConversationEscalations(getConversationAiMessages(conv), { rules: readEscalationRulesFromStorage() }).filter(
+    (escalation) => !resolvedIdSet.has(getInboxEscalationId(conv.id, escalation))
+  );
 }
 
 function normalizeWorkflowEscalation(escalation?: AiWorkflowResponse["escalation"]): ConversationEscalation | null {
@@ -481,7 +917,7 @@ function normalizeWorkflowEscalation(escalation?: AiWorkflowResponse["escalation
   }
 
   return {
-    intent: "complex_question",
+    intent: getInboxEscalationIntent(escalation.intent),
     label: escalation.label,
     reply: "",
     summary: escalation.summary || "This conversation needs creator attention.",
@@ -558,10 +994,12 @@ function ConvList({
   convs,
   activeId,
   starredConversationIds,
+  resolvedEscalationIds,
   onSelect,
   loading,
   refreshing,
   error,
+  oauthError,
   account,
   onRefresh,
   onDisconnect,
@@ -572,10 +1010,12 @@ function ConvList({
   convs: IGConversation[];
   activeId: string | null;
   starredConversationIds: string[];
+  resolvedEscalationIds: string[];
   onSelect: (id: string) => void;
   loading: boolean;
   refreshing: boolean;
   error: string | null;
+  oauthError: string | null;
   account: IGAccount | null;
   onRefresh: () => void;
   onDisconnect: () => void;
@@ -584,7 +1024,8 @@ function ConvList({
   connectingNew: boolean;
 }) {
   const isConnected = Boolean(account || convs.length > 0 || (error && error !== "No Instagram account connected"));
-  const needsConnection = error === "No Instagram account connected";
+  const showOAuthError = Boolean(oauthError && !account && convs.length === 0);
+  const needsConnection = error === "No Instagram account connected" || showOAuthError;
   const needsReconnect = Boolean(error && /access token|session has expired|oauth/i.test(error));
 
   return (
@@ -642,10 +1083,19 @@ function ConvList({
               <div className="absolute h-3.5 w-3.5 rounded-full border-[3px] border-white" />
               <div className="absolute right-3 top-3 h-1.5 w-1.5 rounded-full bg-white" />
             </div>
-            <p className="text-[13px] font-bold text-black">Instagram disconnected</p>
-            <p className="text-[11px] font-medium leading-[1.5] text-[#596175]">
-              Connect an Instagram Business account to load conversations.
+            <p className="text-[13px] font-bold text-black">
+              {showOAuthError ? "Instagram not connected" : "Instagram disconnected"}
             </p>
+            {showOAuthError ? (
+              <div className="max-w-[240px] rounded-[9px] border border-[#ffd5dd] bg-[#fff7f9] px-3 py-2">
+                <TriangleAlert size={16} className="mx-auto mb-1.5 text-[#df405b]" />
+                <p className="text-[11px] font-semibold leading-[1.45] text-[#df405b]">{oauthError}</p>
+              </div>
+            ) : (
+              <p className="text-[11px] font-medium leading-[1.5] text-[#596175]">
+                Connect an Instagram Business account to load conversations.
+              </p>
+            )}
             <a
               href="/api/auth/instagram?next=/conversations"
               className="mt-1 flex h-8 items-center justify-center rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-semibold text-white"
@@ -707,7 +1157,7 @@ function ConvList({
             const lastMsg = conv.messages.find((message) => message.from !== "note");
             const name = conv.participant.username || conv.participant.name || `User ${conv.participant.id.slice(-6)}`;
             const avatarSrc = conv.participant.profile_pic || "";
-            const escalations = getInboxEscalations(conv);
+            const escalations = getInboxEscalations(conv, resolvedEscalationIds);
             const escalation = escalations[0];
             const isStarred = starredConversationIds.includes(conv.id);
 
@@ -766,10 +1216,25 @@ function ConvList({
 
 // ─── Chat Thread ──────────────────────────────────────────────────────────────
 
-function ChatBubble({ msg, igUserId }: { msg: IGMessage; igUserId: string }) {
+function ChatBubble({
+  msg,
+  igUserId,
+  checkoutRedirectUrl = "",
+  commerceOrder,
+  renderCommerceCheckoutTemplate = false,
+}: {
+  msg: IGMessage;
+  igUserId: string;
+  checkoutRedirectUrl?: string;
+  commerceOrder?: CommerceOrder | null;
+  renderCommerceCheckoutTemplate?: boolean;
+}) {
   const isMe = msg.from === "me" || msg.sender_id === igUserId;
   const hasText = Boolean(msg.text);
   const attachments = msg.attachments || [];
+  const showConfirmQuickReplyPreview = isMe && hasConfirmOrderPrompt(msg.text || "");
+  const stripeCheckoutUrl = getStripeCheckoutUrlFromText(msg.text || "");
+  const checkoutButtonUrl = stripeCheckoutUrl && checkoutRedirectUrl ? checkoutRedirectUrl : "";
 
   return (
     <div className={`flex w-full items-end gap-2.5 ${isMe ? "justify-end sm:pr-4" : "justify-start"}`}>
@@ -855,9 +1320,33 @@ function ChatBubble({ msg, igUserId }: { msg: IGMessage; igUserId: string }) {
           </div>
         )}
         {hasText ? (
-          <p className="whitespace-pre-wrap break-words">{msg.text}</p>
+          <MessageTextWithLinks text={msg.text} checkoutRedirectUrl={checkoutRedirectUrl} />
+        ) : renderCommerceCheckoutTemplate && commerceOrder && checkoutRedirectUrl ? (
+          <CheckoutTemplatePreview order={commerceOrder} checkoutUrl={checkoutRedirectUrl} />
         ) : attachments.length === 0 ? (
           <p className="text-[#596175]">Unsupported message</p>
+        ) : null}
+        {checkoutButtonUrl ? (
+          <a
+            href={checkoutButtonUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 flex h-9 items-center justify-center gap-2 rounded-[9px] bg-[#14a947] px-3 text-[11px] font-extrabold text-white shadow-[0_10px_20px_rgba(20,169,71,0.16)]"
+          >
+            <ExternalLink size={13} strokeWidth={2.5} />
+            Open Stripe checkout
+          </a>
+        ) : null}
+        {showConfirmQuickReplyPreview ? (
+          <div className="mt-2 rounded-[10px] border border-[#d7f3df] bg-white/80 p-2">
+            <p className="mb-1.5 text-[10px] font-extrabold uppercase text-[#0c8d3a]">
+              Instagram quick reply sent
+            </p>
+            <div className="flex h-8 items-center justify-center gap-2 rounded-[8px] bg-[#14a947] px-3 text-[11px] font-extrabold text-white shadow-[0_10px_20px_rgba(20,169,71,0.14)]">
+              <Check size={13} strokeWidth={2.5} />
+              Confirm order
+            </div>
+          </div>
         ) : null}
         <div className={`mt-1 text-[10px] font-medium text-[#596175] ${isMe ? "text-right" : ""}`}>
           {msg.status === "sending" ? "Sending..." : msg.status === "failed" ? "Not sent" : msgTime(msg.time)}
@@ -1218,6 +1707,7 @@ function ChatThread({
   onToggleTakeoverMode,
   isStarred,
   onToggleStarred,
+  commerceOrder,
 }: {
   conv: IGConversation | null;
   igUserId: string;
@@ -1229,6 +1719,7 @@ function ChatThread({
   onToggleTakeoverMode: () => void;
   isStarred: boolean;
   onToggleStarred: () => void;
+  commerceOrder?: CommerceOrder | null;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const messages = conv ? [...conv.messages].filter((message) => message.from !== "note").reverse() : [];
@@ -1273,6 +1764,7 @@ function ChatThread({
   const takeoverLabel = getTakeoverLabel(takeoverMode);
   const TakeoverStatusIcon = isHumanTakeover ? Users : Sparkles;
   const visibleQuickReplies = quickReplies.filter((reply) => reply.enabled && reply.label.trim() && reply.text.trim());
+  const checkoutRedirectUrl = getOrderCheckoutPath(commerceOrder);
 
   return (
     <main className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-white">
@@ -1389,9 +1881,27 @@ function ChatThread({
           </div>
         ) : (
           <div className="space-y-2">
-            {messages.map((msg) => (
-              <ChatBubble key={msg.id} msg={msg} igUserId={igUserId} />
-            ))}
+            {messages.map((msg, index) => {
+              const isMe = msg.from === "me" || msg.sender_id === igUserId;
+              const renderCommerceCheckoutTemplate = isEmptyOutboundTemplateMessage({
+                msg,
+                previousMsg: messages[index - 1],
+                isMe,
+                commerceOrder,
+                checkoutRedirectUrl,
+              });
+
+              return (
+                <ChatBubble
+                  key={msg.id}
+                  msg={msg}
+                  igUserId={igUserId}
+                  checkoutRedirectUrl={checkoutRedirectUrl}
+                  commerceOrder={commerceOrder}
+                  renderCommerceCheckoutTemplate={renderCommerceCheckoutTemplate}
+                />
+              );
+            })}
             <div ref={bottomRef} />
           </div>
         )}
@@ -1583,6 +2093,11 @@ function SummaryPanel({
   assignmentSavingAgentId,
   assignmentStatus,
   onToggleAgentAssignment,
+  commerceOrder,
+  confirmingOrderId,
+  resolvedEscalationIds,
+  onConfirmPendingOrder,
+  onConfirmLatestInboundOrder,
 }: {
   conv: IGConversation | null;
   igUserId: string;
@@ -1592,13 +2107,18 @@ function SummaryPanel({
   takeoverMode: ConversationTakeoverMode;
   onToggleTakeoverMode: () => void;
   onDraftSuggestedReply: (text: string) => void;
-  onAutoSendAiReply: (text: string, conversationId: string) => Promise<void>;
+  onAutoSendAiReply: (text: string, conversationId: string, catalogOffer?: CatalogOffer | null) => Promise<void>;
   agents: AgentAccount[];
   loadingAgents: boolean;
   canManageAgents: boolean;
   assignmentSavingAgentId: string;
   assignmentStatus: string;
   onToggleAgentAssignment: (agent: AgentAccount) => Promise<void>;
+  commerceOrder: CommerceOrder | null;
+  confirmingOrderId: string;
+  resolvedEscalationIds: string[];
+  onConfirmPendingOrder: (order: CommerceOrder) => Promise<void>;
+  onConfirmLatestInboundOrder: (conversationId: string) => Promise<void>;
 }) {
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [aiWorkflow, setAiWorkflow] = useState<AiWorkflowResponse | null>(null);
@@ -1627,22 +2147,39 @@ function SummaryPanel({
         ].filter(Boolean).join(" ").toLowerCase().includes(trimmedMessageSearch)
       )
     : [];
-  const lastUserMsg = conv?.messages.find(m => m.from === "user" && m.sender_id !== igUserId);
+  const lastUserMsg = getLatestUserMessage(conv, igUserId);
   const lastUserMsgPreview = getMessagePreview(lastUserMsg);
   const knowledgeSummary = aiWorkflow?.knowledge;
   const hasKnowledgeReply = knowledgeSummary?.mode === "direct" || knowledgeSummary?.mode === "context";
-  const localEscalations = getInboxEscalations(conv);
+  const localEscalations = getInboxEscalations(conv, resolvedEscalationIds);
   const workflowEscalation = normalizeWorkflowEscalation(aiWorkflow?.escalation);
-  const escalationCards = localEscalations.length > 0 ? localEscalations : workflowEscalation ? [workflowEscalation] : [];
+  const resolvedEscalationIdSet = new Set(resolvedEscalationIds);
+  const visibleWorkflowEscalation =
+    conv && workflowEscalation && !resolvedEscalationIdSet.has(getInboxEscalationId(conv.id, workflowEscalation))
+      ? workflowEscalation
+      : null;
+  const escalationCards = localEscalations.length > 0 ? localEscalations : visibleWorkflowEscalation ? [visibleWorkflowEscalation] : [];
   const suggestedReply = isHumanTakeover
     ? ""
     : aiWorkflow?.reply ||
       (aiLoading ? "Reading saved knowledge and conversation context..." : getSuggestedReply(conv));
   const leadInsight = aiWorkflow?.lead;
+  const catalogOffer = aiWorkflow?.catalogOffer;
   const aiRefreshKey = conv ? `${conv.id}-${conv.updated_time}-${conv.messages.length}` : "empty";
   const lastMessage = msgs[msgs.length - 1];
   const latestInboundMessage = lastMessage?.from === "user" ? lastMessage : null;
+  const latestInboundIsOrderConfirmation = isCommerceConfirmationText(getMessagePreview(latestInboundMessage || undefined));
+  const commerceOrderIsPending = commerceOrder?.status === "pending_confirmation";
+  const commerceOrderIsPaid = commerceOrder?.status === "paid" || commerceOrder?.paymentStatus === "paid";
+  const commerceOrderCheckoutUrl = getInboxCommerceCheckoutUrl(commerceOrder);
+  const commerceOrderIsAwaitingPayment = Boolean(
+    commerceOrder && !commerceOrderIsPending && !commerceOrderIsPaid
+  );
+  const commerceOrderPrice = commerceOrder
+    ? formatInboxPriceText(commerceOrder.priceText, commerceOrder.amount, commerceOrder.currency)
+    : "Price pending";
   const lastAutoSendKeyRef = useRef("");
+  const confirmationFallbackKeyRef = useRef("");
   const savedConversationNote = conv ? conversationNotes[conv.id] : undefined;
   const noteDraft = conv ? noteDrafts[conv.id] ?? savedConversationNote?.text ?? "" : "";
   const hasConversationNote = Boolean(savedConversationNote?.text.trim());
@@ -1653,6 +2190,7 @@ function SummaryPanel({
       ? formatNoteSavedAt(savedConversationNote.updatedAt)
       : "No notes yet";
   const canSaveConversationNote = Boolean(conv && hasConversationNoteChanges);
+  const autoSendPaused = Boolean(aiWorkflow?.handoff || aiWorkflow?.autoSend === false);
 
   useEffect(() => {
     takeoverModeRef.current = takeoverMode;
@@ -1778,11 +2316,11 @@ function SummaryPanel({
     const reply = aiWorkflow?.reply?.trim();
 
     if (
-      true || // Backend webhook handles auto-sending; disable frontend auto-sending to prevent race conditions and duplicate messages
       !conv ||
       isHumanTakeover ||
       aiLoading ||
       composerStatus.sending ||
+      latestInboundIsOrderConfirmation ||
       !reply ||
       aiWorkflow?.autoSend === false ||
       aiWorkflow?.handoff ||
@@ -1793,14 +2331,15 @@ function SummaryPanel({
 
     const autoSendKey = `${conv?.id || ""}:${latestInboundMessage?.id || ""}:${reply}`;
 
-    if (lastAutoSendKeyRef.current === autoSendKey) {
+    if (lastAutoSendKeyRef.current === autoSendKey || hasInstagramAutoSendKey(autoSendKey)) {
       return;
     }
 
     lastAutoSendKeyRef.current = autoSendKey;
+    rememberInstagramAutoSendKey(autoSendKey);
     setAiStatus("AI takeover active. Sending reply automatically...");
 
-    void onAutoSendAiReply(reply || "", conv?.id || "")
+    void onAutoSendAiReply(reply || "", conv?.id || "", catalogOffer)
       .then(() => {
         if (takeoverModeRef.current !== "human") {
           setAiStatus("AI takeover active. Reply sent automatically.");
@@ -1808,6 +2347,7 @@ function SummaryPanel({
       })
       .catch((error) => {
         lastAutoSendKeyRef.current = "";
+        forgetInstagramAutoSendKey(autoSendKey);
 
         if (takeoverModeRef.current !== "human") {
           setAiStatus(error instanceof Error ? error.message : "AI auto-send failed.");
@@ -1818,12 +2358,33 @@ function SummaryPanel({
     aiWorkflow?.autoSend,
     aiWorkflow?.handoff,
     aiWorkflow?.reply,
+    catalogOffer,
     composerStatus.sending,
     conv,
     isHumanTakeover,
     latestInboundMessage,
+    latestInboundIsOrderConfirmation,
     onAutoSendAiReply,
   ]);
+
+  useEffect(() => {
+    if (!conv || !latestInboundMessage || !latestInboundIsOrderConfirmation) {
+      return undefined;
+    }
+
+    const key = `${conv.id}:${latestInboundMessage.id}:confirm-order`;
+
+    if (confirmationFallbackKeyRef.current === key) {
+      return undefined;
+    }
+
+    confirmationFallbackKeyRef.current = key;
+    const timeout = window.setTimeout(() => {
+      void onConfirmLatestInboundOrder(conv.id);
+    }, 1800);
+
+    return () => window.clearTimeout(timeout);
+  }, [conv, latestInboundMessage, latestInboundIsOrderConfirmation, onConfirmLatestInboundOrder]);
 
   function updateConversationNoteDraft(value: string) {
     if (!conv) {
@@ -1909,7 +2470,7 @@ function SummaryPanel({
             </button>
           </div>
         ) : (
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 overflow-hidden">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
             {conv && profileUrl ? (
               <a
                 href={profileUrl}
@@ -2100,6 +2661,70 @@ function SummaryPanel({
                 onToggleTakeoverMode={onToggleTakeoverMode}
               />
 
+              {commerceOrder ? (
+                <div className="mt-3 rounded-[10px] border border-[#d9f5e1] bg-[#f4fff7] p-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="flex items-center gap-1.5 text-[12px] font-extrabold text-black">
+                        <CircleDollarSign size={14} className="text-[#14a947]" strokeWidth={2.35} />
+                        {commerceOrderIsPending ? "Pending order" : commerceOrderIsPaid ? "Paid order" : "Awaiting payment"}
+                      </h3>
+                      <p className="mt-1 truncate text-[11px] font-bold text-[#253049]">
+                        {commerceOrder.productTitle || "Instagram order"}
+                      </p>
+                      <p className="mt-0.5 text-[11px] font-extrabold text-[#0a9b3f]">
+                        {commerceOrderPrice}
+                      </p>
+                    </div>
+                    <span className="rounded-[7px] bg-white px-2 py-1 text-[10px] font-extrabold text-[#0a9b3f]">
+                      {commerceOrderIsPending ? "Awaiting confirm" : commerceOrderIsPaid ? "Paid" : "Payment pending"}
+                    </span>
+                  </div>
+                  {commerceOrderIsPending ? (
+                    <button
+                      type="button"
+                      onClick={() => void onConfirmPendingOrder(commerceOrder)}
+                      disabled={confirmingOrderId === commerceOrder.id}
+                      className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded-[8px] bg-[#14a947] px-3 text-[11px] font-extrabold text-white shadow-[0_12px_24px_rgba(20,169,71,0.16)] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {confirmingOrderId === commerceOrder.id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} strokeWidth={2.5} />}
+                      Confirm order
+                    </button>
+                  ) : commerceOrderIsAwaitingPayment ? (
+                    <div className="mt-2 space-y-2">
+                      <p className="rounded-[8px] bg-white px-2.5 py-2 text-[11px] font-bold leading-relaxed text-[#176b35]">
+                        Waiting for Stripe payment. This value is not counted in dashboard revenue yet.
+                      </p>
+                      {commerceOrderCheckoutUrl ? (
+                        <a
+                          href={commerceOrderCheckoutUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex h-8 w-full items-center justify-center gap-2 rounded-[8px] border border-[#cdebd6] bg-white px-3 text-[11px] font-extrabold text-[#0a9b3f]"
+                        >
+                          <ExternalLink size={13} strokeWidth={2.5} />
+                          Stripe checkout link sent
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void onConfirmPendingOrder(commerceOrder)}
+                          disabled={confirmingOrderId === commerceOrder.id}
+                          className="flex h-8 w-full items-center justify-center gap-2 rounded-[8px] bg-[#14a947] px-3 text-[11px] font-extrabold text-white shadow-[0_12px_24px_rgba(20,169,71,0.16)] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {confirmingOrderId === commerceOrder.id ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} strokeWidth={2.5} />}
+                          Send payment link
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-2 rounded-[8px] bg-white px-2.5 py-2 text-[11px] font-bold leading-relaxed text-[#176b35]">
+                      Payment received. This value is counted in dashboard revenue.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+
               {!isHumanTakeover ? (
                 <div className="mt-3 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-2.5">
                   <div className="flex items-center justify-between gap-2">
@@ -2233,12 +2858,34 @@ function SummaryPanel({
                       disabled={aiLoading || !suggestedReply}
                       className="text-[11px] font-bold text-[#3044ff] disabled:cursor-not-allowed disabled:opacity-55"
                     >
-                      {aiLoading ? "Thinking" : "Auto-send on"}
+                      {aiLoading ? "Thinking" : autoSendPaused ? "Auto-send paused" : "Auto-send on"}
                     </button>
                   </div>
                   <div className="rounded-[8px] border border-[#dde3ee] bg-white p-2.5 text-[12px] leading-[1.35] text-[#252c41]">
                     {suggestedReply}
                   </div>
+                  {catalogOffer?.imageUrl ? (
+                    <div className="mt-2 flex gap-2 rounded-[8px] border border-[#dde3ee] bg-[#fbfcff] p-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={catalogOffer.thumbnailUrl || catalogOffer.imageUrl}
+                        alt={catalogOffer.title || "Instagram product"}
+                        className="h-12 w-12 shrink-0 rounded-[7px] object-cover"
+                      />
+                      <div className="min-w-0">
+                        <div className="truncate text-[11px] font-extrabold text-black">{catalogOffer.title || "Matched product"}</div>
+                        {catalogOffer.priceText ? (
+                          <div className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-[#0a9b3f]">
+                            <CircleDollarSign size={12} />
+                            {catalogOffer.priceText}
+                          </div>
+                        ) : null}
+                        <div className="mt-0.5 line-clamp-2 text-[10px] font-medium leading-[1.25] text-[#596175]">
+                          Product image will be sent with the AI reply.
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => {
@@ -2248,7 +2895,7 @@ function SummaryPanel({
                     className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded-[7px] bg-[#0d1118] text-[12px] font-semibold text-white opacity-70"
                   >
                     {composerStatus.sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-                    AI sends automatically
+                    {autoSendPaused ? "Human review required" : "AI sends automatically"}
                   </button>
                 </div>
               ) : null}
@@ -2276,6 +2923,7 @@ export default function Inbox() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [connectingNew, setConnectingNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [composerStatus, setComposerStatus] = useState<ComposerStatus>({
     sending: false,
@@ -2290,6 +2938,9 @@ export default function Inbox() {
   const [assignmentStatus, setAssignmentStatus] = useState("");
   const [takeoverModes, setTakeoverModes] = useState<Record<string, ConversationTakeoverMode>>({});
   const [starredConversationIds, setStarredConversationIds] = useState<string[]>([]);
+  const [commerceOrders, setCommerceOrders] = useState<CommerceOrder[]>([]);
+  const [confirmingOrderId, setConfirmingOrderId] = useState("");
+  const [resolvedEscalationIds, setResolvedEscalationIds] = useState<string[]>(() => readStoredEscalationWorkflowState().resolvedIds);
   const hasLoadedInboxRef = useRef(false);
   const activeIdRef = useRef<string | null>(null);
   const activeTakeoverModeRef = useRef<ConversationTakeoverMode>("ai");
@@ -2297,6 +2948,32 @@ export default function Inbox() {
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
+
+  useEffect(() => {
+    const syncResolvedEscalations = () => {
+      setResolvedEscalationIds(readStoredEscalationWorkflowState().resolvedIds);
+    };
+
+    syncResolvedEscalations();
+    void loadEscalationWorkflowStateFromDatabase().catch((error) => {
+      console.error("Escalation workflow state load error:", error);
+    });
+    window.addEventListener("storage", syncResolvedEscalations);
+    window.addEventListener(escalationWorkflowStateChangedEvent, syncResolvedEscalations);
+
+    return () => {
+      window.removeEventListener("storage", syncResolvedEscalations);
+      window.removeEventListener(escalationWorkflowStateChangedEvent, syncResolvedEscalations);
+    };
+  }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setOauthError(getInstagramOAuthErrorFromLocation());
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   const fetchConvs = useCallback(async (options?: { showLoader?: boolean }) => {
     const showLoader = options?.showLoader ?? !hasLoadedInboxRef.current;
@@ -2309,10 +2986,25 @@ export default function Inbox() {
 
     setError(null);
     try {
-      const res = await fetch("/api/instagram/conversations", { cache: "no-store" });
+      const [res, ordersRes] = await Promise.all([
+        fetch("/api/instagram/conversations", { cache: "no-store" }),
+        fetch("/api/commerce/orders", { cache: "no-store" }).catch(() => null),
+      ]);
       const data: APIResponse = await res.json();
+      const ordersData: CommerceOrdersResponse =
+        ordersRes && ordersRes.ok ? await ordersRes.json().catch(() => ({ orders: [] })) : { orders: [] };
+      if (ordersRes?.ok) {
+        setCommerceOrders((current) => mergeCommerceOrders(current, ordersData.orders || []));
+      }
 
-      if (data.error && data.conversations.length === 0) {
+      const responseConversations = data.conversations || [];
+
+      if (data.error && responseConversations.length === 0) {
+        if (data.account || data.ig_user_id) {
+          setOauthError(null);
+          clearInstagramOAuthErrorFromLocation();
+        }
+
         setConvs([]);
         setActiveId(null);
         setIgUserId("");
@@ -2320,7 +3012,12 @@ export default function Inbox() {
         setAccount(data.account ?? null);
         setError(data.error);
       } else {
-        const nextConversations = data.conversations || [];
+        const nextConversations = responseConversations;
+        if (data.account || data.ig_user_id || nextConversations.length > 0) {
+          setOauthError(null);
+          clearInstagramOAuthErrorFromLocation();
+        }
+
         const requestedConversationId =
           typeof window !== "undefined" && !hasLoadedInboxRef.current
             ? new URLSearchParams(window.location.search).get("conversation")
@@ -2378,6 +3075,8 @@ export default function Inbox() {
   const connectNewInstagram = useCallback(async () => {
     setConnectingNew(true);
     setError(null);
+    setOauthError(null);
+    clearInstagramOAuthErrorFromLocation();
 
     window.location.href = "/api/auth/instagram?next=/conversations";
   }, []);
@@ -2477,16 +3176,19 @@ export default function Inbox() {
         return;
       }
 
-      if (!payload.text && payload.files.length === 0) {
+      const attachmentUrls = payload.attachmentUrls || [];
+
+      if (!payload.text && payload.files.length === 0 && attachmentUrls.length === 0) {
         setComposerStatus({ sending: false, error: "Type a message or attach an image/video.", notice: null });
         return;
       }
 
+      const localAttachments = payload.localAttachments.length > 0 ? payload.localAttachments : attachmentUrls;
       const localId = `local-${Date.now()}-${globalThis.crypto.randomUUID()}`;
       const localMessage: IGMessage = {
         id: localId,
         text: payload.text,
-        attachments: payload.localAttachments,
+        attachments: localAttachments,
         from: "me",
         sender_name: account?.name || account?.username || "You",
         sender_id: igUserId,
@@ -2509,23 +3211,68 @@ export default function Inbox() {
       setComposerStatus({ sending: true, error: null, notice: null });
 
       try {
-        const formData = new FormData();
-        formData.append("recipientId", targetConv.participant.id);
-        formData.append("conversationId", targetConv.id);
-        formData.append("text", payload.text);
-        payload.files.forEach((file) => formData.append("files", file));
+        const remoteAttachmentPayload = attachmentUrls.map((attachment) => ({
+          type: attachment.type,
+          url: attachment.url,
+          name: attachment.name,
+          mime_type: attachment.mime_type,
+          preview_url: attachment.preview_url,
+        }));
+        const orderDraft = payload.orderDraft
+          ? {
+              ...payload.orderDraft,
+              conversationId: targetConv.id,
+              instagramSenderId: targetConv.participant.id,
+              instagramUsername: targetConv.participant.username || targetConv.participant.name || "",
+            }
+          : null;
 
-        const response = await fetch("/api/instagram/send", {
-          method: "POST",
-          body: formData,
-        });
+        let response: Response;
+
+        if (payload.files.length > 0) {
+          const formData = new FormData();
+          formData.append("recipientId", targetConv.participant.id);
+          formData.append("conversationId", targetConv.id);
+          formData.append("text", payload.text);
+          if (remoteAttachmentPayload.length > 0) {
+            formData.append("attachmentUrls", JSON.stringify(remoteAttachmentPayload));
+          }
+          if (orderDraft) {
+            formData.append("orderDraft", JSON.stringify(orderDraft));
+          }
+          payload.files.forEach((file) => formData.append("files", file));
+
+          response = await fetch("/api/instagram/send", {
+            method: "POST",
+            body: formData,
+          });
+        } else {
+          response = await fetch("/api/instagram/send", {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              recipientId: targetConv.participant.id,
+              conversationId: targetConv.id,
+              text: payload.text,
+              attachmentUrls: remoteAttachmentPayload,
+              orderDraft,
+            }),
+          });
+        }
         const data: SendAPIResponse = await response.json();
 
         if (!response.ok || data.error) {
           throw new Error(data.error || "Could not send this reply.");
         }
 
-        const firstMessageId = data.sent?.[0]?.message_id;
+        if (data.order) {
+          setCommerceOrders((current) => mergeCommerceOrders(current, [data.order as CommerceOrder]));
+        }
+
+        const firstMessageId = data.sent?.find((item) => item.text)?.message_id || data.sent?.[0]?.message_id;
 
         setConvs((current) =>
           current.map((conv) =>
@@ -2640,6 +3387,13 @@ export default function Inbox() {
   const activeConv = convs.find(c => c.id === activeId) ?? null;
   const activeTakeoverMode: ConversationTakeoverMode = activeConv ? takeoverModes[activeConv.id] || "ai" : "ai";
   const activeConversationIsStarred = Boolean(activeId && starredConversationIds.includes(activeId));
+  const activeCommerceOrder = activeConv
+    ? commerceOrders.find(
+        (order) =>
+          order.status !== "cancelled" &&
+          (order.conversationId === activeConv.id || order.instagramSenderId === activeConv.participant.id)
+      ) || null
+    : null;
 
   useEffect(() => {
     activeTakeoverModeRef.current = activeTakeoverMode;
@@ -2681,6 +3435,117 @@ export default function Inbox() {
     );
   }, []);
 
+  const confirmPendingOrder = useCallback(
+    async (order: CommerceOrder) => {
+      const targetConv = activeIdRef.current ? convs.find((conv) => conv.id === activeIdRef.current) : null;
+
+      setConfirmingOrderId(order.id);
+      setComposerStatus({ sending: false, error: null, notice: null });
+
+      try {
+        const response = await fetch("/api/commerce/orders", {
+          method: "PATCH",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            conversationId: order.conversationId || targetConv?.id || "",
+            instagramSenderId: order.instagramSenderId || targetConv?.participant.id || "",
+            confirmationText: "Confirmed from inbox",
+          }),
+        });
+        const data = (await response.json()) as { order?: CommerceOrder; checkoutUrl?: string; error?: string };
+
+        if (!response.ok || data.error || !data.order) {
+          throw new Error(data.error || "Could not confirm this order.");
+        }
+
+        setCommerceOrders((current) => current.map((item) => (item.id === data.order?.id ? data.order : item)));
+        setComposerStatus({
+          sending: false,
+          error: null,
+          notice: data.checkoutUrl ? "Order confirmed. Stripe checkout link sent." : "Order confirmed. Payment link needs setup.",
+        });
+        window.setTimeout(() => {
+          void fetchConvs({ showLoader: false });
+        }, 800);
+      } catch (error) {
+        setComposerStatus({
+          sending: false,
+          error: error instanceof Error ? error.message : "Could not confirm this order.",
+          notice: null,
+        });
+      } finally {
+        setConfirmingOrderId("");
+      }
+    },
+    [convs, fetchConvs]
+  );
+
+  const confirmLatestInboundOrder = useCallback(
+    async (conversationId: string) => {
+      const targetConv = convs.find((conv) => conv.id === conversationId);
+
+      if (!targetConv) {
+        return;
+      }
+
+      const fallbackText = getConversationAiMessages(targetConv)
+        .map((message) => `${message.from === "me" ? "Business" : "Customer"}: ${message.text || "Sent an attachment"}`)
+        .join("\n");
+
+      try {
+        const response = await fetch("/api/commerce/orders", {
+          method: "PATCH",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            conversationId: targetConv.id,
+            instagramSenderId: targetConv.participant.id,
+            instagramUsername: targetConv.participant.username || targetConv.participant.name || "",
+            confirmationText: "Confirm order",
+            fallbackText,
+            sendConfirmation: true,
+          }),
+        });
+        const data = (await response.json()) as {
+          order?: CommerceOrder;
+          confirmationSent?: boolean;
+          checkoutUrl?: string;
+          error?: string;
+        };
+
+        if (!response.ok || data.error || !data.order) {
+          throw new Error(data.error || "Could not confirm this order.");
+        }
+
+        setCommerceOrders((current) => mergeCommerceOrders(current, [data.order as CommerceOrder]));
+        setComposerStatus({
+          sending: false,
+          error: null,
+          notice: data.checkoutUrl
+            ? data.confirmationSent
+              ? "Order confirmed and Stripe checkout link sent"
+              : "Order confirmed. Stripe checkout link already exists."
+            : "Order confirmed. Payment link needs setup.",
+        });
+        window.setTimeout(() => {
+          void fetchConvs({ showLoader: false });
+        }, 1200);
+      } catch (error) {
+        setComposerStatus({
+          sending: false,
+          error: error instanceof Error ? error.message : "Could not confirm this order.",
+          notice: null,
+        });
+      }
+    },
+    [convs, fetchConvs]
+  );
+
   const draftSuggestedReply = useCallback((text: string) => {
     if (activeTakeoverModeRef.current === "human") {
       return;
@@ -2694,17 +3559,22 @@ export default function Inbox() {
   }, []);
 
   const autoSendAiReply = useCallback(
-    async (text: string, conversationId: string) => {
+    async (text: string, conversationId: string, catalogOffer?: CatalogOffer | null) => {
       if (activeTakeoverModeRef.current === "human") {
         throw new Error("AI auto-send is paused while human takeover is active.");
       }
+
+      const catalogAttachments = getCatalogOfferAttachments(catalogOffer);
+      const orderDraft = getCatalogOfferOrderDraft(catalogOffer);
 
       await submitComposerMessage({
         conversationId,
         mode: "reply",
         text,
         files: [],
-        localAttachments: [],
+        localAttachments: catalogAttachments,
+        attachmentUrls: catalogAttachments,
+        orderDraft,
         refreshAfter: true,
         automated: true,
       });
@@ -2768,10 +3638,12 @@ export default function Inbox() {
         convs={convs}
         activeId={activeId}
         starredConversationIds={starredConversationIds}
+        resolvedEscalationIds={resolvedEscalationIds}
         onSelect={setActiveId}
         loading={loading}
         refreshing={refreshing}
         error={error}
+        oauthError={oauthError}
         account={account}
         onRefresh={() => {
           void fetchConvs({ showLoader: false });
@@ -2792,6 +3664,7 @@ export default function Inbox() {
         onToggleTakeoverMode={toggleTakeoverMode}
         isStarred={activeConversationIsStarred}
         onToggleStarred={toggleActiveConversationStar}
+        commerceOrder={activeCommerceOrder}
       />
       <SummaryPanel
         key={activeConv?.id || "empty-summary"}
@@ -2810,6 +3683,11 @@ export default function Inbox() {
         assignmentSavingAgentId={assignmentSavingAgentId}
         assignmentStatus={assignmentStatus}
         onToggleAgentAssignment={toggleAgentAssignment}
+        commerceOrder={activeCommerceOrder}
+        confirmingOrderId={confirmingOrderId}
+        resolvedEscalationIds={resolvedEscalationIds}
+        onConfirmPendingOrder={confirmPendingOrder}
+        onConfirmLatestInboundOrder={confirmLatestInboundOrder}
       />
     </div>
   );

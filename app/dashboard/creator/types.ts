@@ -8,6 +8,7 @@ export type DashboardTab =
   | "inbox"
   | "instagram-content"
   | "opportunities"
+  | "ros"
   | "audience"
   | "knowledge"
   | "escalations"
@@ -183,6 +184,42 @@ export type RecentActivityItem = {
   meta?: string;
 };
 
+export type CommerceOrderStatus = "pending_confirmation" | "confirmed" | "paid" | "cancelled";
+export type CommercePaymentStatus = "unpaid" | "pending" | "paid" | "refunded" | "failed";
+
+export type CommerceOrder = {
+  id: string;
+  userId: string;
+  conversationId: string;
+  instagramSenderId: string;
+  instagramUsername: string;
+  productId: string;
+  sourceMediaId: string;
+  productTitle: string;
+  productDescription: string;
+  productImageUrl: string;
+  productPermalink: string;
+  priceText: string;
+  amount: number | null;
+  currency: string;
+  status: CommerceOrderStatus;
+  paymentStatus: CommercePaymentStatus;
+  paymentMethod: string;
+  confirmationText: string;
+  source: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt: string;
+  paidAt: string;
+};
+
+export type CommerceOrdersResponse = {
+  orders?: CommerceOrder[];
+  tableReady?: boolean;
+  error?: string;
+};
+
 export type KnowledgeTabLabel =
   | "All Sources"
   | "FAQs"
@@ -339,6 +376,17 @@ export type CreatorLiveSummary = {
   outboundMessageCount: number;
   dateRangeLabel: string;
   estimatedRevenue: number;
+  estimatedPipelineRevenue: number;
+  confirmedRevenue: number;
+  paidRevenue: number;
+  pendingRevenue: number;
+  revenueMode: "estimated" | "confirmed" | "paid";
+  orders: CommerceOrder[];
+  orderCount: number;
+  pendingOrderCount: number;
+  confirmedOrderCount: number;
+  paidOrderCount: number;
+  commerceTableReady: boolean;
   opportunityCount: number;
   escalationCount: number;
   dashboardOpportunities: Opportunity[];

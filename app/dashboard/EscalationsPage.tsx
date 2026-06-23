@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowRight,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -18,6 +19,13 @@ import {
 } from "lucide-react";
 import NotificationBell from "../components/NotificationBell";
 import { formatCreatorInteger } from "./creator-insights";
+import {
+  escalationWorkflowStateChangedEvent,
+  loadEscalationWorkflowStateFromDatabase,
+  readStoredEscalationWorkflowState,
+  saveEscalationWorkflowStateToDatabase,
+} from "./escalation-resolution";
+import { emptyEscalationWorkflowState } from "@/lib/escalation-workflow-state";
 
 type EscalationTab = {
   id: string;
@@ -129,17 +137,24 @@ function EscalationTabs({
 function EscalationCard({
   escalation,
   isSelected,
+  isWorking,
   onViewDetails,
+  onResolve,
 }: {
   escalation: EscalationItem;
   isSelected: boolean;
+  isWorking: boolean;
   onViewDetails: () => void;
+  onResolve: () => void;
 }) {
   const Icon = escalation.icon;
 
   return (
-    <article className={`relative overflow-hidden rounded-[13px] border ${isSelected ? "ring-2 ring-[#3044ff]/20" : ""} ${escalation.borderTone} ${escalation.glowTone} p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:p-5 lg:p-6`}>
-      <span className={`absolute right-6 top-7 h-2.5 w-2.5 rounded-full ${escalation.dotTone}`} />
+    <article
+      onClick={onViewDetails}
+      className={`relative cursor-pointer overflow-hidden rounded-[13px] border transition hover:shadow-[0_26px_70px_rgba(20,28,53,0.045)] ${isSelected ? "ring-2 ring-[#3044ff]/20" : ""} ${escalation.borderTone} ${escalation.glowTone} p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:p-5 lg:p-6`}
+    >
+      {!isWorking ? <span className={`absolute right-6 top-7 h-2.5 w-2.5 rounded-full ${escalation.dotTone}`} /> : null}
 
       <div className="grid gap-5 md:grid-cols-[176px_minmax(0,1fr)]">
         <div className="flex min-w-0 items-start gap-3 md:border-r md:border-[#dfe3ed] md:pr-5">
@@ -175,14 +190,30 @@ function EscalationCard({
                 </span>
               ))}
             </div>
-            <button
-              type="button"
-              onClick={onViewDetails}
-              className="flex h-10 w-full items-center justify-center gap-4 rounded-[8px] border border-[#dde3ee] bg-white text-[12px] font-extrabold text-black shadow-[0_12px_28px_rgba(20,28,53,0.035)] sm:w-[128px]"
-            >
-              View details
-              <ArrowRight size={15} strokeWidth={2.5} />
-            </button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onResolve();
+                }}
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-[#cdeedb] bg-[#eafaf0] px-3 text-[12px] font-extrabold text-[#0a9b3f] shadow-[0_12px_28px_rgba(20,28,53,0.025)] sm:w-[132px]"
+              >
+                <CheckCircle2 size={15} strokeWidth={2.4} />
+                Mark resolved
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onViewDetails();
+                }}
+                className="flex h-10 w-full items-center justify-center gap-4 rounded-[8px] border border-[#dde3ee] bg-white text-[12px] font-extrabold text-black shadow-[0_12px_28px_rgba(20,28,53,0.035)] sm:w-[128px]"
+              >
+                View details
+                <ArrowRight size={15} strokeWidth={2.5} />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -194,10 +225,12 @@ function EscalationDetailPanel({
   escalation,
   rows,
   onClose,
+  onResolve,
 }: {
   escalation?: EscalationItem;
   rows: EscalationDetailRow[];
   onClose: () => void;
+  onResolve: () => void;
 }) {
   if (!escalation) {
     return (
@@ -281,16 +314,26 @@ function EscalationDetailPanel({
         </p>
       </div>
 
-      <button
-        type="button"
-        onClick={() => {
-          window.location.href = `/conversations?conversation=${encodeURIComponent(escalation.conversationId)}`;
-        }}
-        className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.24)]"
-      >
-        <Send size={15} strokeWidth={2.25} />
-        Take over in Inbox
-      </button>
+      <div className="mt-5 grid gap-2 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={onResolve}
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-[#cdeedb] bg-[#eafaf0] text-[12px] font-extrabold text-[#0a9b3f] shadow-[0_18px_36px_rgba(10,155,63,0.08)]"
+        >
+          <CheckCircle2 size={15} strokeWidth={2.35} />
+          Mark resolved
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            window.location.href = `/conversations?conversation=${encodeURIComponent(escalation.conversationId)}`;
+          }}
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.24)]"
+        >
+          <Send size={15} strokeWidth={2.25} />
+          Take over in Inbox
+        </button>
+      </div>
     </aside>
   );
 }
@@ -325,12 +368,24 @@ function buildEscalationDetailRows(escalation?: EscalationItem): EscalationDetai
   ];
 }
 
+function buildVisibleEscalationTabs(tabs: EscalationTab[], escalations: EscalationItem[]) {
+  return tabs.map((tab) => ({
+    ...tab,
+    count: formatCreatorInteger(escalations.filter((escalation) => escalationMatchesTab(escalation, tab.id)).length),
+  }));
+}
+
 export default function EscalationsPage({ summary, isLoading, error }: { summary: CreatorLiveSummary; isLoading: boolean; error: string }) {
   const pageSize = 3;
   const [activeEscalationTabId, setActiveEscalationTabId] = useState("all");
   const [selectedEscalationId, setSelectedEscalationId] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const filteredEscalations = summary.escalations.filter((escalation) => escalationMatchesTab(escalation, activeEscalationTabId));
+  const [escalationWorkflowState, setEscalationWorkflowState] = useState(emptyEscalationWorkflowState);
+  const resolvedEscalationIdSet = new Set(escalationWorkflowState.resolvedIds);
+  const workingEscalationIdSet = new Set(escalationWorkflowState.workingIds);
+  const unresolvedEscalations = summary.escalations.filter((escalation) => !resolvedEscalationIdSet.has(escalation.id));
+  const visibleEscalationTabs = buildVisibleEscalationTabs(summary.escalationTabs, unresolvedEscalations);
+  const filteredEscalations = unresolvedEscalations.filter((escalation) => escalationMatchesTab(escalation, activeEscalationTabId));
   const totalPages = Math.max(1, Math.ceil(filteredEscalations.length / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * pageSize;
@@ -342,6 +397,45 @@ export default function EscalationsPage({ summary, isLoading, error }: { summary
   const showingStart = filteredEscalations.length > 0 ? startIndex + 1 : 0;
   const showingEnd = Math.min(startIndex + paginatedEscalations.length, filteredEscalations.length);
   const paginationPages = Array.from({ length: totalPages }, (_, index) => index + 1);
+
+  useEffect(() => {
+    const syncEscalationWorkflowState = () => {
+      setEscalationWorkflowState(readStoredEscalationWorkflowState());
+    };
+
+    syncEscalationWorkflowState();
+    void loadEscalationWorkflowStateFromDatabase().catch((error) => {
+      console.error("Escalation workflow state load error:", error);
+    });
+    window.addEventListener("storage", syncEscalationWorkflowState);
+    window.addEventListener(escalationWorkflowStateChangedEvent, syncEscalationWorkflowState);
+
+    return () => {
+      window.removeEventListener("storage", syncEscalationWorkflowState);
+      window.removeEventListener(escalationWorkflowStateChangedEvent, syncEscalationWorkflowState);
+    };
+  }, []);
+
+  function handleWorkEscalation(escalationId: string) {
+    if (workingEscalationIdSet.has(escalationId)) {
+      return;
+    }
+
+    void saveEscalationWorkflowStateToDatabase({ workingIds: [escalationId], readIds: [escalationId] }).catch((error) => {
+      console.error("Escalation working state save error:", error);
+    });
+  }
+
+  function handleResolveEscalation(escalationId: string) {
+    const nextFilteredCount = filteredEscalations.filter((escalation) => escalation.id !== escalationId).length;
+    const nextTotalPages = Math.max(1, Math.ceil(nextFilteredCount / pageSize));
+
+    void saveEscalationWorkflowStateToDatabase({ resolvedIds: [escalationId] }).catch((error) => {
+      console.error("Escalation resolve state save error:", error);
+    });
+    setSelectedEscalationId("");
+    setCurrentPage((page) => Math.min(page, nextTotalPages));
+  }
 
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
@@ -369,7 +463,7 @@ export default function EscalationsPage({ summary, isLoading, error }: { summary
         </header>
 
         <EscalationTabs
-          tabs={summary.escalationTabs}
+          tabs={visibleEscalationTabs}
           activeTabId={activeEscalationTabId}
           onTabChange={(tabId) => {
             setActiveEscalationTabId(tabId);
@@ -392,15 +486,20 @@ export default function EscalationsPage({ summary, isLoading, error }: { summary
                   key={escalation.id}
                   escalation={escalation}
                   isSelected={selectedEscalation?.id === escalation.id}
-                  onViewDetails={() => setSelectedEscalationId(escalation.id)}
+                  isWorking={workingEscalationIdSet.has(escalation.id)}
+                  onViewDetails={() => {
+                    handleWorkEscalation(escalation.id);
+                    setSelectedEscalationId(escalation.id);
+                  }}
+                  onResolve={() => handleResolveEscalation(escalation.id)}
                 />
               ))
             ) : (
               <section className="rounded-[13px] border border-dashed border-[#d7deeb] bg-white p-8 text-center shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
                 <TriangleAlert className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
-                <h2 className="mt-3 text-[15px] font-extrabold text-black">No escalation signals yet</h2>
+                <h2 className="mt-3 text-[15px] font-extrabold text-black">No unresolved escalations</h2>
                 <p className="mx-auto mt-2 max-w-[430px] text-[12px] font-medium leading-relaxed text-[#596175]">
-                  Refunds, complaints, damaged orders, wrong sizes, brand deals, VIP buying intent, custom orders, and human handoff requests from real Instagram messages will appear here.
+                  New refunds, complaints, brand deals, urgent orders, VIP leads, and human handoff requests from real Instagram messages will appear here.
                 </p>
               </section>
             )}
@@ -461,10 +560,10 @@ export default function EscalationsPage({ summary, isLoading, error }: { summary
             escalation={selectedEscalation}
             rows={selectedEscalationRows}
             onClose={() => setSelectedEscalationId("")}
+            onResolve={() => selectedEscalation && handleResolveEscalation(selectedEscalation.id)}
           />
         </div>
       </div>
     </main>
   );
 }
-

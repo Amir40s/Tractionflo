@@ -1,11 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowRight, ChevronLeft, ChevronRight, SlidersHorizontal, Target, TrendingUp } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, SlidersHorizontal, Target, TrendingUp } from "lucide-react";
 import { CreatorDateRangeSelect, type AdminDateRangePreset } from "../admin/shared";
 import { formatCreatorInteger } from "../creator-insights";
 import type { CreatorLiveSummary, LeadCategoryFilter, LeadUrgencyFilter, OpportunityPageCard } from "./types";
 import { BrandMark } from "./BrandMark";
+import {
+  loadOpportunityWorkflowStateFromDatabase,
+  opportunityWorkflowStateChangedEvent,
+  readStoredOpportunityWorkflowState,
+  saveOpportunityWorkflowStateToDatabase,
+} from "../opportunity-resolution";
+import { emptyOpportunityWorkflowState } from "@/lib/opportunity-workflow-state";
 
 const opportunityToneClasses = {
   purple: {
@@ -116,7 +123,17 @@ function isOpportunityInLeadCategory(opportunity: OpportunityPageCard, filter: L
 }
 
 
-function OpportunityPageCardView({ opportunity }: { opportunity: OpportunityPageCard }) {
+function OpportunityPageCardView({
+  opportunity,
+  isWorking,
+  onMarkWorking,
+  onResolve,
+}: {
+  opportunity: OpportunityPageCard;
+  isWorking: boolean;
+  onMarkWorking: () => void;
+  onResolve: () => void;
+}) {
   const Icon = opportunity.icon;
   const tone = opportunityToneClasses[opportunity.tone];
   const scoreText = opportunity.risk ?? opportunity.score ?? "0/100";
@@ -124,7 +141,11 @@ function OpportunityPageCardView({ opportunity }: { opportunity: OpportunityPage
   const signals = opportunity.signals?.length ? opportunity.signals : [opportunity.intent || opportunity.subtitle];
 
   return (
-    <article className="flex min-h-[384px] flex-col rounded-[11px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+    <article
+      onClick={onMarkWorking}
+      className="relative flex min-h-[384px] cursor-pointer flex-col rounded-[11px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)] transition hover:shadow-[0_26px_70px_rgba(20,28,53,0.045)]"
+    >
+      {!isWorking ? <span className="absolute right-4 top-4 h-2.5 w-2.5 rounded-full bg-[#13a84f]" /> : null}
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3.5">
           <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] ${tone.tile}`}>
@@ -209,14 +230,28 @@ function OpportunityPageCardView({ opportunity }: { opportunity: OpportunityPage
             ) : null}
           </div>
 
-          <OpportunityReviewButton
-            tone={tone.action}
-            onClick={() => {
-              window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.id)}`;
-            }}
-          >
-            {opportunity.action}
-          </OpportunityReviewButton>
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onResolve();
+              }}
+              className="flex h-9 w-[132px] items-center justify-center gap-2 rounded-[8px] border border-[#cdeedb] bg-[#eafaf0] px-3 text-[12px] font-extrabold text-[#0a9b3f] shadow-[0_12px_28px_rgba(20,28,53,0.025)]"
+            >
+              <CheckCircle2 size={15} strokeWidth={2.4} />
+              Mark resolved
+            </button>
+            <OpportunityReviewButton
+              tone={tone.action}
+              onClick={() => {
+                onMarkWorking();
+                window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.id)}`;
+              }}
+            >
+              {opportunity.action}
+            </OpportunityReviewButton>
+          </div>
         </div>
       </div>
     </article>
@@ -227,7 +262,10 @@ function OpportunityReviewButton({ children, tone, onClick }: { children: string
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
       className={`flex h-9 w-[118px] items-center justify-between rounded-[8px] border border-[#dde2ed] bg-white px-4 text-[12px] font-extrabold shadow-[0_12px_28px_rgba(20,28,53,0.03)] ${tone}`}
     >
       {children}
@@ -253,8 +291,16 @@ export function OpportunitiesPage({
   const [leadUrgencyFilter, setLeadUrgencyFilter] = useState<LeadUrgencyFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [opportunityWorkflowState, setOpportunityWorkflowState] = useState(emptyOpportunityWorkflowState);
+  const resolvedOpportunityIdSet = new Set(opportunityWorkflowState.resolvedIds);
+  const workingOpportunityIdSet = new Set(opportunityWorkflowState.workingIds);
+  const unresolvedOpportunityCards = summary.opportunityCards.filter((opportunity) => !resolvedOpportunityIdSet.has(opportunity.id));
+  const visibleOpportunityTabs = summary.opportunityTabs.map((tab) => ({
+    ...tab,
+    count: formatCreatorInteger(unresolvedOpportunityCards.filter((opportunity) => isOpportunityInLeadCategory(opportunity, getLeadCategoryFromTabLabel(tab.label))).length),
+  }));
   const activeFilterCount = Number(leadCategoryFilter !== "all") + Number(leadUrgencyFilter !== "all");
-  const filteredOpportunityCards = summary.opportunityCards.filter(
+  const filteredOpportunityCards = unresolvedOpportunityCards.filter(
     (opportunity) =>
       isOpportunityInLeadCategory(opportunity, leadCategoryFilter) &&
       (leadUrgencyFilter === "all" || opportunity.urgency === leadUrgencyFilter)
@@ -266,6 +312,44 @@ export function OpportunitiesPage({
   const pageEndIndex = Math.min(pageStartIndex + leadsPerPage, totalFilteredLeads);
   const visibleOpportunityCards = filteredOpportunityCards.slice(pageStartIndex, pageEndIndex);
   const paginationItems = buildLeadPaginationItems(activePage, totalPages);
+
+  useEffect(() => {
+    const syncOpportunityWorkflowState = () => {
+      setOpportunityWorkflowState(readStoredOpportunityWorkflowState());
+    };
+
+    syncOpportunityWorkflowState();
+    void loadOpportunityWorkflowStateFromDatabase().catch((stateError) => {
+      console.error("Lead workflow state load error:", stateError);
+    });
+    window.addEventListener("storage", syncOpportunityWorkflowState);
+    window.addEventListener(opportunityWorkflowStateChangedEvent, syncOpportunityWorkflowState);
+
+    return () => {
+      window.removeEventListener("storage", syncOpportunityWorkflowState);
+      window.removeEventListener(opportunityWorkflowStateChangedEvent, syncOpportunityWorkflowState);
+    };
+  }, []);
+
+  function handleMarkOpportunityWorking(opportunityId: string) {
+    if (workingOpportunityIdSet.has(opportunityId)) {
+      return;
+    }
+
+    void saveOpportunityWorkflowStateToDatabase({ workingIds: [opportunityId], readIds: [opportunityId] }).catch((stateError) => {
+      console.error("Lead working state save error:", stateError);
+    });
+  }
+
+  function handleResolveOpportunity(opportunityId: string) {
+    const nextFilteredCount = filteredOpportunityCards.filter((opportunity) => opportunity.id !== opportunityId).length;
+    const nextTotalPages = Math.max(1, Math.ceil(nextFilteredCount / leadsPerPage));
+
+    void saveOpportunityWorkflowStateToDatabase({ resolvedIds: [opportunityId] }).catch((stateError) => {
+      console.error("Lead resolve state save error:", stateError);
+    });
+    setCurrentPage((page) => Math.min(page, nextTotalPages));
+  }
 
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
@@ -380,7 +464,7 @@ export function OpportunitiesPage({
 
         <div className="-mx-4 mt-5 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:mt-6 lg:px-0">
           <div className="grid w-max auto-cols-[150px] grid-flow-col lg:auto-cols-[190px]">
-            {summary.opportunityTabs.map((tab, index) => {
+            {visibleOpportunityTabs.map((tab, index) => {
               const Icon = tab.icon;
               const tabFilter = getLeadCategoryFromTabLabel(tab.label);
               const isActive = leadCategoryFilter === tabFilter;
@@ -394,7 +478,7 @@ export function OpportunitiesPage({
                   }}
                   className={`relative flex h-11 items-center justify-center gap-2 text-[11px] font-extrabold sm:gap-3 sm:text-[12px] ${
                     isActive ? "text-[#4b3cff]" : "text-black"
-                  } ${index < summary.opportunityTabs.length - 1 ? "border-r border-[#e2e6f0]" : ""}`}
+                  } ${index < visibleOpportunityTabs.length - 1 ? "border-r border-[#e2e6f0]" : ""}`}
                 >
                   <Icon size={17} strokeWidth={isActive ? 2.4 : 2.1} />
                   <span>{tab.label}</span>
@@ -443,7 +527,13 @@ export function OpportunitiesPage({
         {visibleOpportunityCards.length > 0 ? (
           <div className="mt-5 grid gap-4 lg:grid-cols-2">
             {visibleOpportunityCards.map((opportunity) => (
-              <OpportunityPageCardView key={`${opportunity.name}-${opportunity.badge}-${opportunity.time}`} opportunity={opportunity} />
+              <OpportunityPageCardView
+                key={`${opportunity.name}-${opportunity.badge}-${opportunity.time}`}
+                opportunity={opportunity}
+                isWorking={workingOpportunityIdSet.has(opportunity.id)}
+                onMarkWorking={() => handleMarkOpportunityWorking(opportunity.id)}
+                onResolve={() => handleResolveOpportunity(opportunity.id)}
+              />
             ))}
           </div>
         ) : (

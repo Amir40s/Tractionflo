@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   BookOpen,
+  BrainCircuit,
   ChevronDown,
   Heart,
   Home,
@@ -38,15 +39,31 @@ import { DashboardOverview } from "./creator/DashboardOverview";
 import { KnowledgeBasePage } from "./creator/KnowledgeBasePage";
 import { BrandMark } from "./creator/BrandMark";
 import { OpportunitiesPage } from "./creator/LeadsPage";
+import { RosPage } from "./creator/RosPage";
+import {
+  escalationWorkflowStateChangedEvent,
+  loadEscalationWorkflowStateFromDatabase,
+  readStoredEscalationWorkflowState,
+  saveEscalationWorkflowStateToDatabase,
+} from "./escalation-resolution";
+import {
+  loadOpportunityWorkflowStateFromDatabase,
+  opportunityWorkflowStateChangedEvent,
+  readStoredOpportunityWorkflowState,
+  saveOpportunityWorkflowStateToDatabase,
+} from "./opportunity-resolution";
 import type {
   AccountProfile,
   AccountProfileResponse,
+  CommerceOrdersResponse,
   DashboardTab,
   InstagramConversationsResponse,
-  NavigationCounts,
   NavItem,
+  OpportunityPageCard,
 } from "./creator/types";
 import { buildCreatorLiveSummary } from "./creator-insights";
+import { emptyEscalationWorkflowState } from "@/lib/escalation-workflow-state";
+import { emptyOpportunityWorkflowState } from "@/lib/opportunity-workflow-state";
 
 const accountProfileStorageKey = "tractionflo_account_profile";
 
@@ -110,6 +127,7 @@ const dashboardTabUrlValues: Record<DashboardTab, string> = {
   inbox: "/conversations",
   "instagram-content": "/instagram-content",
   opportunities: "/opportunities",
+  ros: "/ros",
   audience: "/audience",
   knowledge: "/knowledge-base",
   escalations: "/escalations",
@@ -140,6 +158,10 @@ function getDashboardTabFromUrl(): DashboardTab {
 
   if (pathname === "/opportunities" || pathname === "/opporunies") {
     return "opportunities";
+  }
+
+  if (pathname === "/ros" || pathname === "/revenue-operating-system") {
+    return "ros";
   }
 
   if (pathname === "/audience") {
@@ -174,6 +196,10 @@ function getDashboardTabFromUrl(): DashboardTab {
 
   if (view === "opportunities" || view === "opporunies") {
     return "opportunities";
+  }
+
+  if (view === "ros" || view === "revenue-operating-system") {
+    return "ros";
   }
 
   if (view === "audience") {
@@ -219,6 +245,7 @@ const navItems: NavItem[] = [
   { label: "Conversations", icon: MessageSquare, tab: "inbox" },
   { label: "Posts & Stories", icon: Heart, tab: "instagram-content" },
   { label: "Leads", icon: Target, tab: "opportunities" },
+  { label: "ROS", icon: BrainCircuit, tab: "ros" },
   { label: "Audience", icon: Users, tab: "audience" },
   { label: "Knowledge Base", icon: BookOpen, tab: "knowledge" },
   { label: "Escalations", icon: TriangleAlert, tab: "escalations" },
@@ -243,6 +270,70 @@ function getVisibleNavItems(profile: AccountProfile) {
   return navItems.filter((item) => item.tab && profile.allowedPages.includes(item.tab as PagePermissionId));
 }
 
+function isOpportunityCardInTab(card: OpportunityPageCard, label: string) {
+  const normalizedLabel = label.toLowerCase();
+
+  if (normalizedLabel.includes("hot")) return card.classification === "Hot";
+  if (normalizedLabel.includes("warm")) return card.classification === "Warm";
+  if (normalizedLabel.includes("cold")) return card.classification === "Cold";
+  if (normalizedLabel.includes("partner")) return card.badge === "PARTNERSHIP";
+  if (normalizedLabel.includes("community")) return card.badge === "COMMUNITY";
+  return true;
+}
+
+function formatDashboardMoney(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatDashboardPercent(value: number, total: number) {
+  return `${Math.round((value / Math.max(1, total)) * 100)}%`;
+}
+
+function buildDisplayOpportunityTabs(
+  tabs: ReturnType<typeof buildCreatorLiveSummary>["opportunityTabs"],
+  cards: OpportunityPageCard[],
+) {
+  return tabs.map((tab) => ({
+    ...tab,
+    count: cards.filter((card) => isOpportunityCardInTab(card, tab.label)).length.toLocaleString("en-US"),
+  }));
+}
+
+function buildDisplayOpportunityMetrics(
+  metrics: ReturnType<typeof buildCreatorLiveSummary>["opportunityMetrics"],
+  cards: OpportunityPageCard[],
+  totalConversationCount: number,
+  revenueTotal: number,
+) {
+  const hotLeadCount = cards.filter((card) => card.classification === "Hot").length;
+
+  return metrics.map((metric) => {
+    const normalizedLabel = metric.label.toLowerCase();
+
+    if (normalizedLabel.includes("leads generated")) {
+      return { ...metric, value: cards.length.toLocaleString("en-US") };
+    }
+
+    if (normalizedLabel.includes("hot")) {
+      return { ...metric, value: hotLeadCount.toLocaleString("en-US") };
+    }
+
+    if (normalizedLabel.includes("revenue")) {
+      return { ...metric, value: formatDashboardMoney(revenueTotal) };
+    }
+
+    if (normalizedLabel.includes("rate")) {
+      return { ...metric, value: formatDashboardPercent(cards.length, totalConversationCount) };
+    }
+
+    return metric;
+  });
+}
+
 function LogoutButton() {
   return (
     <form action={signout}>
@@ -261,12 +352,10 @@ function Sidebar({
   activeTab,
   onChangeTab,
   profile,
-  navigationCounts,
 }: {
   activeTab: string;
   onChangeTab: (tab: DashboardTab) => void;
   profile: AccountProfile;
-  navigationCounts: NavigationCounts;
 }) {
   const initials = profile.name
     .split(" ")
@@ -287,7 +376,6 @@ function Sidebar({
           const Icon = item.icon;
           const isActive = item.tab === activeTab;
           const isAfterDivider = item.label === "Analytics" || item.label === "Settings";
-          const count = item.tab ? navigationCounts[item.tab] : null;
 
           return (
             <div key={item.label} className={isAfterDivider ? "border-t border-[#d7dbe6] pt-4" : ""}>
@@ -306,11 +394,6 @@ function Sidebar({
                   className={isActive ? "text-[#4b3cff]" : "text-black"}
                 />
                 <span className="flex-1">{item.label}</span>
-                {typeof count === "number" ? (
-                  <span className={`min-w-7 rounded-full bg-[#f0f1f5] px-2 py-0.5 text-center text-[12px] font-extrabold ${isActive ? "text-[#4b3cff]" : "text-black"}`}>
-                    {count}
-                  </span>
-                ) : null}
               </button>
             </div>
           );
@@ -362,7 +445,7 @@ function MobileNavigation({
   );
 
   return (
-    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-5 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur sm:grid-cols-9 lg:hidden">
+    <nav className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-5 rounded-[14px] border border-[#e0e4ef] bg-white/95 p-1.5 shadow-[0_18px_60px_rgba(20,28,53,0.18)] backdrop-blur sm:grid-cols-10 lg:hidden">
       {mobileItems.map((item) => {
         const Icon = item.icon;
         const isActive = item.tab === activeTab;
@@ -373,8 +456,10 @@ function MobileNavigation({
             ? "Chats"
             : item.label === "Posts & Stories"
             ? "Posts"
-            : item.label === "Opportunities"
-              ? "Opps"
+            : item.label === "Leads"
+              ? "Leads"
+              : item.label === "ROS"
+                ? "ROS"
               : item.label === "Knowledge Base"
                 ? "KB"
                 : item.label === "Escalations"
@@ -426,11 +511,17 @@ function DashboardContent() {
     conversations: [],
     conversation_count: 0,
   });
+  const [creatorOrderResponse, setCreatorOrderResponse] = useState<CommerceOrdersResponse>({
+    orders: [],
+    tableReady: true,
+  });
   const [isLoadingCreatorData, setIsLoadingCreatorData] = useState(true);
   const [creatorDataError, setCreatorDataError] = useState("");
   const [creatorDateRangePreset, setCreatorDateRangePreset] = useState<AdminDateRangePreset>("7d");
   const [creatorAutoRefreshOn, setCreatorAutoRefreshOn] = useState(true);
   const [creatorEscalationRules, setCreatorEscalationRules] = useState<EscalationRuleSetting[]>(() => readStoredSettingsState().rules);
+  const [escalationWorkflowState, setEscalationWorkflowState] = useState(emptyEscalationWorkflowState);
+  const [opportunityWorkflowState, setOpportunityWorkflowState] = useState(emptyOpportunityWorkflowState);
   const hasLoadedAccountProfileRef = useRef(false);
   const creatorSummary = buildCreatorLiveSummary(
     creatorConversationResponse.conversations || [],
@@ -438,7 +529,34 @@ function DashboardContent() {
     creatorConversationResponse.account,
     creatorDateRangePreset,
     creatorEscalationRules,
+    creatorOrderResponse.orders || [],
+    creatorOrderResponse.tableReady !== false,
   );
+  const resolvedEscalationIdSet = new Set(escalationWorkflowState.resolvedIds);
+  const resolvedOpportunityIdSet = new Set(opportunityWorkflowState.resolvedIds);
+  const unresolvedEscalations = creatorSummary.escalations.filter((escalation) => !resolvedEscalationIdSet.has(escalation.id));
+  const unresolvedOpportunityCards = creatorSummary.opportunityCards.filter((opportunity) => !resolvedOpportunityIdSet.has(opportunity.id));
+  const unresolvedEscalationIdsKey = unresolvedEscalations.map((escalation) => escalation.id).join("|");
+  const unresolvedOpportunityIdsKey = unresolvedOpportunityCards.map((opportunity) => opportunity.id).join("|");
+  const readEscalationIdsKey = escalationWorkflowState.readIds.join("|");
+  const readOpportunityIdsKey = opportunityWorkflowState.readIds.join("|");
+  const creatorSummaryForDisplay = {
+    ...creatorSummary,
+    dashboardOpportunities: creatorSummary.dashboardOpportunities.filter((opportunity) => !opportunity.id || !resolvedOpportunityIdSet.has(opportunity.id)),
+    estimatedRevenue: creatorSummary.estimatedRevenue,
+    estimatedPipelineRevenue: creatorSummary.estimatedPipelineRevenue,
+    opportunityCount: unresolvedOpportunityCards.length,
+    opportunityTabs: buildDisplayOpportunityTabs(creatorSummary.opportunityTabs, unresolvedOpportunityCards),
+    opportunityMetrics: buildDisplayOpportunityMetrics(
+      creatorSummary.opportunityMetrics,
+      unresolvedOpportunityCards,
+      creatorSummary.totalConversationCount,
+      creatorSummary.estimatedRevenue,
+    ),
+    opportunityCards: unresolvedOpportunityCards,
+    escalations: unresolvedEscalations,
+    escalationCount: unresolvedEscalations.length,
+  };
 
   useEffect(() => {
     const syncFromUrl = () => {
@@ -500,6 +618,78 @@ function DashboardContent() {
   }, []);
 
   useEffect(() => {
+    const syncEscalationWorkflowState = () => {
+      setEscalationWorkflowState(readStoredEscalationWorkflowState());
+    };
+
+    syncEscalationWorkflowState();
+    void loadEscalationWorkflowStateFromDatabase().catch((error) => {
+      console.error("Escalation workflow state load error:", error);
+    });
+    window.addEventListener("storage", syncEscalationWorkflowState);
+    window.addEventListener(escalationWorkflowStateChangedEvent, syncEscalationWorkflowState);
+
+    return () => {
+      window.removeEventListener("storage", syncEscalationWorkflowState);
+      window.removeEventListener(escalationWorkflowStateChangedEvent, syncEscalationWorkflowState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncOpportunityWorkflowState = () => {
+      setOpportunityWorkflowState(readStoredOpportunityWorkflowState());
+    };
+
+    syncOpportunityWorkflowState();
+    void loadOpportunityWorkflowStateFromDatabase().catch((error) => {
+      console.error("Lead workflow state load error:", error);
+    });
+    window.addEventListener("storage", syncOpportunityWorkflowState);
+    window.addEventListener(opportunityWorkflowStateChangedEvent, syncOpportunityWorkflowState);
+
+    return () => {
+      window.removeEventListener("storage", syncOpportunityWorkflowState);
+      window.removeEventListener(opportunityWorkflowStateChangedEvent, syncOpportunityWorkflowState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "escalations" || !unresolvedEscalationIdsKey) {
+      return;
+    }
+
+    const unresolvedEscalationIds = unresolvedEscalationIdsKey.split("|").filter(Boolean);
+    const readIds = new Set(readEscalationIdsKey.split("|").filter(Boolean));
+    const unreadEscalationIds = unresolvedEscalationIds.filter((escalationId) => !readIds.has(escalationId));
+
+    if (unreadEscalationIds.length === 0) {
+      return;
+    }
+
+    void saveEscalationWorkflowStateToDatabase({ readIds: unreadEscalationIds }).catch((error) => {
+      console.error("Escalation read state save error:", error);
+    });
+  }, [activeTab, unresolvedEscalationIdsKey, readEscalationIdsKey]);
+
+  useEffect(() => {
+    if (activeTab !== "opportunities" || !unresolvedOpportunityIdsKey) {
+      return;
+    }
+
+    const unresolvedOpportunityIds = unresolvedOpportunityIdsKey.split("|").filter(Boolean);
+    const readIds = new Set(readOpportunityIdsKey.split("|").filter(Boolean));
+    const unreadOpportunityIds = unresolvedOpportunityIds.filter((opportunityId) => !readIds.has(opportunityId));
+
+    if (unreadOpportunityIds.length === 0) {
+      return;
+    }
+
+    void saveOpportunityWorkflowStateToDatabase({ readIds: unreadOpportunityIds }).catch((error) => {
+      console.error("Lead read state save error:", error);
+    });
+  }, [activeTab, unresolvedOpportunityIdsKey, readOpportunityIdsKey]);
+
+  useEffect(() => {
     if (!hasLoadedAccountProfileRef.current) {
       return;
     }
@@ -526,25 +716,38 @@ function DashboardContent() {
 
     async function loadCreatorConversations() {
       try {
-        const response = await fetch("/api/instagram/conversations", {
-          headers: { Accept: "application/json" },
-          cache: "no-store",
-        });
-        const data: InstagramConversationsResponse = await response.json();
+        const [conversationResponse, orderResponse] = await Promise.all([
+          fetch("/api/instagram/conversations", {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          }),
+          fetch("/api/commerce/orders", {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          }),
+        ]);
+        const data: InstagramConversationsResponse = await conversationResponse.json();
+        const orderData: CommerceOrdersResponse = await orderResponse.json().catch(() => ({ orders: [], tableReady: false }));
 
         if (!isMounted) {
           return;
         }
 
-        if (!response.ok || (data.error && data.error !== "No Instagram account connected")) {
+        if (!conversationResponse.ok || (data.error && data.error !== "No Instagram account connected")) {
           throw new Error(data.error || "Could not load Instagram conversations");
         }
 
         setCreatorConversationResponse(data);
+        setCreatorOrderResponse({
+          orders: orderResponse.ok && !orderData.error ? orderData.orders || [] : [],
+          tableReady: orderData.tableReady !== false,
+          error: orderData.error,
+        });
         setCreatorDataError(data.error || "");
       } catch (error) {
         if (isMounted) {
           setCreatorConversationResponse({ conversations: [], conversation_count: 0 });
+          setCreatorOrderResponse({ orders: [], tableReady: false });
           setCreatorDataError(error instanceof Error ? error.message : "Could not load Instagram conversations");
         }
       } finally {
@@ -621,11 +824,6 @@ function DashboardContent() {
         activeTab={activeTab}
         onChangeTab={handleTabChange}
         profile={accountProfile}
-        navigationCounts={{
-          inbox: creatorSummary.totalConversationCount,
-          opportunities: creatorSummary.opportunityCount,
-          escalations: creatorSummary.escalationCount,
-        }}
       />
 
       {!canOpenDashboardTab(accountProfile, activeTab) ? (
@@ -633,22 +831,25 @@ function DashboardContent() {
       ) : activeTab === "dashboard" ? (
         <DashboardOverview
           profile={accountProfile}
-          summary={creatorSummary}
+          summary={creatorSummaryForDisplay}
           isLoading={isLoadingCreatorData}
           error={creatorDataError}
           dateRangePreset={creatorDateRangePreset}
           isAutoRefreshOn={creatorAutoRefreshOn}
           onDateRangeChange={setCreatorDateRangePreset}
           onAutoRefreshChange={setCreatorAutoRefreshOn}
+          onNavigate={handleTabChange}
         />
       ) : activeTab === "opportunities" ? (
         <OpportunitiesPage
-          summary={creatorSummary}
+          summary={creatorSummaryForDisplay}
           isLoading={isLoadingCreatorData}
           error={creatorDataError}
           dateRangePreset={creatorDateRangePreset}
           onDateRangeChange={setCreatorDateRangePreset}
         />
+      ) : activeTab === "ros" ? (
+        <RosPage />
       ) : activeTab === "instagram-content" ? (
         <InstagramContentPage />
       ) : activeTab === "audience" ? (
@@ -662,7 +863,7 @@ function DashboardContent() {
       ) : activeTab === "knowledge" ? (
         <KnowledgeBasePage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
       ) : activeTab === "escalations" ? (
-        <EscalationsPage summary={creatorSummary} isLoading={isLoadingCreatorData} error={creatorDataError} />
+        <EscalationsPage summary={creatorSummaryForDisplay} isLoading={isLoadingCreatorData} error={creatorDataError} />
       ) : activeTab === "analytics" ? (
         <AnalyticsPage />
       ) : activeTab === "settings" ? (

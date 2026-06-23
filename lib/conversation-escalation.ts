@@ -119,8 +119,24 @@ function hasComplaint(text: string) {
   return /\b(disappointed|not happy|unhappy|angry|upset|complaint|complain|bad service|poor service|terrible|worst|scam|issue|problem|broken|damaged|wrong item|wrong order|missing item)\b/.test(text);
 }
 
+function hasPartnershipDealValue(text: string) {
+  const amountMatches = [
+    ...text.matchAll(/\b(?:\$|usd|pkr|rs\.?)\s?([1-9][\d,]*(?:\.\d+)?)\b/g),
+    ...text.matchAll(/\b([1-9][\d,]*(?:\.\d+)?)\s?(?:usd|pkr|rs)\b/g),
+  ];
+
+  return amountMatches.some((match) => {
+    const amount = Number((match[1] || "").replace(/,/g, ""));
+    return Number.isFinite(amount) && amount >= 2500;
+  });
+}
+
 function hasPartnership(text: string) {
-  return /\b(partner|partnership|collab|collaboration|sponsor|sponsored|brand deal|brand collaboration|campaign|affiliate|ambassador|influencer)\b/.test(text);
+  const hasGeneralPartnershipLanguage = /\b(partner|partnership|collab|collaboration)\b/.test(text);
+  const hasFormalDealLanguage = /\b(sponsor|sponsored|brand deal|brand collaboration|campaign|affiliate|ambassador|influencer)\b/.test(text);
+  const hasDealPlanningLanguage = /\b(budget|paid|payment|rate|rates|proposal|contract|deliverables|media kit|commission)\b/.test(text);
+
+  return hasFormalDealLanguage || (hasGeneralPartnershipLanguage && (hasDealPlanningLanguage || hasPartnershipDealValue(text)));
 }
 
 function hasBulkQuantity(text: string) {
@@ -318,4 +334,17 @@ export function detectConversationEscalation(
   }
 
   return buildEscalationsForText(normalized, rules)[0] || null;
+}
+
+export function shouldPauseAiForEscalation(escalation: ConversationEscalation | null | undefined) {
+  if (!escalation) {
+    return false;
+  }
+
+  return (
+    escalation.intent === "human_handoff" ||
+    escalation.intent === "refund_request" ||
+    escalation.intent === "complaint" ||
+    escalation.intent === "complex_question"
+  );
 }

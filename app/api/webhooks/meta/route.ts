@@ -1,22 +1,63 @@
 import { NextResponse, after } from 'next/server';
 import logger from '@/lib/logger';
 import type { User } from '@supabase/supabase-js';
-import { detectConversationEscalation, escalationRulesMetadataKey } from '@/lib/conversation-escalation';
+import {
+  buildCommerceOrderPaymentReply,
+  confirmLatestPendingCommerceOrder,
+  createPendingCommerceOrder,
+  getCommerceOrderPublicCheckoutUrl,
+  hasCommerceOrderCheckoutButtonMessage,
+  getLatestCommerceOrderForSender,
+  hasCommerceOrderPaymentMessage,
+  isCommerceOrderConfirmationText,
+  markCommerceOrderPaymentMessageSent,
+  prepareCommerceOrderCheckout,
+} from '@/lib/commerce-orders';
+import {
+  detectConversationEscalation,
+  escalationRulesMetadataKey,
+  shouldPauseAiForEscalation,
+  type ConversationEscalation,
+} from '@/lib/conversation-escalation';
 import {
   getAiBehaviorPrompt,
   getEnabledWorkflowMap,
   getStoredOpenAiKey,
   normalizeAiIntegrationMetadata,
 } from '@/lib/ai-integration';
-import { getFreshInstagramAccount, getFreshInstagramAccountByIgUserId } from '@/lib/instagram-token';
+import { getFreshInstagramAccountByIgUserId } from '@/lib/instagram-token';
+import {
+  buildCatalogOfferReply,
+  findBestCatalogOffer,
+  formatCatalogForPrompt,
+  getInstagramProductCatalogForUser,
+  type InstagramCatalogOffer,
+} from '@/lib/instagram-product-catalog';
 import {
   instagramWelcomeAutomationMetadataKey,
   normalizeInstagramWelcomeAutomation,
   renderInstagramWelcomeMessage,
 } from '@/lib/instagram-welcome-automation';
+import { storeInstagramMessage } from '@/lib/instagram-message-store';
+import { sendInstagramCommercePaymentMessage } from '@/lib/instagram-send-api';
+import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
 import { runAssistantThread } from '@/lib/openai-assistants';
+import {
+  buildFallbackRevenueOperatingSnapshot,
+  normalizeRevenueOperatingSnapshot,
+  persistRevenueOperatingSnapshot,
+  recordRevenueConversionEvent,
+} from '@/lib/revenue-intelligence';
+import { applyRevenueOutcomeAction } from '@/lib/revenue-outcome-actions';
+import {
+  formatRevenueOutcomeProvidersForPrompt,
+  revenueOutcomeProvidersMetadataKey,
+  type RevenueOutcomeProviderSettings,
+} from '@/lib/revenue-outcome-providers';
+import { loadRevenueOutcomeProviderSettings } from '@/lib/revenue-provider-execution';
+import { formatRevenueLearningForPrompt } from '@/lib/revenue-learning';
+import { applyRevenueStrategy } from '@/lib/revenue-strategy';
 
-import { recordOpenAiUsage } from '@/lib/openai-usage';
 import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 
@@ -36,6 +77,9 @@ type InstagramWebhookMessageEvent = {
     mid?: string;
     text?: string;
     is_echo?: boolean;
+    quick_reply?: {
+      payload?: string;
+    };
     reply_to?: {
       story?: {
         id?: string;
@@ -63,6 +107,25 @@ type InstagramParticipantProfile = {
 type InstagramGraphError = {
   message?: string;
 };
+
+type WebhookAiReplyResult = {
+  reply: string;
+  catalogOffer: InstagramCatalogOffer | null;
+};
+
+type InstagramQuickReply = {
+  content_type: 'text';
+  title: string;
+  payload: string;
+};
+
+const confirmOrderQuickReplies: InstagramQuickReply[] = [
+  {
+    content_type: 'text',
+    title: 'Confirm order',
+    payload: 'CONFIRM_ORDER',
+  },
+];
 
 async function hasStoredMessage(supabase: SupabaseServiceClient, mid: string) {
   if (!mid) {
@@ -97,48 +160,6 @@ async function getSenderMessageCount(supabase: SupabaseServiceClient, senderId: 
   return count || 0;
 }
 
-async function findAutomationUser(supabase: SupabaseServiceClient) {
-  const { data, error } = await supabase.auth.admin.listUsers({
-    page: 1,
-    perPage: 100,
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  const candidates = (data.users || [])
-    .map((user) => {
-      const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-      const integration = normalizeAiIntegrationMetadata(metadata);
-      const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
-
-      return {
-        user,
-        integration,
-        welcome,
-        hasAssistantId: Boolean(metadata.openai_assistant_id),
-      };
-    })
-    .filter((candidate) => candidate.integration.autoSend);
-
-  logger.info("findAutomationUser debug list:", {
-    totalUsersChecked: data.users?.length || 0,
-    userStatuses: (data.users || []).map(u => {
-      const meta = (u.user_metadata || {}) as Record<string, unknown>;
-      return {
-        email: u.email,
-        autoSend: normalizeAiIntegrationMetadata(meta).autoSend,
-        hasAssistantId: Boolean(meta.openai_assistant_id)
-      };
-    })
-  });
-
-  logger.info("findAutomationUser: Found candidates with autoSend enabled", { candidateCount: candidates.length });
-
-  return candidates.find((candidate) => candidate.hasAssistantId) || candidates[0] || null;
-}
-
 async function fetchParticipantProfile(accessToken: string, participantId: string) {
   try {
     const profileUrl = new URL(`https://graph.instagram.com/v21.0/${participantId}`);
@@ -161,7 +182,12 @@ async function fetchParticipantProfile(accessToken: string, participantId: strin
   }
 }
 
-async function sendInstagramTextMessage(accessToken: string, recipientId: string, text: string) {
+async function sendInstagramTextMessage(
+  accessToken: string,
+  recipientId: string,
+  text: string,
+  quickReplies: InstagramQuickReply[] = []
+) {
   const messageUrl = new URL('https://graph.instagram.com/v21.0/me/messages');
   messageUrl.searchParams.set('access_token', accessToken);
 
@@ -176,6 +202,7 @@ async function sendInstagramTextMessage(accessToken: string, recipientId: string
       },
       message: {
         text,
+        ...(quickReplies.length > 0 ? { quick_replies: quickReplies } : {}),
       },
     }),
   });
@@ -193,9 +220,185 @@ async function sendInstagramTextMessage(accessToken: string, recipientId: string
   return data;
 }
 
+async function sendInstagramTextMessageWithQuickReplyFallback(
+  accessToken: string,
+  recipientId: string,
+  text: string,
+  quickReplies: InstagramQuickReply[] = []
+) {
+  if (quickReplies.length === 0) {
+    return sendInstagramTextMessage(accessToken, recipientId, text);
+  }
+
+  try {
+    return await sendInstagramTextMessage(accessToken, recipientId, text, quickReplies);
+  } catch (error) {
+    logger.warn('Instagram quick reply send failed; retrying webhook reply as plain text.', { error });
+    return sendInstagramTextMessage(accessToken, recipientId, text);
+  }
+}
+
+async function sendInstagramAttachmentMessage(
+  accessToken: string,
+  recipientId: string,
+  attachment: { type: 'image' | 'video'; url: string }
+) {
+  const messageUrl = new URL('https://graph.instagram.com/v21.0/me/messages');
+  messageUrl.searchParams.set('access_token', accessToken);
+
+  const response = await fetch(messageUrl.toString(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient: {
+        id: recipientId,
+      },
+      message: {
+        attachment: {
+          type: attachment.type,
+          payload: {
+            url: attachment.url,
+          },
+        },
+      },
+    }),
+  });
+
+  const data = (await response.json().catch(() => ({}))) as {
+    recipient_id?: string;
+    message_id?: string;
+    error?: InstagramGraphError;
+  };
+
+  if (!response.ok || data.error) {
+    throw new Error(data.error?.message || 'Instagram could not send this automated product image.');
+  }
+
+  return data;
+}
+
 function formatWebhookConversationLine(message: { from?: 'me' | 'user' | 'note'; text?: string }) {
   const sender = message.from === 'me' ? 'Business' : message.from === 'note' ? 'Internal note' : 'Instagram user';
   return `${sender}: ${message.text?.trim() || 'Sent an attachment'}`;
+}
+
+function buildWebhookRevenueOperatingSnapshot({
+  latestText,
+  catalogOffer,
+  pendingOrderId,
+  escalation,
+  outcomeProviders,
+}: {
+  latestText: string;
+  catalogOffer?: InstagramCatalogOffer | null;
+  pendingOrderId?: string;
+  escalation?: ConversationEscalation | null;
+  outcomeProviders?: RevenueOutcomeProviderSettings;
+}) {
+  const normalizedText = latestText.toLowerCase();
+  const hasPriceSignal = /\b(price|pricing|cost|expensive|budget|how much|payment)\b/.test(normalizedText);
+  const hasTimelineSignal = /\b(this month|today|tonight|tomorrow|asap|urgent|now|soon|start)\b/.test(normalizedText);
+  const hasConversionSignal = /\b(confirm|order|checkout|payment|book|call|buy|purchase|works)\b/.test(normalizedText);
+  const offerScore = catalogOffer
+    ? Math.round((catalogOffer.confidence + Math.min(100, catalogOffer.matchScore)) / 2)
+    : 0;
+  const score =
+    escalation?.urgency === 'High'
+      ? 92
+      : catalogOffer
+        ? Math.max(78, Math.min(94, offerScore || catalogOffer.confidence))
+        : hasPriceSignal || hasConversionSignal
+          ? 68
+          : 45;
+  const urgency =
+    escalation?.urgency ||
+    (catalogOffer && (hasTimelineSignal || hasConversionSignal) ? 'High' : hasPriceSignal ? 'Medium' : 'Low');
+  const signals = [
+    ...(escalation?.signals || []),
+    catalogOffer ? `Catalog product matched: ${catalogOffer.title}` : '',
+    hasPriceSignal ? 'Asked about price or payment' : '',
+    hasTimelineSignal ? 'Mentioned purchase timeline' : '',
+    hasConversionSignal ? 'Used booking, order, or checkout language' : '',
+    pendingOrderId ? 'Pending order created' : '',
+  ].filter(Boolean);
+  const missing = [
+    !hasTimelineSignal ? 'purchase timeline' : '',
+    !catalogOffer && !hasPriceSignal ? 'budget or price range' : '',
+    catalogOffer && !hasConversionSignal ? 'confirmation or checkout preference' : '',
+  ].filter(Boolean);
+  const cta = pendingOrderId
+    ? 'Confirm order'
+    : catalogOffer
+      ? `Confirm interest in ${catalogOffer.title}`
+      : 'Ask one clear follow-up question';
+  const recommendedAction = pendingOrderId
+    ? 'Get confirmation, then send checkout/payment link.'
+    : catalogOffer
+      ? 'Confirm fit and move the lead toward booking, checkout, or payment.'
+      : escalation?.recommendedAction || 'Answer the question and ask one concise qualification question.';
+  const summary =
+    escalation?.summary ||
+    (catalogOffer
+      ? `Customer showed pricing interest and received the ${catalogOffer.title} offer.`
+      : 'Customer received an automated Instagram reply.');
+
+  const fallback = buildFallbackRevenueOperatingSnapshot({
+    lead: {
+      score,
+      stage: pendingOrderId ? 'pending_order_confirmation' : catalogOffer ? 'pricing_offer_presented' : 'automated_reply',
+      urgency,
+      intent: escalation?.label || (catalogOffer ? 'High-ticket pricing interest' : 'Instagram DM inquiry'),
+      summary,
+      signals,
+      missing,
+      recommendedAction,
+      cta,
+    },
+    cta,
+    escalation,
+  });
+
+  return applyRevenueOutcomeAction(
+    applyRevenueStrategy(
+      normalizeRevenueOperatingSnapshot(
+        {
+          ...fallback,
+          outcomeProbabilities: {
+            ...fallback.outcomeProbabilities,
+            book_call: Math.max(fallback.outcomeProbabilities.book_call || 0, catalogOffer ? 84 : 35),
+            purchase_product: Math.max(fallback.outcomeProbabilities.purchase_product || 0, pendingOrderId ? 92 : catalogOffer ? 86 : 25),
+          },
+          decision: {
+            ...fallback.decision,
+            bestNextAction: pendingOrderId
+              ? 'confirm_order_then_send_checkout'
+              : catalogOffer
+                ? 'present_offer_and_confirm_interest'
+                : fallback.decision.bestNextAction,
+            confidence: score,
+            rationale: summary,
+          },
+          memory: {
+            ...fallback.memory,
+            objections: hasPriceSignal ? ['price'] : fallback.memory.objections,
+            offersPresented: catalogOffer
+              ? [catalogOffer.title, catalogOffer.priceText].filter(Boolean)
+              : fallback.memory.offersPresented,
+          },
+        },
+        fallback
+      ),
+      {
+        latestText,
+        hasCatalogOffer: Boolean(catalogOffer),
+        hasPendingOrder: Boolean(pendingOrderId),
+        escalation,
+      }
+    ),
+    outcomeProviders
+  );
 }
 
 async function generateWebhookAiReply({
@@ -212,13 +415,23 @@ async function generateWebhookAiReply({
   logger.info("generateWebhookAiReply: Starting generation", { latestText, participantId: participant.id });
   const metadata = (user.user_metadata || {}) as Record<string, unknown>;
   const integration = normalizeAiIntegrationMetadata(metadata);
+  const serviceSupabase = createSupabaseServiceClient();
+  const outcomeProviders = await loadRevenueOutcomeProviderSettings({
+    supabase: serviceSupabase,
+    userId: user.id,
+    metadataValue: metadata[revenueOutcomeProvidersMetadataKey],
+  });
+  const revenueLearningPrompt = await formatRevenueLearningForPrompt({
+    supabase: serviceSupabase,
+    userId: user.id,
+  }).catch(() => '');
   const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
 
   logger.info("generateWebhookAiReply: Workflow settings evaluated", { autoSend: integration.autoSend, answerQuestions: enabledWorkflows.answerQuestions });
 
   if (!integration.autoSend || !enabledWorkflows.answerQuestions) {
     logger.info("generateWebhookAiReply: Bailing out because autoSend or answerQuestions workflow is disabled.");
-    return '';
+    return { reply: '', catalogOffer: null } satisfies WebhookAiReplyResult;
   }
 
   const messages = [{ from: 'user' as const, text: latestText, time: new Date().toISOString() }];
@@ -227,19 +440,25 @@ async function generateWebhookAiReply({
 
   if (!apiKey) {
     logger.info("generateWebhookAiReply: Bailing out because no OpenAI API key was found.");
-    return '';
+    return { reply: '', catalogOffer: null } satisfies WebhookAiReplyResult;
   }
 
   const assistantId = metadata.openai_assistant_id as string | undefined;
 
   if (!assistantId) {
     logger.info("generateWebhookAiReply: Bailing out because no OpenAI Assistant ID was found in metadata.");
-    return '';
+    return { reply: '', catalogOffer: null } satisfies WebhookAiReplyResult;
   }
   const participantName = participant.username || participant.name || 'this Instagram lead';
+  const productCatalog = await getInstagramProductCatalogForUser(supabase, user.id).catch((catalogError) => {
+    logger.warn('Instagram catalog unavailable during webhook AI generation:', { error: catalogError });
+    return [];
+  });
+  const catalogPrompt = formatCatalogForPrompt(productCatalog, latestText);
+  const catalogOffer = findBestCatalogOffer(latestText, productCatalog);
 
   logger.info("generateWebhookAiReply: Proceeding to request OpenAI Assistant Thread...", { participantName });
-  return runAssistantThread({
+  const reply = await runAssistantThread({
     apiKey,
     assistantId,
     maxTokens: 800,
@@ -251,6 +470,15 @@ ${getAiBehaviorPrompt(integration.behavior)}
 
 Lead qualification rules: ${integration.leadQualificationRules}
 Preferred CTA: ${integration.ctaMessage}
+
+Auto-detected Instagram product catalog:
+${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
+
+Configured revenue outcome providers:
+${formatRevenueOutcomeProvidersForPrompt(outcomeProviders) || 'No external outcome provider links are configured yet. If the right outcome needs a provider link, ask for contact/consent or use a manual next step.'}
+
+Creator-specific revenue learning:
+${revenueLearningPrompt || 'No creator-specific learning is available yet. Use the default ROS strategy and persist the decision for future learning.'}
 
 Return only the Instagram DM reply text. Keep it natural, brief, and useful. Do not mention being an AI unless asked.`,
     messages: [
@@ -264,6 +492,86 @@ ${messages.map(formatWebhookConversationLine).join('\n')}
 Write the next best reply.`,
       },
     ],
+  });
+
+  return {
+    reply: buildCatalogOfferReply(reply, catalogOffer),
+    catalogOffer,
+  } satisfies WebhookAiReplyResult;
+}
+
+async function getRecentSenderCatalogText(supabase: SupabaseServiceClient, senderId: string) {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('text')
+    .eq('sender_id', senderId)
+    .order('timestamp', { ascending: false })
+    .limit(8);
+
+  if (error) {
+    logger.warn('Could not load recent sender messages for commerce recovery.', { error, senderId });
+    return '';
+  }
+
+  return (data || [])
+    .map((row) => String((row as { text?: string }).text || ''))
+    .filter((text) => text.trim() && !isCommerceOrderConfirmationText(text))
+    .reverse()
+    .join('\n');
+}
+
+async function recoverPendingCommerceOrderFromCatalog({
+  supabase,
+  user,
+  event,
+  participant,
+}: {
+  supabase: SupabaseServiceClient;
+  user: User;
+  event: AutomationMessageEvent;
+  participant?: InstagramParticipantProfile;
+}) {
+  const recentCatalogText = await getRecentSenderCatalogText(supabase, event.senderId);
+
+  if (!recentCatalogText.trim()) {
+    return null;
+  }
+
+  const catalog = await getInstagramProductCatalogForUser(supabase, user.id).catch((catalogError) => {
+    logger.warn('Instagram catalog unavailable during commerce confirmation recovery.', { error: catalogError });
+    return [];
+  });
+  const offer = findBestCatalogOffer(recentCatalogText, catalog);
+
+  if (!offer) {
+    return null;
+  }
+
+  return createPendingCommerceOrder(supabase, user.id, {
+    instagramSenderId: event.senderId,
+    instagramUsername: participant?.username || participant?.name || '',
+    productId: offer.id,
+    sourceMediaId: offer.sourceMediaId,
+    productTitle: offer.title,
+    productDescription: offer.description,
+    productImageUrl: offer.imageUrl,
+    productPermalink: offer.permalink,
+    priceText: offer.priceText,
+    amount: offer.priceAmount,
+    currency: offer.currency || 'USD',
+    source: 'instagram_webhook_confirmation_recovery',
+    metadata: {
+      matchScore: offer.matchScore,
+      confidence: offer.confidence,
+      recoveredFromConfirmation: true,
+    },
+  }).catch((orderError) => {
+    logger.error('Could not recover pending commerce order from catalog.', {
+      error: orderError,
+      userId: user.id,
+      senderId: event.senderId,
+    });
+    return null;
   });
 }
 
@@ -301,36 +609,259 @@ async function processInstagramAutomations(
 
       const metadata = (user.user_metadata || {}) as Record<string, unknown>;
       const integration = normalizeAiIntegrationMetadata(metadata);
+      const outcomeProviders = await loadRevenueOutcomeProviderSettings({
+        supabase,
+        userId: user.id,
+        metadataValue: metadata[revenueOutcomeProvidersMetadataKey],
+      });
       const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
+
+      if (isCommerceOrderConfirmationText(event.text)) {
+        let confirmedOrder = await confirmLatestPendingCommerceOrder(supabase, {
+          userId: user.id,
+          instagramSenderId: event.senderId,
+          confirmationText: event.text,
+        }).catch((orderError) => {
+          logger.error('processInstagramAutomations: Could not confirm pending commerce order.', {
+            error: orderError,
+            userId: user.id,
+            senderId: event.senderId,
+          });
+          return null;
+        });
+
+        if (!confirmedOrder) {
+          const participant = await fetchParticipantProfile(account.access_token, event.senderId);
+          const recoveredOrder = await recoverPendingCommerceOrderFromCatalog({
+            supabase,
+            user,
+            event,
+            participant,
+          });
+
+          if (recoveredOrder) {
+            confirmedOrder = await confirmLatestPendingCommerceOrder(supabase, {
+              userId: user.id,
+              instagramSenderId: event.senderId,
+              confirmationText: event.text,
+            }).catch((orderError) => {
+              logger.error('processInstagramAutomations: Could not confirm recovered commerce order.', {
+                error: orderError,
+                userId: user.id,
+                senderId: event.senderId,
+              });
+              return null;
+            });
+          }
+        }
+
+        const alreadyConfirmedOrder = confirmedOrder
+          ? null
+          : await getLatestCommerceOrderForSender(supabase, {
+              userId: user.id,
+              instagramSenderId: event.senderId,
+              statuses: ['confirmed', 'paid'],
+            }).catch((orderError) => {
+              logger.error('processInstagramAutomations: Could not load already-confirmed commerce order.', {
+                error: orderError,
+                userId: user.id,
+                senderId: event.senderId,
+              });
+              return null;
+            });
+
+        const orderForReply = confirmedOrder || alreadyConfirmedOrder;
+
+        if (orderForReply) {
+          let payableOrder = orderForReply;
+          const checkout = await prepareCommerceOrderCheckout(supabase, {
+            userId: user.id,
+            order: orderForReply,
+          });
+          payableOrder = checkout.order;
+          if (checkout.error) {
+            logger.warn('processInstagramAutomations: Commerce checkout link was not created.', {
+              error: checkout.error,
+              orderId: orderForReply.id,
+              userId: user.id,
+            });
+          }
+          let sent: Awaited<ReturnType<typeof sendInstagramTextMessage>> = {};
+          const shouldSendPaymentText = !hasCommerceOrderPaymentMessage(payableOrder);
+          const shouldSendCheckoutButton = Boolean(
+            checkout.checkoutUrl && !hasCommerceOrderCheckoutButtonMessage(payableOrder)
+          );
+          const customerCheckoutUrl = checkout.checkoutUrl
+            ? getCommerceOrderPublicCheckoutUrl(payableOrder)
+            : '';
+          const paymentReply = buildCommerceOrderPaymentReply(payableOrder, customerCheckoutUrl, Boolean(alreadyConfirmedOrder), {
+            includeCheckoutUrl: !shouldSendCheckoutButton,
+          });
+
+          if (shouldSendPaymentText || shouldSendCheckoutButton) {
+            const paymentSent = await sendInstagramCommercePaymentMessage({
+              accessToken: account.access_token,
+              recipientId: event.senderId,
+              order: payableOrder,
+              checkoutUrl: customerCheckoutUrl,
+              alreadyConfirmed: Boolean(alreadyConfirmedOrder),
+              sendText: shouldSendPaymentText,
+              sendCheckoutButton: shouldSendCheckoutButton,
+            });
+            sent = {
+              message_id: paymentSent.messageId,
+            };
+            if (checkout.checkoutUrl) {
+              await markCommerceOrderPaymentMessageSent(supabase, {
+                userId: user.id,
+                order: payableOrder,
+                messageId: paymentSent.messageId,
+                source: alreadyConfirmedOrder ? 'webhook_already_confirmed_payment' : 'webhook_confirm_payment',
+                textMessageId: paymentSent.textMessageId,
+                checkoutButtonMessageId: paymentSent.checkoutButtonMessageId,
+                checkoutFallbackMessageId: paymentSent.checkoutFallbackMessageId,
+              }).catch((markError) => {
+                logger.warn('Could not mark commerce payment message as sent.', {
+                  error: markError,
+                  orderId: payableOrder.id,
+                });
+              });
+            }
+            if (paymentSent.checkoutButtonError) {
+              logger.warn('Instagram checkout button failed; payment link fallback was used.', {
+                error: paymentSent.checkoutButtonError,
+                orderId: payableOrder.id,
+              });
+            }
+          }
+
+          await recordRevenueConversionEvent({
+            supabase,
+            userId: user.id,
+            instagramSenderId: event.senderId,
+            conversationId: event.senderId,
+            eventType: alreadyConfirmedOrder ? 'order_confirmation_replayed' : 'order_confirmed',
+            outcomeType: 'purchase_product',
+            status: 'pending',
+            value: payableOrder.amount,
+            currency: payableOrder.currency,
+            commerceOrder: payableOrder,
+            metadata: {
+              checkoutCreated: checkout.checkoutCreated,
+              checkoutConfigured: checkout.checkoutConfigured,
+              source: 'instagram_webhook_confirmation',
+            },
+          }).catch((rosError) => {
+            logger.warn('Could not record ROS commerce confirmation event.', {
+              error: rosError,
+              orderId: payableOrder.id,
+              userId: user.id,
+            });
+          });
+
+          if (checkout.checkoutUrl) {
+            await recordRevenueConversionEvent({
+              supabase,
+              userId: user.id,
+              instagramSenderId: event.senderId,
+              conversationId: event.senderId,
+              eventType: 'checkout_created',
+              outcomeType: 'purchase_product',
+              status: 'pending',
+              value: payableOrder.amount,
+              currency: payableOrder.currency,
+              commerceOrder: payableOrder,
+              metadata: {
+                checkoutUrl: customerCheckoutUrl,
+                source: 'instagram_webhook_confirmation',
+              },
+            }).catch((rosError) => {
+              logger.warn('Could not record ROS checkout event.', {
+                error: rosError,
+                orderId: payableOrder.id,
+                userId: user.id,
+              });
+            });
+          }
+
+          await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
+            type: 'message',
+            title: checkout.checkoutUrl ? 'Instagram checkout link sent' : 'Instagram order confirmed',
+            body: paymentReply.slice(0, 120),
+            url: '/dashboard',
+            metadata: {
+              source: 'instagram-webhook-confirmation',
+              userId: user.id,
+              senderId: event.senderId,
+              orderId: payableOrder.id,
+              messageId: sent.message_id || '',
+              checkoutCreated: checkout.checkoutCreated,
+              checkoutConfigured: checkout.checkoutConfigured,
+            },
+          }).catch((notificationError) => {
+            logger.error('Realtime Instagram order confirmation notification error:', { error: notificationError });
+          });
+
+          logger.info('processInstagramAutomations: Pending commerce order confirmed.', {
+            orderId: payableOrder.id,
+            userId: user.id,
+            senderId: event.senderId,
+            checkoutCreated: checkout.checkoutCreated,
+            checkoutConfigured: checkout.checkoutConfigured,
+          });
+          continue;
+        }
+
+        logger.info('processInstagramAutomations: Confirmation text received, but no commerce order was found. Skipping generic AI reply.', {
+          userId: user.id,
+          senderId: event.senderId,
+        });
+        continue;
+      }
+
       const escalation = detectConversationEscalation([{ from: 'user', text: event.text }], {
         rules: metadata[escalationRulesMetadataKey],
       });
 
       if (escalation) {
-        await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
-          type: 'escalation',
-          title: `${escalation.label} detected`,
-          body: escalation.summary,
-          url: '/conversations',
-          metadata: {
-            source: 'instagram-webhook',
-            userId: user.id,
-            senderId: event.senderId,
-            messageId: event.mid,
-            category: escalation.intent,
-            urgency: escalation.urgency,
-            urgent: escalation.urgency === 'High',
-          },
-        }).catch((notificationError) => {
-          logger.error('Realtime Instagram escalation notification error:', { error: notificationError });
-        });
+        const notificationTitle = `${escalation.label} detected`;
+        const notificationBody = escalation.summary;
+        const notificationMetadata = {
+          source: 'instagram-webhook',
+          userId: user.id,
+          senderId: event.senderId,
+          messageId: event.mid,
+          category: escalation.intent,
+          urgency: escalation.urgency,
+          urgent: escalation.urgency === 'High',
+        };
 
-        logger.info("processInstagramAutomations: Escalation detected, pausing webhook auto-reply.", {
+        if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
+          await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
+            type: 'escalation',
+            title: notificationTitle,
+            body: notificationBody,
+            url: '/conversations',
+            metadata: notificationMetadata,
+          }).catch((notificationError) => {
+            logger.error('Realtime Instagram escalation notification error:', { error: notificationError });
+          });
+        }
+
+        if (shouldPauseAiForEscalation(escalation)) {
+          logger.info("processInstagramAutomations: Escalation detected, pausing webhook auto-reply.", {
+            userId: user.id,
+            intent: escalation.intent,
+            senderId: event.senderId,
+          });
+          continue;
+        }
+
+        logger.info("processInstagramAutomations: Sales escalation detected, continuing webhook auto-reply.", {
           userId: user.id,
           intent: escalation.intent,
           senderId: event.senderId,
         });
-        continue;
       }
 
       if (!integration.autoSend) {
@@ -346,6 +877,7 @@ async function processInstagramAutomations(
       logger.info("processInstagramAutomations: Checked message history", { isFirstInboundDm, previousCount: event.previousSenderMessageCount, welcomeEnabled: welcome.enabled });
 
       let reply = '';
+      let catalogOffer: InstagramCatalogOffer | null = null;
       if (isFirstInboundDm && welcome.enabled) {
         logger.info("processInstagramAutomations: Generating Welcome Message.");
         reply = renderInstagramWelcomeMessage({
@@ -355,12 +887,14 @@ async function processInstagramAutomations(
         });
       } else {
         logger.info("processInstagramAutomations: Triggering generateWebhookAiReply.");
-        reply = await generateWebhookAiReply({
+        const aiResult = await generateWebhookAiReply({
           supabase,
           user,
           latestText: event.text,
           participant,
         });
+        reply = aiResult.reply;
+        catalogOffer = aiResult.catalogOffer;
       }
 
       if (!reply.trim()) {
@@ -368,9 +902,119 @@ async function processInstagramAutomations(
         continue;
       }
 
+      let orderId = '';
+      let pendingOrder: Awaited<ReturnType<typeof createPendingCommerceOrder>> = null;
+      if (catalogOffer) {
+        pendingOrder = await createPendingCommerceOrder(supabase, user.id, {
+          instagramSenderId: event.senderId,
+          instagramUsername: participant.username || participant.name || '',
+          productId: catalogOffer.id,
+          sourceMediaId: catalogOffer.sourceMediaId,
+          productTitle: catalogOffer.title,
+          productDescription: catalogOffer.description,
+          productImageUrl: catalogOffer.imageUrl,
+          productPermalink: catalogOffer.permalink,
+          priceText: catalogOffer.priceText,
+          amount: catalogOffer.priceAmount,
+          currency: catalogOffer.currency || 'USD',
+          source: 'instagram_webhook_ai',
+          metadata: {
+            matchScore: catalogOffer.matchScore,
+            confidence: catalogOffer.confidence,
+          },
+        }).catch((orderError) => {
+          logger.error('processInstagramAutomations: Could not create pending commerce order before confirm reply.', {
+            error: orderError,
+            userId: user.id,
+            senderId: event.senderId,
+          });
+          return null;
+        });
+        orderId = pendingOrder?.id || '';
+      }
+
+      let catalogImageMessageId = '';
+      if (catalogOffer?.imageUrl?.startsWith('https://')) {
+        try {
+          const imageSent = await sendInstagramAttachmentMessage(account.access_token, event.senderId, {
+            type: 'image',
+            url: catalogOffer.imageUrl,
+          });
+          catalogImageMessageId = imageSent.message_id || '';
+          logger.info("processInstagramAutomations: Product image sent successfully before confirm reply", {
+            product: catalogOffer.title,
+            message_id: imageSent.message_id,
+          });
+        } catch (attachmentError) {
+          logger.warn('processInstagramAutomations: Product image could not be sent before AI reply.', {
+            error: attachmentError,
+            product: catalogOffer.title,
+          });
+        }
+      }
+
       logger.info("processInstagramAutomations: Sending Instagram text message reply...", { reply: reply.trim() });
-      const sent = await sendInstagramTextMessage(account.access_token, event.senderId, reply.trim());
+      const sent = await sendInstagramTextMessageWithQuickReplyFallback(
+        account.access_token,
+        event.senderId,
+        reply.trim(),
+        pendingOrder ? confirmOrderQuickReplies : []
+      );
       logger.info("processInstagramAutomations: Instagram text message sent successfully", { message_id: sent.message_id });
+
+      await storeInstagramMessage({
+        supabase,
+        mid: sent.message_id || '',
+        userId: user.id,
+        conversationId: event.senderId,
+        senderId: event.recipientId,
+        recipientId: event.senderId,
+        direction: 'outbound',
+        text: reply.trim(),
+        timestamp: Date.now(),
+        rawEvent: sent as Record<string, unknown>,
+        metadata: {
+          source: isFirstInboundDm && welcome.enabled ? 'instagram_webhook_welcome' : 'instagram_webhook_ai',
+          catalogProduct: catalogOffer?.title || '',
+          catalogImageMessageId,
+          orderId,
+        },
+      }).catch((storeError) => {
+        logger.warn('processInstagramAutomations: Could not persist outbound automation message.', { error: storeError });
+      });
+
+      const rosSnapshot = buildWebhookRevenueOperatingSnapshot({
+        latestText: event.text,
+        catalogOffer,
+        pendingOrderId: orderId,
+        escalation,
+        outcomeProviders,
+      });
+      await persistRevenueOperatingSnapshot({
+        supabase,
+        userId: user.id,
+        participant: {
+          id: event.senderId,
+          username: participant.username,
+          name: participant.name,
+        },
+        conversationId: event.senderId,
+        messages: [
+          { from: 'user', text: event.text },
+          { from: 'me', text: reply.trim() },
+        ],
+        snapshot: rosSnapshot,
+        escalation,
+        outcomeProviders,
+        source: isFirstInboundDm && welcome.enabled ? 'instagram_webhook_welcome' : 'instagram_webhook_ai',
+      }).catch((rosError) => {
+        logger.warn('processInstagramAutomations: Could not persist ROS decision for webhook reply.', {
+          error: rosError,
+          userId: user.id,
+          senderId: event.senderId,
+          orderId,
+        });
+      });
 
       logger.info("processInstagramAutomations: Triggering realtime pusher notification for sent reply...");
       await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
@@ -384,6 +1028,9 @@ async function processInstagramAutomations(
           igUserId: event.recipientId,
           senderId: event.senderId,
           messageId: sent.message_id || '',
+          catalogProduct: catalogOffer?.title || '',
+          catalogImageMessageId,
+          orderId,
           welcome: isFirstInboundDm,
         },
       }).catch((notificationError) => {
@@ -442,12 +1089,16 @@ export async function POST(request: Request) {
 
       for (const entry of body.entry || []) {
         for (const msg of (entry.messaging || []) as InstagramWebhookMessageEvent[]) {
-          const text = msg.message?.text?.trim();
+          const quickReplyPayload = msg.message?.quick_reply?.payload?.trim() || '';
+          const displayText =
+            msg.message?.text?.trim() ||
+            (quickReplyPayload === 'CONFIRM_ORDER' ? 'Confirm order' : quickReplyPayload);
+          const automationText = quickReplyPayload || displayText;
           const mid = msg.message?.mid || '';
           const senderId = msg.sender?.id || '';
           const recipientId = msg.recipient?.id || entry.id || '';
 
-          if (msg.message?.is_echo || !text || !senderId || !recipientId) {
+          if (msg.message?.is_echo || !automationText || !senderId || !recipientId) {
             continue;
           }
 
@@ -455,10 +1106,10 @@ export async function POST(request: Request) {
           const previousSenderMessageCount = await getSenderMessageCount(supabase, senderId);
 
           if (!alreadyStored) {
-            let dbText = text;
+            let dbText = displayText;
             const story = msg.message?.reply_to?.story;
             if (story) {
-              dbText = `__STORY_REPLY__:${JSON.stringify(story)}__TEXT__:${text}`;
+              dbText = `__STORY_REPLY__:${JSON.stringify(story)}__TEXT__:${displayText}`;
             }
 
             messagesToInsert.push({
@@ -472,7 +1123,7 @@ export async function POST(request: Request) {
               mid,
               senderId,
               recipientId,
-              text,
+              text: automationText,
               timestamp: msg.timestamp,
               previousSenderMessageCount,
             });
@@ -499,27 +1150,44 @@ export async function POST(request: Request) {
         }
 
         const messagesForNotification = messagesToInsert.filter(m => insertedMids.has(m.mid));
-        if (messagesForNotification.length > 0) {
-          const firstMsgText = messagesForNotification[0].text;
+        const notificationMessages = messagesForNotification.filter((message) => {
+          const cleanText = message.text.startsWith('__STORY_REPLY__:') && message.text.includes('__TEXT__:')
+            ? message.text.split('__TEXT__:', 2)[1]
+            : message.text;
+
+          return !shouldSuppressRealtimeNotification({
+            title: 'New Instagram message',
+            body: cleanText.slice(0, 120) || 'A new Instagram DM arrived.',
+            metadata: { source: 'meta-webhook' },
+          });
+        });
+
+        if (notificationMessages.length > 0) {
+          const firstMsgText = notificationMessages[0].text;
           const cleanText = firstMsgText.startsWith('__STORY_REPLY__:') && firstMsgText.includes('__TEXT__:')
             ? firstMsgText.split('__TEXT__:', 2)[1]
             : firstMsgText;
+          const notificationTitle = notificationMessages.length === 1 ? 'New Instagram message' : 'New Instagram messages';
+          const notificationBody =
+            notificationMessages.length === 1
+              ? cleanText.slice(0, 120) || 'A new Instagram DM arrived.'
+              : `${notificationMessages.length} new Instagram DMs arrived.`;
+          const notificationMetadata = {
+            count: notificationMessages.length,
+            source: 'meta-webhook',
+          };
 
-          await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
-            type: 'message',
-            title: messagesForNotification.length === 1 ? 'New Instagram message' : 'New Instagram messages',
-            body:
-              messagesForNotification.length === 1
-                ? cleanText.slice(0, 120) || 'A new Instagram DM arrived.'
-                : `${messagesForNotification.length} new Instagram DMs arrived.`,
-            url: '/conversations',
-            metadata: {
-              count: messagesForNotification.length,
-              source: 'meta-webhook',
-            },
-          }).catch((notificationError) => {
-            logger.error('Realtime webhook notification error:', { error: notificationError });
-          });
+          if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
+            await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+              type: 'message',
+              title: notificationTitle,
+              body: notificationBody,
+              url: '/conversations',
+              metadata: notificationMetadata,
+            }).catch((notificationError) => {
+              logger.error('Realtime webhook notification error:', { error: notificationError });
+            });
+          }
         }
       }
       const filteredEvents = automationEvents.filter(event => insertedMids.has(event.mid));

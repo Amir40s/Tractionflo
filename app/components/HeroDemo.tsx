@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Check, Send, RefreshCw, ArrowRight } from "lucide-react";
+import { Check, Send, RefreshCw, ArrowRight } from "lucide-react";
 
 const LIME = '#d4ff00';
 
@@ -52,7 +52,7 @@ export default function HeroDemo() {
     setShowWorkflow(false);
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     setIsGenerating(true);
     setProgress(0);
@@ -87,29 +87,31 @@ export default function HeroDemo() {
         }, 220);
       }
     }, 250); // Total loading takes 1 second
-  };
+  }, []);
 
   // Auto replay loop every 15 seconds
   useEffect(() => {
-    handleGenerate();
+    const startTimer = setTimeout(handleGenerate, 0);
 
     loopRef.current = setInterval(() => {
       handleGenerate();
     }, 15000);
 
     return () => {
+      clearTimeout(startTimer);
       if (loopRef.current) clearInterval(loopRef.current);
-      if (timerRef.current) clearTimeout(timerRef.current);
+      const timer = timerRef.current;
+      if (timer) clearTimeout(timer);
     };
-  }, [activePreset]);
+  }, [activePreset, handleGenerate]);
 
-  const handleManualClick = () => {
+  const handleManualClick = useCallback(() => {
     if (loopRef.current) clearInterval(loopRef.current);
     handleGenerate();
     loopRef.current = setInterval(() => {
       handleGenerate();
     }, 15000);
-  };
+  }, [handleGenerate]);
 
   return (
     <div className="w-full relative flex flex-col gap-6 text-black select-none">
@@ -142,9 +144,7 @@ export default function HeroDemo() {
             
             {/* Chat Bubble Prompt Box */}
             <div className="flex-1 bg-black/[0.02] border border-black/10 rounded-xl p-3 text-xs font-bold text-left relative leading-relaxed pr-8">
-              <span>When someone comments </span>
-              <span className="text-[#007257] font-black underline">GUIDE</span>
-              <span>, send my PDF, answer pricing questions and follow up tomorrow.</span>
+              <span>{inputText}</span>
               <Send className="absolute right-3.5 bottom-3.5 h-3.5 w-3.5 text-black/35" />
             </div>
           </div>

@@ -74,25 +74,34 @@ import {
   type WelcomeMessageSetting,
 } from "@/lib/quick-replies";
 import {
+  creatorSettingsAccessChangedEvent,
+  creatorSettingsAccessStorageKey,
   getVisibleSettingsMenuItems,
+  normalizeCreatorSettingsAccess,
   notificationVisuals,
+  readCreatorSettingsAccess,
   readStoredSettingsState,
   ruleVisuals,
   settingsMenuItems,
   settingsStateStorageKey,
   type AiSettings,
-  type ApiSettings,
   type AppSettingsState,
   type BillingSettings,
   type BookingIntegrationSettings,
   type BookingSheetRoute,
   type BrandSettings,
   type BrowserNotificationPermission,
+  type CreatorSettingsAccessState,
   type PricingPlan,
   type PricingResponse,
   type SecuritySettings,
   type SettingsSection,
 } from "./settings-state";
+import {
+  normalizeRevenueOutcomeProviderSettings,
+  type RevenueOutcomeProviderConfig,
+  type RevenueOutcomeProviderSettings,
+} from "@/lib/revenue-outcome-providers";
 
 type AccountProfile = {
   name: string;
@@ -291,12 +300,14 @@ function SettingsMenuCard({
   activeSection,
   onSectionChange,
   profile,
+  creatorSettingsAccess,
 }: {
   activeSection: SettingsSection;
   onSectionChange: (section: SettingsSection) => void;
   profile: AccountProfile;
+  creatorSettingsAccess: CreatorSettingsAccessState;
 }) {
-  const visibleMenuItems = getVisibleSettingsMenuItems(profile);
+  const visibleMenuItems = getVisibleSettingsMenuItems(profile, creatorSettingsAccess);
 
   return (
     <aside className="self-start rounded-[12px] border border-[#e5e8f0] bg-white p-3 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
@@ -1135,13 +1146,6 @@ function SettingsInstagramSection() {
     .slice(0, 5);
   const profileUrl = getInstagramProfileUrl(account?.username);
   const displayName = formatInstagramDisplayName(account);
-  const oauthCallbackPath = "/api/auth/instagram/callback";
-  const webhookCallbackPath = "/api/webhooks/meta";
-
-  function copyValue(value: string) {
-    void navigator.clipboard?.writeText(value);
-  }
-
   if (!isConnected && !loading) {
     return (
       <div className="grid gap-5">
@@ -1254,56 +1258,29 @@ function SettingsInstagramSection() {
         />
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
-          <h2 className="text-[15px] font-extrabold text-black">Connected Account</h2>
-          <div className="mt-5 flex items-center gap-4">
-            <InstagramLogoTile />
-            <div className="min-w-0">
-              <p className="truncate text-[14px] font-extrabold text-black">{displayName}</p>
-              <p className="mt-1 truncate text-[12px] font-semibold text-[#46506a]">{formatInstagramHandle(account) || "No username returned"}</p>
+      <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+        <h2 className="text-[15px] font-extrabold text-black">Connected Account</h2>
+        <div className="mt-5 flex items-center gap-4">
+          <InstagramLogoTile />
+          <div className="min-w-0">
+            <p className="truncate text-[14px] font-extrabold text-black">{displayName}</p>
+            <p className="mt-1 truncate text-[12px] font-semibold text-[#46506a]">{formatInstagramHandle(account) || "No username returned"}</p>
+          </div>
+        </div>
+        <div className="mt-5 divide-y divide-[#edf0f6] border-t border-[#edf0f6]">
+          {[
+            ["Instagram name", account?.name || "Not returned"],
+            ["Username", account?.username ? `@${account.username}` : "Not returned"],
+            ["Graph user ID", igUserId || account?.id || "Not returned"],
+            ["Connected date", formatInstagramFullDate(account?.connectedAt)],
+          ].map(([label, value]) => (
+            <div key={label} className="flex min-h-[43px] items-center justify-between gap-4 text-[12px]">
+              <span className="font-medium text-black">{label}</span>
+              <span className="min-w-0 truncate text-right font-semibold text-[#253049]">{value}</span>
             </div>
-          </div>
-          <div className="mt-5 divide-y divide-[#edf0f6] border-t border-[#edf0f6]">
-            {[
-              ["Instagram name", account?.name || "Not returned"],
-              ["Username", account?.username ? `@${account.username}` : "Not returned"],
-              ["Graph user ID", igUserId || account?.id || "Not returned"],
-              ["Connected date", formatInstagramFullDate(account?.connectedAt)],
-            ].map(([label, value]) => (
-              <div key={label} className="flex min-h-[43px] items-center justify-between gap-4 text-[12px]">
-                <span className="font-medium text-black">{label}</span>
-                <span className="min-w-0 truncate text-right font-semibold text-[#253049]">{value}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
-          <h2 className="text-[15px] font-extrabold text-black">API Setup</h2>
-          <div className="mt-5 divide-y divide-[#edf0f6] border-t border-[#edf0f6]">
-            {[
-              ["OAuth callback", oauthCallbackPath],
-              ["Webhook callback", webhookCallbackPath],
-              ["Conversations API", "/api/instagram/conversations"],
-              ["Send message API", "/api/instagram/send"],
-            ].map(([label, value]) => (
-              <div key={label} className="grid min-h-[48px] grid-cols-[118px_minmax(0,1fr)_28px] items-center gap-3 text-[12px]">
-                <span className="font-medium text-black">{label}</span>
-                <code className="truncate rounded-[7px] bg-[#f6f7fb] px-2 py-1 text-[11px] font-semibold text-[#253049]">{value}</code>
-                <button
-                  type="button"
-                  aria-label={`Copy ${label}`}
-                  onClick={() => copyValue(value)}
-                  className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[#46506a] hover:bg-[#f0edff] hover:text-[#3044ff]"
-                >
-                  <Copy size={14} strokeWidth={2.25} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
+          ))}
+        </div>
+      </section>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
@@ -1959,15 +1936,6 @@ function SettingsAiIntegrationSection({
         </div>
 
         <div className="grid gap-4">
-          <label className="block">
-            <span className="text-[11px] font-extrabold text-[#46506a]">CTA message</span>
-            <textarea
-              value={draft.ctaMessage}
-              onChange={(event) => updateDraft({ ctaMessage: event.target.value })}
-              className="mt-2 min-h-[96px] w-full rounded-[8px] border border-[#dde3ee] px-3 py-2 text-[12px] font-semibold leading-relaxed outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
-            />
-          </label>
-
           <div className="rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-4">
             <div className="flex items-center justify-between gap-4">
               <span>
@@ -2088,9 +2056,9 @@ function SettingsNotificationsCard({
     return () => window.clearTimeout(timeout);
   }, [savedMessage]);
 
-  const activeCount = notifications.filter((notification) => notification.enabled).length;
+  const visibleNotifications = notifications.filter((notification) => notification.id !== "digest");
+  const activeCount = visibleNotifications.filter((notification) => notification.enabled).length;
   const emailSetting = notifications.find((notification) => notification.id === "email");
-  const pushSetting = notifications.find((notification) => notification.id === "push");
 
   function updateNotification(id: string, partial: Partial<NotificationSetting>) {
     onChange(
@@ -2147,28 +2115,6 @@ function SettingsNotificationsCard({
     updateNotification(id, { value, enabled: value !== "Off" });
   }
 
-  async function sendTestNotification() {
-    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
-      await requestPushPermission();
-    }
-
-    try {
-      const response = await fetch("/api/notifications/test", {
-        method: "POST",
-      });
-      const payload = (await response.json()) as { error?: string };
-
-      if (!response.ok || payload.error) {
-        throw new Error(payload.error || "Could not send test notification");
-      }
-
-      setSavedMessage("Realtime test sent");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not send test notification";
-      setSavedMessage(message);
-    }
-  }
-
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -2185,7 +2131,7 @@ function SettingsNotificationsCard({
       </div>
 
       <div className="mt-4 space-y-4">
-        {notifications.map((item) => {
+        {visibleNotifications.map((item) => {
           const visual = notificationVisuals[item.id] || { icon: Bell };
           const Icon = visual.icon;
           return (
@@ -2243,15 +2189,6 @@ function SettingsNotificationsCard({
           {savedMessage || "Changes are saved to your account."}
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <button
-            type="button"
-            onClick={sendTestNotification}
-            disabled={pushSetting?.enabled === false}
-            className="flex h-10 items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-extrabold text-black transition hover:bg-[#f8f9fc] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Bell size={14} strokeWidth={2.4} />
-            Test push
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -3275,8 +3212,11 @@ const bookingSheetTypeOptions = [
   "Cricket ground booking",
   "Padel ground booking",
   "All confirmed bookings",
-  "Custom booking type",
 ];
+
+function getVisibleBookingSheetType(bookingType: string) {
+  return bookingSheetTypeOptions.includes(bookingType) ? bookingType : "All confirmed bookings";
+}
 
 function hasUsableSheetLink(value: string) {
   return Boolean(getSheetDestinationUrl(value));
@@ -3307,12 +3247,204 @@ function getSheetDestinationUrl(value: string) {
   return "";
 }
 
+const outcomeProviderLabels: Record<string, string> = {
+  follow_creator: "Follow creator",
+  join_newsletter: "Join newsletter",
+  book_call: "Book call",
+  start_trial: "Start trial",
+  purchase_product: "Purchase product",
+  upgrade_plan: "Upgrade plan",
+  recover_abandoned_cart: "Recover cart",
+  renew_subscription: "Renew subscription",
+  collect_testimonial: "Collect testimonial",
+};
+
+const hiddenOutcomeProviderTypes = new Set(["follow_creator", "join_newsletter", "start_trial", "upgrade_plan", "renew_subscription"]);
+
+function SettingsRevenueOutcomeProvidersSection({
+  outcomeProviders,
+  onChange,
+}: {
+  outcomeProviders: RevenueOutcomeProviderSettings;
+  onChange: (outcomeProviders: RevenueOutcomeProviderSettings) => void;
+}) {
+  const [message, setMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [providerSecrets, setProviderSecrets] = useState<Record<string, string>>({});
+  const visibleProviders = outcomeProviders.providers.filter((provider) => !hiddenOutcomeProviderTypes.has(provider.outcomeType));
+  const connectedCount = visibleProviders.filter((provider) => provider.enabled && (provider.actionUrl || provider.outcomeType === "purchase_product")).length;
+
+  function updateProvider(outcomeType: RevenueOutcomeProviderConfig["outcomeType"], partial: Partial<RevenueOutcomeProviderConfig>) {
+    onChange({
+      providers: outcomeProviders.providers.map((provider) =>
+        provider.outcomeType === outcomeType
+          ? { ...provider, ...partial, enabled: provider.outcomeType === "purchase_product" ? true : partial.enabled ?? provider.enabled }
+          : provider
+      ),
+    });
+  }
+
+  function openProvider(provider: RevenueOutcomeProviderConfig) {
+    if (!provider.actionUrl) {
+      setMessage("Add a valid https link first.");
+      return;
+    }
+
+    window.open(provider.actionUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function saveProviders() {
+    setIsSaving(true);
+    setMessage("Saving revenue outcome providers...");
+
+    try {
+      const response = await fetch("/api/revenue/outcome-providers", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          outcomeProviders,
+          providerSecrets: Object.entries(providerSecrets)
+            .filter(([, secretToken]) => secretToken.trim())
+            .map(([outcomeType, secretToken]) => ({ outcomeType, secretToken })),
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { outcomeProviders?: unknown; error?: string };
+
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Could not save revenue outcome providers");
+      }
+
+      const normalized = normalizeRevenueOutcomeProviderSettings(payload.outcomeProviders);
+      onChange(normalized);
+      setProviderSecrets({});
+      setMessage("Revenue outcome providers saved.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save revenue outcome providers");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-[15px] font-extrabold text-black">Revenue outcome providers</h3>
+          <p className="mt-1 max-w-[760px] text-[12px] font-medium leading-relaxed text-[#46506a]">
+            Connect the links ROS should use when it chooses booking, product purchase, cart recovery, or testimonial outcomes.
+          </p>
+        </div>
+        <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
+          {connectedCount} ready
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3">
+        {visibleProviders.map((provider) => {
+          const isPurchase = provider.outcomeType === "purchase_product";
+          const ready = provider.enabled && (provider.actionUrl || isPurchase);
+
+          return (
+            <div key={provider.outcomeType} className="rounded-[10px] border border-[#edf0f6] p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-extrabold text-black">{outcomeProviderLabels[provider.outcomeType] || provider.outcomeType}</p>
+                  <p className="mt-1 text-[11px] font-medium text-[#687089]">{provider.notes}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`rounded-[8px] px-2.5 py-1 text-[10px] font-extrabold ${ready ? "bg-[#e7f8ed] text-[#0a9b3f]" : "bg-[#fff3e6] text-[#c77800]"}`}>
+                    {ready ? "Ready" : "Needs link"}
+                  </span>
+                  <SettingsToggle
+                    ariaLabel={`Toggle ${outcomeProviderLabels[provider.outcomeType] || provider.outcomeType}`}
+                    checked={provider.enabled}
+                    onChange={(enabled) => updateProvider(provider.outcomeType, { enabled })}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
+                <label className="block">
+                  <span className="text-[11px] font-extrabold text-[#46506a]">Provider</span>
+                  <input
+                    value={provider.provider}
+                    onChange={(event) => updateProvider(provider.outcomeType, { provider: event.target.value })}
+                    disabled={isPurchase}
+                    className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-extrabold text-[#46506a]">Action link</span>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={provider.actionUrl}
+                      onChange={(event) => updateProvider(provider.outcomeType, { actionUrl: event.target.value, enabled: Boolean(event.target.value.trim()) || isPurchase })}
+                      placeholder={isPurchase ? "Existing Stripe checkout is used for product purchases" : "https://..."}
+                      disabled={isPurchase}
+                      className="h-10 min-w-0 flex-1 rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => openProvider(provider)}
+                      disabled={!provider.actionUrl}
+                      className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee] disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-label={`Open ${provider.provider}`}
+                    >
+                      <ExternalLink size={14} strokeWidth={2.25} />
+                    </button>
+                  </div>
+                </label>
+              </div>
+
+              <label className="mt-3 block">
+                <span className="text-[11px] font-extrabold text-[#46506a]">CTA text</span>
+                <input
+                  value={provider.cta}
+                  onChange={(event) => updateProvider(provider.outcomeType, { cta: event.target.value })}
+                  className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+                />
+              </label>
+
+              {(provider.lastStatus || provider.lastSyncAt) && (
+                <p className="mt-3 text-[10px] font-semibold text-[#8a91a3]">
+                  Last sync: {provider.lastStatus || "unknown"} {provider.lastSyncAt ? `at ${new Date(provider.lastSyncAt).toLocaleString()}` : ""}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 flex flex-col gap-3 border-t border-[#edf0f6] pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-[11px] font-semibold text-[#46506a]">
+          These links are included in ROS decisions, outcome metadata, and AI prompts.
+        </p>
+        <button
+          type="button"
+          onClick={() => void saveProviders()}
+          disabled={isSaving}
+          className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.22)] disabled:cursor-not-allowed disabled:opacity-65"
+        >
+          {isSaving ? <RefreshCw size={15} strokeWidth={2.5} className="animate-spin" /> : <Check size={15} strokeWidth={2.5} />}
+          Save providers
+        </button>
+      </div>
+
+      {message && <p className="mt-4 rounded-[8px] bg-[#f6f7fb] px-3 py-2 text-[11px] font-semibold text-[#46506a]">{message}</p>}
+    </section>
+  );
+}
+
 function SettingsBookingIntegrationsSection({
   integrations,
   onChange,
+  hideHeader = false,
 }: {
   integrations: BookingIntegrationSettings;
   onChange: (integrations: BookingIntegrationSettings) => void;
+  hideHeader?: boolean;
 }) {
   const [message, setMessage] = useState("");
   const [testingRouteId, setTestingRouteId] = useState("");
@@ -3336,7 +3468,7 @@ function SettingsBookingIntegrationsSection({
         {
           id,
           name: "Custom booking sheet",
-          bookingType: "Custom booking type",
+          bookingType: "All confirmed bookings",
           sheetUrl: "",
           worksheetName: "Confirmed Bookings",
           enabled: true,
@@ -3426,14 +3558,16 @@ function SettingsBookingIntegrationsSection({
 
   return (
     <div className="grid gap-5">
-      <SettingsSectionHeader
-        section="integrations"
-        action={
-          <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
-            {connectedRoutes} connected
-          </span>
-        }
-      />
+      {!hideHeader ? (
+        <SettingsSectionHeader
+          section="integrations"
+          action={
+            <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
+              {connectedRoutes} connected
+            </span>
+          }
+        />
+      ) : null}
 
       <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -3478,7 +3612,7 @@ function SettingsBookingIntegrationsSection({
                       </span>
                       <div className="min-w-0">
                         <p className="truncate text-[13px] font-extrabold text-black">{route.name}</p>
-                        <p className="mt-1 text-[11px] font-medium text-[#46506a]">{route.bookingType} to {route.worksheetName || "sheet tab"}</p>
+                        <p className="mt-1 text-[11px] font-medium text-[#46506a]">{getVisibleBookingSheetType(route.bookingType)} to {route.worksheetName || "sheet tab"}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -3504,7 +3638,7 @@ function SettingsBookingIntegrationsSection({
                       <span className="text-[11px] font-extrabold text-[#46506a]">Booking filter</span>
                       <SettingsSelect
                         ariaLabel={`${route.name} booking filter`}
-                        value={route.bookingType}
+                        value={getVisibleBookingSheetType(route.bookingType)}
                         options={bookingSheetTypeOptions}
                         onChange={(bookingType) => updateRoute(route.id, { bookingType })}
                         className="mt-2 w-full"
@@ -3653,94 +3787,6 @@ function SettingsBookingIntegrationsSection({
               })}
             </tbody>
           </table>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function SettingsApiSection({
-  api,
-  onChange,
-}: {
-  api: ApiSettings;
-  onChange: (api: ApiSettings) => void;
-}) {
-  const [origin] = useState(() => (typeof window === "undefined" ? "http://localhost:3000" : window.location.origin));
-  const [testStatus, setTestStatus] = useState("");
-
-  function updateEvent(id: string, enabled: boolean) {
-    onChange({
-      ...api,
-      events: api.events.map((event) => (event.id === id ? { ...event, enabled } : event)),
-    });
-  }
-
-  function copyValue(value: string) {
-    void navigator.clipboard?.writeText(value);
-    setTestStatus("Copied.");
-  }
-
-  return (
-    <div className="grid gap-5">
-      <SettingsSectionHeader section="api" />
-      <section className="grid gap-5 rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <div>
-          <h3 className="text-[14px] font-extrabold text-black">Endpoints</h3>
-          <div className="mt-4 space-y-3">
-            {[
-              ["Instagram OAuth callback", `${origin}/api/auth/instagram/callback`],
-              ["Meta webhook callback", `${origin}/api/webhooks/meta`],
-              ["Conversations API", `${origin}/api/instagram/conversations`],
-              ["Send message API", `${origin}/api/instagram/send`],
-            ].map(([label, value]) => (
-              <div key={label} className="grid gap-2 rounded-[10px] border border-[#edf0f6] p-3 sm:grid-cols-[150px_minmax(0,1fr)_32px] sm:items-center">
-                <span className="text-[11px] font-extrabold text-black">{label}</span>
-                <code className="truncate rounded-[7px] bg-[#f6f7fb] px-2 py-1 text-[11px] font-semibold text-[#253049]">{value}</code>
-                <button type="button" onClick={() => copyValue(value)} className="flex h-8 w-8 items-center justify-center rounded-[8px] text-[#46506a] hover:bg-[#f0edff] hover:text-[#3044ff]" aria-label={`Copy ${label}`}>
-                  <Copy size={14} strokeWidth={2.25} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <h3 className="text-[14px] font-extrabold text-black">Webhook Settings</h3>
-          <label className="mt-4 block">
-            <span className="text-[11px] font-extrabold text-[#46506a]">Webhook URL</span>
-            <input
-              value={api.webhookUrl}
-              onChange={(event) => onChange({ ...api, webhookUrl: event.target.value })}
-              className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
-            />
-          </label>
-          <label className="mt-4 block">
-            <span className="text-[11px] font-extrabold text-[#46506a]">Signing secret</span>
-            <div className="mt-2 flex gap-2">
-              <input value={api.signingSecret} onChange={(event) => onChange({ ...api, signingSecret: event.target.value })} className="h-10 min-w-0 flex-1 rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10" />
-              <button type="button" onClick={() => copyValue(api.signingSecret)} className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee]">
-                <Copy size={14} strokeWidth={2.25} />
-              </button>
-            </div>
-          </label>
-          <div className="mt-5 space-y-3">
-            {api.events.map((event) => (
-              <div key={event.id} className="flex items-center justify-between gap-4">
-                <span className="text-[12px] font-extrabold text-black">{event.label}</span>
-                <SettingsToggle ariaLabel={`Toggle ${event.label}`} checked={event.enabled} onChange={(checked) => updateEvent(event.id, checked)} />
-              </div>
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={() => setTestStatus("Webhook configuration looks ready. Use Meta's Test button to send a live event.")}
-            className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-[#0d1118] px-4 text-[12px] font-extrabold text-white"
-          >
-            <Send size={14} strokeWidth={2.4} />
-            Test configuration
-          </button>
-          {testStatus && <p className="mt-3 rounded-[8px] bg-[#f6f7fb] px-3 py-2 text-[11px] font-semibold text-[#46506a]">{testStatus}</p>}
         </div>
       </section>
     </div>
@@ -4259,9 +4305,11 @@ export default function SettingsPage({
 }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("account");
   const [settingsState, setSettingsState] = useState<AppSettingsState>(readStoredSettingsState);
+  const [creatorSettingsAccess, setCreatorSettingsAccess] = useState<CreatorSettingsAccessState>(readCreatorSettingsAccess);
   const customRuleCounterRef = useRef(1);
   const hasChangedNotificationsRef = useRef(false);
   const hasChangedRulesRef = useRef(false);
+  const hasChangedOutcomeProvidersRef = useRef(false);
 
   useEffect(() => {
     window.localStorage.setItem(settingsStateStorageKey, JSON.stringify(settingsState));
@@ -4270,6 +4318,31 @@ export default function SettingsPage({
     dispatchSavedRepliesChanged(settingsState.savedReplies);
     dispatchWelcomeMessageChanged(settingsState.welcomeMessage);
   }, [settingsState]);
+
+  useEffect(() => {
+    function syncCreatorSettingsAccess() {
+      setCreatorSettingsAccess(readCreatorSettingsAccess());
+    }
+
+    function handleCreatorSettingsAccessChange(event: Event) {
+      const nextAccess = normalizeCreatorSettingsAccess((event as CustomEvent<CreatorSettingsAccessState>).detail);
+      setCreatorSettingsAccess(nextAccess);
+    }
+
+    function handleStorage(event: StorageEvent) {
+      if (event.key === creatorSettingsAccessStorageKey) {
+        syncCreatorSettingsAccess();
+      }
+    }
+
+    window.addEventListener(creatorSettingsAccessChangedEvent, handleCreatorSettingsAccessChange);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener(creatorSettingsAccessChangedEvent, handleCreatorSettingsAccessChange);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
 
   useEffect(() => {
     const nextCounter =
@@ -4286,9 +4359,10 @@ export default function SettingsPage({
 
     async function loadSavedSettings() {
       try {
-        const [notificationsResponse, rulesResponse] = await Promise.all([
+        const [notificationsResponse, rulesResponse, outcomeProvidersResponse] = await Promise.all([
           fetch("/api/notifications/preferences", { cache: "no-store" }),
           fetch("/api/escalation-rules", { cache: "no-store" }),
+          fetch("/api/revenue/outcome-providers", { cache: "no-store" }),
         ]);
 
         if (notificationsResponse.ok) {
@@ -4315,6 +4389,18 @@ export default function SettingsPage({
             dispatchEscalationRulesChanged(rules);
           }
         }
+
+        if (outcomeProvidersResponse.ok) {
+          const payload = (await outcomeProvidersResponse.json()) as { outcomeProviders?: unknown };
+          const revenueOutcomeProviders = normalizeRevenueOutcomeProviderSettings(payload.outcomeProviders);
+
+          if (isMounted && !hasChangedOutcomeProvidersRef.current) {
+            setSettingsState((current) => ({
+              ...current,
+              revenueOutcomeProviders,
+            }));
+          }
+        }
       } catch (error) {
         console.error("Settings preferences load error:", error);
       }
@@ -4328,7 +4414,7 @@ export default function SettingsPage({
   }, []);
 
   useEffect(() => {
-    const visibleSections = getVisibleSettingsMenuItems(profile);
+    const visibleSections = getVisibleSettingsMenuItems(profile, creatorSettingsAccess);
 
     if (!visibleSections.some((item) => item.id === activeSection)) {
       const timeout = window.setTimeout(() => {
@@ -4337,7 +4423,7 @@ export default function SettingsPage({
 
       return () => window.clearTimeout(timeout);
     }
-  }, [profile, activeSection]);
+  }, [profile, activeSection, creatorSettingsAccess]);
 
   function updateSettingsState<K extends keyof AppSettingsState>(key: K, value: AppSettingsState[K]) {
     setSettingsState((current) => ({
@@ -4413,10 +4499,21 @@ export default function SettingsPage({
 
     if (activeSection === "integrations") {
       return (
-        <SettingsBookingIntegrationsSection
-          integrations={settingsState.bookingIntegrations}
-          onChange={(bookingIntegrations) => updateSettingsState("bookingIntegrations", bookingIntegrations)}
-        />
+        <div className="grid gap-5">
+          <SettingsSectionHeader section="integrations" />
+          <SettingsRevenueOutcomeProvidersSection
+            outcomeProviders={settingsState.revenueOutcomeProviders}
+            onChange={(revenueOutcomeProviders) => {
+              hasChangedOutcomeProvidersRef.current = true;
+              updateSettingsState("revenueOutcomeProviders", revenueOutcomeProviders);
+            }}
+          />
+          <SettingsBookingIntegrationsSection
+            integrations={settingsState.bookingIntegrations}
+            onChange={(bookingIntegrations) => updateSettingsState("bookingIntegrations", bookingIntegrations)}
+            hideHeader
+          />
+        </div>
       );
     }
 
@@ -4463,10 +4560,6 @@ export default function SettingsPage({
       return <SettingsBillingSection billing={settingsState.billing} onChange={(billing) => updateSettingsState("billing", billing)} />;
     }
 
-    if (activeSection === "api") {
-      return <SettingsApiSection api={settingsState.api} onChange={(api) => updateSettingsState("api", api)} />;
-    }
-
     if (activeSection === "security") {
       return <SettingsSecuritySection security={settingsState.security} onChange={(security) => updateSettingsState("security", security)} />;
     }
@@ -4506,7 +4599,12 @@ export default function SettingsPage({
         </header>
 
         <div className="mt-7 grid items-start gap-5 xl:grid-cols-[252px_minmax(0,1fr)]">
-          <SettingsMenuCard activeSection={activeSection} onSectionChange={setActiveSection} profile={profile} />
+          <SettingsMenuCard
+            activeSection={activeSection}
+            onSectionChange={setActiveSection}
+            profile={profile}
+            creatorSettingsAccess={creatorSettingsAccess}
+          />
           {renderSettingsContent()}
         </div>
       </div>
