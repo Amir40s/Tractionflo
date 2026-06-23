@@ -93,6 +93,11 @@ import {
   type SecuritySettings,
   type SettingsSection,
 } from "./settings-state";
+import {
+  normalizeRevenueOutcomeProviderSettings,
+  type RevenueOutcomeProviderConfig,
+  type RevenueOutcomeProviderSettings,
+} from "@/lib/revenue-outcome-providers";
 
 type AccountProfile = {
   name: string;
@@ -3307,12 +3312,260 @@ function getSheetDestinationUrl(value: string) {
   return "";
 }
 
+const outcomeProviderLabels: Record<string, string> = {
+  follow_creator: "Follow creator",
+  join_newsletter: "Join newsletter",
+  book_call: "Book call",
+  start_trial: "Start trial",
+  purchase_product: "Purchase product",
+  upgrade_plan: "Upgrade plan",
+  recover_abandoned_cart: "Recover cart",
+  renew_subscription: "Renew subscription",
+  collect_testimonial: "Collect testimonial",
+};
+
+function SettingsRevenueOutcomeProvidersSection({
+  outcomeProviders,
+  onChange,
+}: {
+  outcomeProviders: RevenueOutcomeProviderSettings;
+  onChange: (outcomeProviders: RevenueOutcomeProviderSettings) => void;
+}) {
+  const [message, setMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [providerSecrets, setProviderSecrets] = useState<Record<string, string>>({});
+  const connectedCount = outcomeProviders.providers.filter(
+    (provider) => provider.enabled && (provider.actionUrl || provider.webhookUrl || provider.apiEndpoint || provider.outcomeType === "purchase_product")
+  ).length;
+
+  function updateProvider(outcomeType: RevenueOutcomeProviderConfig["outcomeType"], partial: Partial<RevenueOutcomeProviderConfig>) {
+    onChange({
+      providers: outcomeProviders.providers.map((provider) =>
+        provider.outcomeType === outcomeType
+          ? { ...provider, ...partial, enabled: provider.outcomeType === "purchase_product" ? true : partial.enabled ?? provider.enabled }
+          : provider
+      ),
+    });
+  }
+
+  function openProvider(provider: RevenueOutcomeProviderConfig) {
+    if (!provider.actionUrl) {
+      setMessage("Add a valid https link first.");
+      return;
+    }
+
+    window.open(provider.actionUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function saveProviders() {
+    setIsSaving(true);
+    setMessage("Saving revenue outcome providers...");
+
+    try {
+      const response = await fetch("/api/revenue/outcome-providers", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          outcomeProviders,
+          providerSecrets: Object.entries(providerSecrets)
+            .filter(([, secretToken]) => secretToken.trim())
+            .map(([outcomeType, secretToken]) => ({ outcomeType, secretToken })),
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { outcomeProviders?: unknown; error?: string };
+
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Could not save revenue outcome providers");
+      }
+
+      const normalized = normalizeRevenueOutcomeProviderSettings(payload.outcomeProviders);
+      onChange(normalized);
+      setProviderSecrets({});
+      setMessage("Revenue outcome providers saved.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save revenue outcome providers");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-[15px] font-extrabold text-black">Revenue outcome providers</h3>
+          <p className="mt-1 max-w-[760px] text-[12px] font-medium leading-relaxed text-[#46506a]">
+            Connect the links ROS should use when it chooses newsletter, booking, trial, upgrade, renewal, cart recovery, or testimonial outcomes.
+          </p>
+        </div>
+        <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
+          {connectedCount} ready
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3">
+        {outcomeProviders.providers.map((provider) => {
+          const isPurchase = provider.outcomeType === "purchase_product";
+          const ready = provider.enabled && (provider.actionUrl || provider.webhookUrl || provider.apiEndpoint || isPurchase);
+
+          return (
+            <div key={provider.outcomeType} className="rounded-[10px] border border-[#edf0f6] p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-extrabold text-black">{outcomeProviderLabels[provider.outcomeType] || provider.outcomeType}</p>
+                  <p className="mt-1 text-[11px] font-medium text-[#687089]">{provider.notes}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`rounded-[8px] px-2.5 py-1 text-[10px] font-extrabold ${ready ? "bg-[#e7f8ed] text-[#0a9b3f]" : "bg-[#fff3e6] text-[#c77800]"}`}>
+                    {ready ? "Ready" : "Needs link"}
+                  </span>
+                  <SettingsToggle
+                    ariaLabel={`Toggle ${outcomeProviderLabels[provider.outcomeType] || provider.outcomeType}`}
+                    checked={provider.enabled}
+                    onChange={(enabled) => updateProvider(provider.outcomeType, { enabled })}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
+                <label className="block">
+                  <span className="text-[11px] font-extrabold text-[#46506a]">Provider</span>
+                  <input
+                    value={provider.provider}
+                    onChange={(event) => updateProvider(provider.outcomeType, { provider: event.target.value })}
+                    disabled={isPurchase}
+                    className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-extrabold text-[#46506a]">Action link</span>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={provider.actionUrl}
+                      onChange={(event) => updateProvider(provider.outcomeType, { actionUrl: event.target.value, enabled: Boolean(event.target.value.trim()) || isPurchase })}
+                      placeholder={isPurchase ? "Existing Stripe checkout is used for product purchases" : "https://..."}
+                      disabled={isPurchase}
+                      className="h-10 min-w-0 flex-1 rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => openProvider(provider)}
+                      disabled={!provider.actionUrl}
+                      className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee] disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-label={`Open ${provider.provider}`}
+                    >
+                      <ExternalLink size={14} strokeWidth={2.25} />
+                    </button>
+                  </div>
+                </label>
+              </div>
+
+              <label className="mt-3 block">
+                <span className="text-[11px] font-extrabold text-[#46506a]">CTA text</span>
+                <input
+                  value={provider.cta}
+                  onChange={(event) => updateProvider(provider.outcomeType, { cta: event.target.value })}
+                  className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+                />
+              </label>
+
+              <div className="mt-3 grid gap-3 lg:grid-cols-[160px_minmax(0,1fr)]">
+                <label className="block">
+                  <span className="text-[11px] font-extrabold text-[#46506a]">Execution</span>
+                  <select
+                    value={provider.executionMode}
+                    onChange={(event) => updateProvider(provider.outcomeType, { executionMode: event.target.value as RevenueOutcomeProviderConfig["executionMode"] })}
+                    disabled={isPurchase}
+                    className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
+                  >
+                    <option value="link">Link route</option>
+                    <option value="webhook">Webhook POST</option>
+                    <option value="api">API POST</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-extrabold text-[#46506a]">{provider.executionMode === "api" ? "API endpoint" : "Webhook URL"}</span>
+                  <input
+                    value={provider.executionMode === "api" ? provider.apiEndpoint : provider.webhookUrl}
+                    onChange={(event) =>
+                      updateProvider(
+                        provider.outcomeType,
+                        provider.executionMode === "api"
+                          ? { apiEndpoint: event.target.value, enabled: Boolean(event.target.value.trim()) || provider.enabled }
+                          : { webhookUrl: event.target.value, enabled: Boolean(event.target.value.trim()) || provider.enabled }
+                      )
+                    }
+                    placeholder={provider.executionMode === "link" ? "Switch to webhook/API to execute automatically" : "https://..."}
+                    disabled={isPurchase || provider.executionMode === "link"}
+                    className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_160px]">
+                <label className="block">
+                  <span className="text-[11px] font-extrabold text-[#46506a]">
+                    Token {provider.secretSaved ? "(saved)" : "(optional)"}
+                  </span>
+                  <input
+                    type="password"
+                    value={providerSecrets[provider.outcomeType] || ""}
+                    onChange={(event) => setProviderSecrets((current) => ({ ...current, [provider.outcomeType]: event.target.value }))}
+                    placeholder={provider.secretSaved ? "Leave blank to keep saved token" : "Bearer/API token"}
+                    disabled={isPurchase || provider.executionMode === "link"}
+                    className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
+                  />
+                </label>
+                <div className="flex items-end justify-between gap-3 rounded-[8px] border border-[#edf0f6] px-3 py-2">
+                  <span className="text-[11px] font-extrabold text-[#46506a]">Auto execute</span>
+                  <SettingsToggle
+                    ariaLabel={`Auto execute ${outcomeProviderLabels[provider.outcomeType] || provider.outcomeType}`}
+                    checked={provider.autoExecute}
+                    onChange={(autoExecute) => updateProvider(provider.outcomeType, { autoExecute })}
+                  />
+                </div>
+              </div>
+
+              {(provider.lastStatus || provider.lastSyncAt) && (
+                <p className="mt-3 text-[10px] font-semibold text-[#8a91a3]">
+                  Last sync: {provider.lastStatus || "unknown"} {provider.lastSyncAt ? `at ${new Date(provider.lastSyncAt).toLocaleString()}` : ""}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-5 flex flex-col gap-3 border-t border-[#edf0f6] pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-[11px] font-semibold text-[#46506a]">
+          These links are included in ROS decisions, outcome metadata, and AI prompts.
+        </p>
+        <button
+          type="button"
+          onClick={() => void saveProviders()}
+          disabled={isSaving}
+          className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.22)] disabled:cursor-not-allowed disabled:opacity-65"
+        >
+          {isSaving ? <RefreshCw size={15} strokeWidth={2.5} className="animate-spin" /> : <Check size={15} strokeWidth={2.5} />}
+          Save providers
+        </button>
+      </div>
+
+      {message && <p className="mt-4 rounded-[8px] bg-[#f6f7fb] px-3 py-2 text-[11px] font-semibold text-[#46506a]">{message}</p>}
+    </section>
+  );
+}
+
 function SettingsBookingIntegrationsSection({
   integrations,
   onChange,
+  hideHeader = false,
 }: {
   integrations: BookingIntegrationSettings;
   onChange: (integrations: BookingIntegrationSettings) => void;
+  hideHeader?: boolean;
 }) {
   const [message, setMessage] = useState("");
   const [testingRouteId, setTestingRouteId] = useState("");
@@ -3426,14 +3679,16 @@ function SettingsBookingIntegrationsSection({
 
   return (
     <div className="grid gap-5">
-      <SettingsSectionHeader
-        section="integrations"
-        action={
-          <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
-            {connectedRoutes} connected
-          </span>
-        }
-      />
+      {!hideHeader ? (
+        <SettingsSectionHeader
+          section="integrations"
+          action={
+            <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
+              {connectedRoutes} connected
+            </span>
+          }
+        />
+      ) : null}
 
       <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -4262,6 +4517,7 @@ export default function SettingsPage({
   const customRuleCounterRef = useRef(1);
   const hasChangedNotificationsRef = useRef(false);
   const hasChangedRulesRef = useRef(false);
+  const hasChangedOutcomeProvidersRef = useRef(false);
 
   useEffect(() => {
     window.localStorage.setItem(settingsStateStorageKey, JSON.stringify(settingsState));
@@ -4286,9 +4542,10 @@ export default function SettingsPage({
 
     async function loadSavedSettings() {
       try {
-        const [notificationsResponse, rulesResponse] = await Promise.all([
+        const [notificationsResponse, rulesResponse, outcomeProvidersResponse] = await Promise.all([
           fetch("/api/notifications/preferences", { cache: "no-store" }),
           fetch("/api/escalation-rules", { cache: "no-store" }),
+          fetch("/api/revenue/outcome-providers", { cache: "no-store" }),
         ]);
 
         if (notificationsResponse.ok) {
@@ -4313,6 +4570,18 @@ export default function SettingsPage({
               rules,
             }));
             dispatchEscalationRulesChanged(rules);
+          }
+        }
+
+        if (outcomeProvidersResponse.ok) {
+          const payload = (await outcomeProvidersResponse.json()) as { outcomeProviders?: unknown };
+          const revenueOutcomeProviders = normalizeRevenueOutcomeProviderSettings(payload.outcomeProviders);
+
+          if (isMounted && !hasChangedOutcomeProvidersRef.current) {
+            setSettingsState((current) => ({
+              ...current,
+              revenueOutcomeProviders,
+            }));
           }
         }
       } catch (error) {
@@ -4413,10 +4682,21 @@ export default function SettingsPage({
 
     if (activeSection === "integrations") {
       return (
-        <SettingsBookingIntegrationsSection
-          integrations={settingsState.bookingIntegrations}
-          onChange={(bookingIntegrations) => updateSettingsState("bookingIntegrations", bookingIntegrations)}
-        />
+        <div className="grid gap-5">
+          <SettingsSectionHeader section="integrations" />
+          <SettingsRevenueOutcomeProvidersSection
+            outcomeProviders={settingsState.revenueOutcomeProviders}
+            onChange={(revenueOutcomeProviders) => {
+              hasChangedOutcomeProvidersRef.current = true;
+              updateSettingsState("revenueOutcomeProviders", revenueOutcomeProviders);
+            }}
+          />
+          <SettingsBookingIntegrationsSection
+            integrations={settingsState.bookingIntegrations}
+            onChange={(bookingIntegrations) => updateSettingsState("bookingIntegrations", bookingIntegrations)}
+            hideHeader
+          />
+        </div>
       );
     }
 

@@ -1,5 +1,10 @@
 import type { createSupabaseServiceClient } from "@/lib/supabase";
 import type { ConversationEscalation } from "@/lib/conversation-escalation";
+import { buildRevenueOutcomeAction } from "@/lib/revenue-outcome-actions";
+import type { RevenueOutcomeProviderSettings } from "@/lib/revenue-outcome-providers";
+import { executeRevenueOutcomeProvider } from "@/lib/revenue-provider-execution";
+import { recordPlatformAnalyticsEvent } from "@/lib/platform-analytics";
+import { createSupportTicket } from "@/lib/support-tickets";
 
 type SupabaseServiceClient = ReturnType<typeof createSupabaseServiceClient>;
 
@@ -79,6 +84,7 @@ export type PersistRevenueOperatingSnapshotParams = {
   messages?: RosMessage[];
   snapshot: RevenueOperatingSnapshot;
   escalation?: ConversationEscalation | null;
+  outcomeProviders?: RevenueOutcomeProviderSettings;
   source?: string;
 };
 
@@ -415,6 +421,7 @@ export async function persistRevenueOperatingSnapshot({
   messages = [],
   snapshot,
   escalation,
+  outcomeProviders,
   source = "ai_workflow",
 }: PersistRevenueOperatingSnapshotParams) {
   const prospectId = await upsertRosProspect({ supabase, userId, participant, snapshot });
@@ -457,6 +464,7 @@ export async function persistRevenueOperatingSnapshot({
   }
 
   if (escalation) {
+    const sourceEventId = `${userId}:${conversationId || senderId || "conversation"}:${escalation.intent}`;
     await supabase.from("ros_escalation_events").insert({
       user_id: userId,
       prospect_id: prospectId,
@@ -469,6 +477,24 @@ export async function persistRevenueOperatingSnapshot({
       recommended_action: escalation.recommendedAction,
       signals: escalation.signals,
     });
+
+    await createSupportTicket({
+      supabase,
+      userId,
+      title: escalation.label,
+      summary: escalation.summary,
+      topic: escalation.intent === "refund_request" ? "Billing" : "Support",
+      priority: escalation.urgency === "High" ? "High" : "Medium",
+      assignee: escalation.intent === "refund_request" ? "Billing" : "Support",
+      source: "ros_escalation",
+      sourceEventId,
+      conversationId,
+      instagramSenderId: senderId,
+      metadata: {
+        recommendedAction: escalation.recommendedAction,
+        signals: escalation.signals,
+      },
+    }).catch(() => undefined);
   }
 
   const dominantOutcome = Object.entries(snapshot.outcomeProbabilities)
@@ -476,7 +502,9 @@ export async function persistRevenueOperatingSnapshot({
     .sort(([, firstScore], [, secondScore]) => secondScore - firstScore)[0];
 
   if (dominantOutcome) {
-    await supabase.from("ros_revenue_outcomes").insert({
+    const outcomeAction = buildRevenueOutcomeAction(snapshot, dominantOutcome[0], outcomeProviders);
+
+    const { data: outcome, error: outcomeError } = await supabase.from("ros_revenue_outcomes").insert({
       user_id: userId,
       prospect_id: prospectId,
       decision_id: decision?.id || null,
@@ -486,9 +514,31 @@ export async function persistRevenueOperatingSnapshot({
       metadata: {
         probability: dominantOutcome[1],
         bestNextAction: snapshot.decision.bestNextAction,
+        outcomeAction,
         source,
       },
-    });
+    }).select("id").single();
+
+    if (outcomeError) {
+      throw outcomeError;
+    }
+
+    await executeRevenueOutcomeProvider({
+      supabase,
+      userId,
+      prospectId,
+      decisionId: decision?.id || null,
+      outcomeId: outcome?.id || null,
+      conversationId,
+      instagramSenderId: senderId,
+      participant,
+      messages,
+      action: outcomeAction,
+      snapshot,
+      providerSettings: outcomeProviders,
+      source,
+      autoOnly: true,
+    }).catch(() => undefined);
   }
 
   await supabase.from("ros_learning_events").insert({
@@ -503,6 +553,22 @@ export async function persistRevenueOperatingSnapshot({
       rationale: snapshot.decision.rationale,
     },
   });
+
+  await recordPlatformAnalyticsEvent({
+    supabase,
+    userId,
+    eventName: "ros_decision_created",
+    source,
+    conversationId,
+    instagramSenderId: senderId,
+    metadata: {
+      decisionId: decision?.id || null,
+      prospectId,
+      confidence: snapshot.decision.confidence,
+      bestNextAction: snapshot.decision.bestNextAction,
+      framework: snapshot.revenueIntelligence.framework,
+    },
+  }).catch(() => undefined);
 
   return {
     prospectId,
@@ -703,6 +769,25 @@ export async function recordRevenueConversionEvent({
   if (learningError && !isMissingRosTableError(learningError)) {
     throw learningError;
   }
+
+  await recordPlatformAnalyticsEvent({
+    supabase,
+    userId,
+    eventName: `conversion_${status}`,
+    source: "revenue_conversion",
+    conversationId: eventConversationId,
+    instagramSenderId: senderId,
+    value: eventValue,
+    currency: eventCurrency,
+    metadata: {
+      eventType,
+      outcomeType,
+      prospectId,
+      decisionId,
+      outcomeId,
+      commerceOrderId: commerceOrder?.id || metadata.commerceOrderId || null,
+    },
+  }).catch(() => undefined);
 
   return {
     prospectId,

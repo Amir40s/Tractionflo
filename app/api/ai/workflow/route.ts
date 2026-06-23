@@ -29,6 +29,14 @@ import {
   normalizeRevenueOperatingSnapshot,
   persistRevenueOperatingSnapshot,
 } from '@/lib/revenue-intelligence';
+import { applyRevenueOutcomeAction } from '@/lib/revenue-outcome-actions';
+import {
+  formatRevenueOutcomeProvidersForPrompt,
+  revenueOutcomeProvidersMetadataKey,
+} from '@/lib/revenue-outcome-providers';
+import { loadRevenueOutcomeProviderSettings } from '@/lib/revenue-provider-execution';
+import { formatRevenueLearningForPrompt } from '@/lib/revenue-learning';
+import { applyRevenueStrategy } from '@/lib/revenue-strategy';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 
@@ -283,6 +291,16 @@ export async function POST(request: Request) {
 
     const metadata = user.user_metadata || {};
     const integration = normalizeAiIntegrationMetadata(metadata);
+    const serviceSupabase = createSupabaseServiceClient();
+    const outcomeProviders = await loadRevenueOutcomeProviderSettings({
+      supabase: serviceSupabase,
+      userId: user.id,
+      metadataValue: metadata[revenueOutcomeProvidersMetadataKey],
+    });
+    const revenueLearningPrompt = await formatRevenueLearningForPrompt({
+      supabase: serviceSupabase,
+      userId: user.id,
+    }).catch(() => '');
     const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
 
     const participantId = payload.participant?.id || '';
@@ -294,7 +312,6 @@ export async function POST(request: Request) {
     const cachedLead = leadQualifications[participantId];
 
     const messages = payload.messages || [];
-    const serviceSupabase = createSupabaseServiceClient();
     const lastMessage = messages[messages.length - 1];
 
     if (lastMessage?.from === 'me') {
@@ -368,6 +385,47 @@ export async function POST(request: Request) {
     }
 
     if (escalation && pauseForEscalation) {
+      const escalationLead = {
+        ...defaultAiLeadInsight,
+        score: escalation.urgency === 'High' ? 92 : 78,
+        stage: 'Needs human',
+        urgency: escalation.urgency,
+        intent: escalation.label,
+        summary: escalation.summary,
+        signals: escalation.signals,
+        missing: [],
+        recommendedAction: escalation.recommendedAction,
+        cta: 'Take over in inbox',
+      };
+      const escalationRos = applyRevenueOutcomeAction(
+        applyRevenueStrategy(
+          buildFallbackRevenueOperatingSnapshot({
+            lead: escalationLead,
+            cta: 'Take over in inbox',
+            escalation,
+          }),
+          {
+            latestText: getLatestUserQuestion(messages),
+            escalation,
+          }
+        ),
+        outcomeProviders
+      );
+
+      await persistRevenueOperatingSnapshot({
+        supabase: serviceSupabase,
+        userId: user.id,
+        participant: payload.participant,
+        conversationId: payload.conversationId || payload.conversation_id || participantId,
+        messages,
+        snapshot: escalationRos,
+        escalation,
+        outcomeProviders,
+        source: 'ai_workflow_escalation',
+      }).catch((persistError) => {
+        logger.warn('ROS escalation decision persistence skipped or failed:', { error: persistError });
+      });
+
       return NextResponse.json({
         assistantId,
         assistant_id: assistantId,
@@ -377,34 +435,8 @@ export async function POST(request: Request) {
         cta: '',
         handoff: true,
         escalation,
-        lead: {
-          ...defaultAiLeadInsight,
-          score: escalation.urgency === 'High' ? 92 : 78,
-          stage: 'Needs human',
-          urgency: escalation.urgency,
-          intent: escalation.label,
-          summary: escalation.summary,
-          signals: escalation.signals,
-          missing: [],
-          recommendedAction: escalation.recommendedAction,
-          cta: 'Take over in inbox',
-        },
-        ros: buildFallbackRevenueOperatingSnapshot({
-          lead: {
-            ...defaultAiLeadInsight,
-            score: escalation.urgency === 'High' ? 92 : 78,
-            stage: 'Needs human',
-            urgency: escalation.urgency,
-            intent: escalation.label,
-            summary: escalation.summary,
-            signals: escalation.signals,
-            missing: [],
-            recommendedAction: escalation.recommendedAction,
-            cta: 'Take over in inbox',
-          },
-          cta: 'Take over in inbox',
-          escalation,
-        }),
+        lead: escalationLead,
+        ros: escalationRos,
         enabledWorkflows,
         knowledge: summarizeKnowledgeForResponse({ mode: 'none', matches: [] }, assistantId),
       });
@@ -497,6 +529,12 @@ Preferred CTA: ${integration.ctaMessage}
 
 Auto-detected Instagram product catalog:
 ${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
+
+Configured revenue outcome providers:
+${formatRevenueOutcomeProvidersForPrompt(outcomeProviders) || 'No external outcome provider links are configured yet. If the right outcome needs a provider link, ask for contact/consent or use a manual next step.'}
+
+Creator-specific revenue learning:
+${revenueLearningPrompt || 'No creator-specific learning is available yet. Use the default ROS strategy and persist the decision for future learning.'}
 
 Return only valid JSON. No markdown. No commentary.
 Never ask again for booking details that the customer already gave earlier in the conversation.
@@ -628,13 +666,23 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       };
     }
 
-    workflowResult.ros = normalizeRevenueOperatingSnapshot(
-      workflowResult.ros,
-      buildFallbackRevenueOperatingSnapshot({
-        lead: workflowResult.lead,
-        cta: workflowResult.cta || workflowResult.lead.cta || integration.ctaMessage,
-        escalation,
-      })
+    workflowResult.ros = applyRevenueOutcomeAction(
+      applyRevenueStrategy(
+        normalizeRevenueOperatingSnapshot(
+          workflowResult.ros,
+          buildFallbackRevenueOperatingSnapshot({
+            lead: workflowResult.lead,
+            cta: workflowResult.cta || workflowResult.lead.cta || integration.ctaMessage,
+            escalation,
+          })
+        ),
+        {
+          latestText: latestUserQuestion,
+          hasCatalogOffer: Boolean(catalogOffer),
+          escalation,
+        }
+      ),
+      outcomeProviders
     );
 
     // Save generated qualification to user metadata cache
@@ -666,6 +714,7 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       messages,
       snapshot: workflowResult.ros,
       escalation,
+      outcomeProviders,
       source: 'ai_workflow',
     }).catch((persistError) => {
       logger.warn('ROS decision persistence skipped or failed:', { error: persistError });

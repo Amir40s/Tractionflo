@@ -4,12 +4,13 @@ import {
   exchangeInstagramTokenForLongLivedToken,
   saveInstagramAccountToken,
 } from '@/lib/instagram-token';
+import { getInstagramAppCredentials, getNormalizedAppBaseUrl } from '@/lib/instagram-oauth';
 import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 
 function getAppBaseUrl(request: Request) {
-  return process.env.NEXT_PUBLIC_APP_URL?.trim() || new URL(request.url).origin;
+  return getNormalizedAppBaseUrl(new URL(request.url).origin);
 }
 
 type InstagramOAuthState = {
@@ -152,7 +153,7 @@ export async function GET(request: Request) {
   const error = searchParams.get('error');
   const baseUrl = getAppBaseUrl(request);
   const callbackOrigin = new URL(request.url).origin;
-  const appSecret = process.env.META_APP_SECRET;
+  const { appId, appSecret } = getInstagramAppCredentials();
   const oauthState = getOAuthState(searchParams.get('state'), callbackOrigin, baseUrl, appSecret);
   const redirectBaseUrl = oauthState.returnTo || baseUrl;
   const nextPath = getSafeNextPath(oauthState.next);
@@ -173,8 +174,6 @@ export async function GET(request: Request) {
     );
   }
 
-  const appId = process.env.META_APP_ID;
-  
   const redirectUri = `${baseUrl}/api/auth/instagram/callback`;
 
   if (!appId || !appSecret) {

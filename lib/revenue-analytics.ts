@@ -1,5 +1,6 @@
 import type { createSupabaseServiceClient } from "@/lib/supabase";
 import { listKnowledgeSourceIndexes, type KnowledgeSourceIndex } from "@/lib/knowledge-base";
+import { refreshRevenueLearningModel } from "@/lib/revenue-learning";
 
 type SupabaseServiceClient = ReturnType<typeof createSupabaseServiceClient>;
 
@@ -59,6 +60,7 @@ export type RevenueOperatingSummary = {
     objections: RosRow[];
     recommendations: RosRecommendation[];
     metrics: Record<string, unknown>;
+    strategyAdaptations: RosRow[];
     computedAt: string;
   };
 };
@@ -595,6 +597,7 @@ export async function buildRevenueOperatingSummary({
     conversionEvents: events.length,
   };
   const recommendations = buildRecommendations({ prospects, decisions, outcomes, conversionPaths });
+  const strategyAdaptations = await refreshRevenueLearningModel({ supabase, userId }).catch(() => []);
   const objections = getPayloadObjections(decisions);
   const conversionPatterns = countByValue(events, "event_type");
   const computedAt = new Date().toISOString();
@@ -607,6 +610,7 @@ export async function buildRevenueOperatingSummary({
     objections,
     recommendations,
     metrics,
+    strategyAdaptations,
     computedAt,
   };
 

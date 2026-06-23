@@ -48,6 +48,11 @@ import {
   type SavedReplySetting,
   type WelcomeMessageSetting,
 } from "@/lib/quick-replies";
+import {
+  getDefaultRevenueOutcomeProviderSettings,
+  normalizeRevenueOutcomeProviderSettings,
+  type RevenueOutcomeProviderSettings,
+} from "@/lib/revenue-outcome-providers";
 
 export { settingsStateStorageKey };
 
@@ -154,6 +159,7 @@ export type AppSettingsState = {
   welcomeMessage: WelcomeMessageSetting;
   billing: BillingSettings;
   bookingIntegrations: BookingIntegrationSettings;
+  revenueOutcomeProviders: RevenueOutcomeProviderSettings;
   api: ApiSettings;
   security: SecuritySettings;
   brand: BrandSettings;
@@ -228,6 +234,7 @@ export const defaultSettingsState: AppSettingsState = {
       },
     ],
   },
+  revenueOutcomeProviders: getDefaultRevenueOutcomeProviderSettings(),
   api: {
     webhookUrl: "/api/webhooks/meta",
     signingSecret: "tf_live_8b4f2c9a",
@@ -352,6 +359,7 @@ function mergeSettingsState(storedValue: Partial<AppSettingsState> | null): AppS
       ...storedValue.bookingIntegrations,
       routes: mergeBookingSheetRoutes(storedValue.bookingIntegrations?.routes),
     },
+    revenueOutcomeProviders: normalizeRevenueOutcomeProviderSettings(storedValue.revenueOutcomeProviders),
     api: {
       ...defaultSettingsState.api,
       ...storedValue.api,

@@ -38,6 +38,7 @@ import {
   normalizeInstagramWelcomeAutomation,
   renderInstagramWelcomeMessage,
 } from '@/lib/instagram-welcome-automation';
+import { storeInstagramMessage } from '@/lib/instagram-message-store';
 import { sendInstagramCommercePaymentMessage } from '@/lib/instagram-send-api';
 import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
 import { runAssistantThread } from '@/lib/openai-assistants';
@@ -47,6 +48,15 @@ import {
   persistRevenueOperatingSnapshot,
   recordRevenueConversionEvent,
 } from '@/lib/revenue-intelligence';
+import { applyRevenueOutcomeAction } from '@/lib/revenue-outcome-actions';
+import {
+  formatRevenueOutcomeProvidersForPrompt,
+  revenueOutcomeProvidersMetadataKey,
+  type RevenueOutcomeProviderSettings,
+} from '@/lib/revenue-outcome-providers';
+import { loadRevenueOutcomeProviderSettings } from '@/lib/revenue-provider-execution';
+import { formatRevenueLearningForPrompt } from '@/lib/revenue-learning';
+import { applyRevenueStrategy } from '@/lib/revenue-strategy';
 
 import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -279,11 +289,13 @@ function buildWebhookRevenueOperatingSnapshot({
   catalogOffer,
   pendingOrderId,
   escalation,
+  outcomeProviders,
 }: {
   latestText: string;
   catalogOffer?: InstagramCatalogOffer | null;
   pendingOrderId?: string;
   escalation?: ConversationEscalation | null;
+  outcomeProviders?: RevenueOutcomeProviderSettings;
 }) {
   const normalizedText = latestText.toLowerCase();
   const hasPriceSignal = /\b(price|pricing|cost|expensive|budget|how much|payment)\b/.test(normalizedText);
@@ -348,33 +360,44 @@ function buildWebhookRevenueOperatingSnapshot({
     escalation,
   });
 
-  return normalizeRevenueOperatingSnapshot(
-    {
-      ...fallback,
-      outcomeProbabilities: {
-        ...fallback.outcomeProbabilities,
-        book_call: Math.max(fallback.outcomeProbabilities.book_call || 0, catalogOffer ? 84 : 35),
-        purchase_product: Math.max(fallback.outcomeProbabilities.purchase_product || 0, pendingOrderId ? 92 : catalogOffer ? 86 : 25),
-      },
-      decision: {
-        ...fallback.decision,
-        bestNextAction: pendingOrderId
-          ? 'confirm_order_then_send_checkout'
-          : catalogOffer
-            ? 'present_offer_and_confirm_interest'
-            : fallback.decision.bestNextAction,
-        confidence: score,
-        rationale: summary,
-      },
-      memory: {
-        ...fallback.memory,
-        objections: hasPriceSignal ? ['price'] : fallback.memory.objections,
-        offersPresented: catalogOffer
-          ? [catalogOffer.title, catalogOffer.priceText].filter(Boolean)
-          : fallback.memory.offersPresented,
-      },
-    },
-    fallback
+  return applyRevenueOutcomeAction(
+    applyRevenueStrategy(
+      normalizeRevenueOperatingSnapshot(
+        {
+          ...fallback,
+          outcomeProbabilities: {
+            ...fallback.outcomeProbabilities,
+            book_call: Math.max(fallback.outcomeProbabilities.book_call || 0, catalogOffer ? 84 : 35),
+            purchase_product: Math.max(fallback.outcomeProbabilities.purchase_product || 0, pendingOrderId ? 92 : catalogOffer ? 86 : 25),
+          },
+          decision: {
+            ...fallback.decision,
+            bestNextAction: pendingOrderId
+              ? 'confirm_order_then_send_checkout'
+              : catalogOffer
+                ? 'present_offer_and_confirm_interest'
+                : fallback.decision.bestNextAction,
+            confidence: score,
+            rationale: summary,
+          },
+          memory: {
+            ...fallback.memory,
+            objections: hasPriceSignal ? ['price'] : fallback.memory.objections,
+            offersPresented: catalogOffer
+              ? [catalogOffer.title, catalogOffer.priceText].filter(Boolean)
+              : fallback.memory.offersPresented,
+          },
+        },
+        fallback
+      ),
+      {
+        latestText,
+        hasCatalogOffer: Boolean(catalogOffer),
+        hasPendingOrder: Boolean(pendingOrderId),
+        escalation,
+      }
+    ),
+    outcomeProviders
   );
 }
 
@@ -392,6 +415,16 @@ async function generateWebhookAiReply({
   logger.info("generateWebhookAiReply: Starting generation", { latestText, participantId: participant.id });
   const metadata = (user.user_metadata || {}) as Record<string, unknown>;
   const integration = normalizeAiIntegrationMetadata(metadata);
+  const serviceSupabase = createSupabaseServiceClient();
+  const outcomeProviders = await loadRevenueOutcomeProviderSettings({
+    supabase: serviceSupabase,
+    userId: user.id,
+    metadataValue: metadata[revenueOutcomeProvidersMetadataKey],
+  });
+  const revenueLearningPrompt = await formatRevenueLearningForPrompt({
+    supabase: serviceSupabase,
+    userId: user.id,
+  }).catch(() => '');
   const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
 
   logger.info("generateWebhookAiReply: Workflow settings evaluated", { autoSend: integration.autoSend, answerQuestions: enabledWorkflows.answerQuestions });
@@ -440,6 +473,12 @@ Preferred CTA: ${integration.ctaMessage}
 
 Auto-detected Instagram product catalog:
 ${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
+
+Configured revenue outcome providers:
+${formatRevenueOutcomeProvidersForPrompt(outcomeProviders) || 'No external outcome provider links are configured yet. If the right outcome needs a provider link, ask for contact/consent or use a manual next step.'}
+
+Creator-specific revenue learning:
+${revenueLearningPrompt || 'No creator-specific learning is available yet. Use the default ROS strategy and persist the decision for future learning.'}
 
 Return only the Instagram DM reply text. Keep it natural, brief, and useful. Do not mention being an AI unless asked.`,
     messages: [
@@ -570,6 +609,11 @@ async function processInstagramAutomations(
 
       const metadata = (user.user_metadata || {}) as Record<string, unknown>;
       const integration = normalizeAiIntegrationMetadata(metadata);
+      const outcomeProviders = await loadRevenueOutcomeProviderSettings({
+        supabase,
+        userId: user.id,
+        metadataValue: metadata[revenueOutcomeProvidersMetadataKey],
+      });
       const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
 
       if (isCommerceOrderConfirmationText(event.text)) {
@@ -918,11 +962,33 @@ async function processInstagramAutomations(
       );
       logger.info("processInstagramAutomations: Instagram text message sent successfully", { message_id: sent.message_id });
 
+      await storeInstagramMessage({
+        supabase,
+        mid: sent.message_id || '',
+        userId: user.id,
+        conversationId: event.senderId,
+        senderId: event.recipientId,
+        recipientId: event.senderId,
+        direction: 'outbound',
+        text: reply.trim(),
+        timestamp: Date.now(),
+        rawEvent: sent as Record<string, unknown>,
+        metadata: {
+          source: isFirstInboundDm && welcome.enabled ? 'instagram_webhook_welcome' : 'instagram_webhook_ai',
+          catalogProduct: catalogOffer?.title || '',
+          catalogImageMessageId,
+          orderId,
+        },
+      }).catch((storeError) => {
+        logger.warn('processInstagramAutomations: Could not persist outbound automation message.', { error: storeError });
+      });
+
       const rosSnapshot = buildWebhookRevenueOperatingSnapshot({
         latestText: event.text,
         catalogOffer,
         pendingOrderId: orderId,
         escalation,
+        outcomeProviders,
       });
       await persistRevenueOperatingSnapshot({
         supabase,
@@ -939,6 +1005,7 @@ async function processInstagramAutomations(
         ],
         snapshot: rosSnapshot,
         escalation,
+        outcomeProviders,
         source: isFirstInboundDm && welcome.enabled ? 'instagram_webhook_welcome' : 'instagram_webhook_ai',
       }).catch((rosError) => {
         logger.warn('processInstagramAutomations: Could not persist ROS decision for webhook reply.', {

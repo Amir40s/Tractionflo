@@ -16,8 +16,18 @@ type InstagramTokenExchangeResponse = {
   expires_in?: number;
   error?: {
     message?: string;
+    type?: string;
+    code?: number;
   };
+  error_message?: string;
 };
+
+class InstagramTokenResponseError extends Error {
+  constructor(message: string, readonly data: InstagramTokenExchangeResponse) {
+    super(message);
+    this.name = "InstagramTokenResponseError";
+  }
+}
 
 // Instagram long-lived tokens last about 60 days. Refresh before that window closes,
 // but not on every inbox poll.
@@ -42,10 +52,10 @@ function shouldRefreshToken(account: StoredInstagramAccount) {
 }
 
 async function parseInstagramTokenResponse(response: Response, fallbackMessage: string) {
-  const data = (await response.json()) as InstagramTokenExchangeResponse;
+  const data = (await response.json().catch(() => ({}))) as InstagramTokenExchangeResponse;
 
   if (!response.ok || data.error || !data.access_token) {
-    throw new Error(data.error?.message || fallbackMessage);
+    throw new InstagramTokenResponseError(data.error?.message || data.error_message || fallbackMessage, data);
   }
 
   return {
@@ -53,6 +63,37 @@ async function parseInstagramTokenResponse(response: Response, fallbackMessage: 
     expiresIn: data.expires_in,
     tokenType: data.token_type,
   };
+}
+
+function isUnsupportedGetTokenError(error: unknown) {
+  return (
+    error instanceof InstagramTokenResponseError &&
+    /unsupported request/i.test(error.message) &&
+    /method type:\s*get/i.test(error.message)
+  );
+}
+
+async function fetchInstagramTokenWithGetPostFallback(url: URL, fallbackMessage: string) {
+  try {
+    const response = await fetch(url.toString(), { cache: "no-store" });
+    return await parseInstagramTokenResponse(response, fallbackMessage);
+  } catch (error) {
+    if (!isUnsupportedGetTokenError(error)) {
+      throw error;
+    }
+
+    const body = new URLSearchParams(url.searchParams);
+    const response = await fetch(`${url.origin}${url.pathname}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+      cache: "no-store",
+    });
+
+    return parseInstagramTokenResponse(response, fallbackMessage);
+  }
 }
 
 export async function exchangeInstagramTokenForLongLivedToken({
@@ -67,8 +108,7 @@ export async function exchangeInstagramTokenForLongLivedToken({
   exchangeUrl.searchParams.set("client_secret", appSecret);
   exchangeUrl.searchParams.set("access_token", accessToken);
 
-  const response = await fetch(exchangeUrl.toString(), { cache: "no-store" });
-  return parseInstagramTokenResponse(response, "Could not create a long-lived Instagram token.");
+  return fetchInstagramTokenWithGetPostFallback(exchangeUrl, "Could not create a long-lived Instagram token.");
 }
 
 export async function refreshLongLivedInstagramToken(accessToken: string) {
@@ -76,8 +116,7 @@ export async function refreshLongLivedInstagramToken(accessToken: string) {
   refreshUrl.searchParams.set("grant_type", "ig_refresh_token");
   refreshUrl.searchParams.set("access_token", accessToken);
 
-  const response = await fetch(refreshUrl.toString(), { cache: "no-store" });
-  return parseInstagramTokenResponse(response, "Could not refresh Instagram token.");
+  return fetchInstagramTokenWithGetPostFallback(refreshUrl, "Could not refresh Instagram token.");
 }
 
 export async function saveInstagramAccountToken(

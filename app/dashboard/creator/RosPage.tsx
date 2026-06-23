@@ -126,6 +126,7 @@ type RosPaginationKey =
   | "pricing"
   | "offers"
   | "buyerMemory"
+  | "outcomeQueue"
   | "decisionLog"
   | "revenueEvents";
 
@@ -137,6 +138,7 @@ const rosPageSizes: Record<RosPaginationKey, number> = {
   pricing: 3,
   offers: 3,
   buyerMemory: 5,
+  outcomeQueue: 4,
   decisionLog: 4,
   revenueEvents: 4,
 };
@@ -149,6 +151,7 @@ const initialRosPages: Record<RosPaginationKey, number> = {
   pricing: 1,
   offers: 1,
   buyerMemory: 1,
+  outcomeQueue: 1,
   decisionLog: 1,
   revenueEvents: 1,
 };
@@ -200,6 +203,22 @@ function getNumber(row: RosRow, key: string) {
   const value = row[key];
   const numeric = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function getRecord(row: RosRow, key: string): RosRow {
+  const value = row[key];
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as RosRow) : {};
+}
+
+function getOutcomeAction(outcome: RosRow) {
+  const metadata = getRecord(outcome, "metadata");
+  return getRecord(metadata, "outcomeAction");
+}
+
+function getOutcomeStatusClass(status: string) {
+  if (status === "connected") return "border-[#ccebd5] bg-[#effaf3] text-[#09923d]";
+  if (status === "manual") return "border-[#d9e3ff] bg-[#f2f5ff] text-[#3044ff]";
+  return "border-[#ffdfb8] bg-[#fff8ef] text-[#b95e00]";
 }
 
 function getPriorityClass(priority: RosRecommendation["priority"]) {
@@ -518,6 +537,7 @@ export function RosPage() {
   const pagedOutcomePaths = paginateItems(topPaths, sectionPages.outcomePaths, rosPageSizes.outcomePaths);
   const pagedRecommendations = paginateItems(summary.recommendations, sectionPages.learning, rosPageSizes.learning);
   const pagedProspects = paginateItems(summary.recentProspects, sectionPages.buyerMemory, rosPageSizes.buyerMemory);
+  const pagedOutcomes = paginateItems(summary.recentOutcomes, sectionPages.outcomeQueue, rosPageSizes.outcomeQueue);
   const pagedDecisions = paginateItems(summary.recentDecisions, sectionPages.decisionLog, rosPageSizes.decisionLog);
   const pagedEvents = paginateItems(summary.recentEvents, sectionPages.revenueEvents, rosPageSizes.revenueEvents);
 
@@ -737,6 +757,46 @@ export function RosPage() {
         </div>
 
         <div className="grid gap-5 xl:grid-cols-2">
+          <SectionShell title="Outcome Queue" icon={Route}>
+            <div className="space-y-3">
+              {summary.recentOutcomes.length === 0 ? (
+                <p className="text-[12px] font-medium text-[#697083]">No routed outcomes yet.</p>
+              ) : (
+                <>
+                  {pagedOutcomes.map((outcome) => {
+                    const action = getOutcomeAction(outcome);
+                    const status = getString(action, "integrationStatus", "manual");
+
+                    return (
+                      <article key={getString(outcome, "id")} className="rounded-[8px] border border-[#edf0f6] bg-[#fbfcff] p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h3 className="truncate text-[12px] font-extrabold text-black">{getString(action, "label", getString(outcome, "outcome_type", "Outcome"))}</h3>
+                            <p className="mt-1 text-[11px] font-medium leading-relaxed text-[#596175]">
+                              {getString(action, "nextAction", "Follow the stored best next action.")}
+                            </p>
+                          </div>
+                          <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-extrabold ${getOutcomeStatusClass(status)}`}>
+                            {status.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        <p className="mt-2 rounded-[7px] bg-white px-2 py-1.5 text-[11px] font-semibold text-[#3044ff]">{getString(action, "cta", getString(outcome, "status", "pending"))}</p>
+                        <p className="mt-2 text-[10px] font-semibold text-[#8a91a3]">{getString(action, "providerHint", "Provider details unavailable.")}</p>
+                      </article>
+                    );
+                  })}
+                  <PaginationControls
+                    page={sectionPages.outcomeQueue}
+                    totalItems={summary.recentOutcomes.length}
+                    pageSize={rosPageSizes.outcomeQueue}
+                    onPageChange={(page) => setSectionPage("outcomeQueue", page)}
+                    label="outcomes"
+                  />
+                </>
+              )}
+            </div>
+          </SectionShell>
+
           <SectionShell title="Decision Log" icon={BrainCircuit}>
             <div className="space-y-3">
               {summary.recentDecisions.length === 0 ? (

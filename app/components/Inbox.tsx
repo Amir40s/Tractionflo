@@ -794,6 +794,21 @@ function getInstagramOAuthErrorFromLocation() {
   return error || null;
 }
 
+function clearInstagramOAuthErrorFromLocation() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+
+  if (!url.searchParams.has("ig_error")) {
+    return;
+  }
+
+  url.searchParams.delete("ig_error");
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 const instagramAutoSendStorageKey = "tractionflo.instagram.aiAutoSentKeys";
 
 function readInstagramAutoSendKeys() {
@@ -2982,7 +2997,14 @@ export default function Inbox() {
         setCommerceOrders((current) => mergeCommerceOrders(current, ordersData.orders || []));
       }
 
-      if (data.error && data.conversations.length === 0) {
+      const responseConversations = data.conversations || [];
+
+      if (data.error && responseConversations.length === 0) {
+        if (data.account || data.ig_user_id) {
+          setOauthError(null);
+          clearInstagramOAuthErrorFromLocation();
+        }
+
         setConvs([]);
         setActiveId(null);
         setIgUserId("");
@@ -2990,7 +3012,12 @@ export default function Inbox() {
         setAccount(data.account ?? null);
         setError(data.error);
       } else {
-        const nextConversations = data.conversations || [];
+        const nextConversations = responseConversations;
+        if (data.account || data.ig_user_id || nextConversations.length > 0) {
+          setOauthError(null);
+          clearInstagramOAuthErrorFromLocation();
+        }
+
         const requestedConversationId =
           typeof window !== "undefined" && !hasLoadedInboxRef.current
             ? new URLSearchParams(window.location.search).get("conversation")
@@ -3049,6 +3076,7 @@ export default function Inbox() {
     setConnectingNew(true);
     setError(null);
     setOauthError(null);
+    clearInstagramOAuthErrorFromLocation();
 
     window.location.href = "/api/auth/instagram?next=/conversations";
   }, []);

@@ -51,6 +51,7 @@ async function main() {
   const sqlPaths = [
     path.join(root, "migrations", "20260622_revenue_operating_system.sql"),
     path.join(root, "migrations", "20260622_ros_phase2.sql"),
+    path.join(root, "migrations", "20260623_ros_enterprise_phase3.sql"),
   ];
   const url = new URL(databaseUrl);
   const isLocalhost = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
@@ -78,6 +79,13 @@ async function main() {
       "ros_business_profiles",
       "ros_conversion_events",
       "ros_learning_summaries",
+      "messages",
+      "ros_provider_connections",
+      "ros_outcome_executions",
+      "support_tickets",
+      "creator_issues",
+      "platform_analytics_events",
+      "ros_strategy_adaptations",
     ];
     const { rows } = await client.query(
       `select table_name

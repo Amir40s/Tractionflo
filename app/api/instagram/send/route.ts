@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { canAccessConversation, canAccessPage, getUserPermissionProfile } from '@/lib/agent-permissions';
 import { createPendingCommerceOrder, normalizeCommerceOrderDraft, type CommerceOrderDraft } from '@/lib/commerce-orders';
+import { storeInstagramMessage } from '@/lib/instagram-message-store';
 import { getFreshInstagramAccount } from '@/lib/instagram-token';
 import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -475,6 +476,29 @@ export async function POST(request: NextRequest) {
         text,
       });
     }
+
+    await Promise.all(
+      sent.map((message) =>
+        storeInstagramMessage({
+          supabase,
+          mid: message.message_id || '',
+          userId: user.id,
+          conversationId,
+          senderId: account.ig_user_id || user.id,
+          recipientId,
+          direction: 'outbound',
+          text: message.text || (message.attachment ? `[${message.attachment.type} attachment] ${message.attachment.url}` : ''),
+          timestamp: Date.now(),
+          rawEvent: message as Record<string, unknown>,
+          metadata: {
+            orderId,
+            source: 'manual_instagram_send',
+          },
+        }).catch((storeError) => {
+          console.error('Could not persist outbound Instagram message:', storeError);
+        })
+      )
+    );
 
     await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
       type: 'message',
