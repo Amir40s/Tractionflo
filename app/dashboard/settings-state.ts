@@ -3,7 +3,6 @@ import {
   Bell,
   BrainCircuit,
   CalendarDays,
-  Code2,
   CreditCard,
   Crown,
   Database,
@@ -67,7 +66,6 @@ export type SettingsSection =
   | "notifications"
   | "quick-replies"
   | "billing"
-  | "api"
   | "security"
   | "brand";
 
@@ -77,6 +75,10 @@ export type SettingsMenuItem = {
   detail: string;
   icon: LucideIcon;
 };
+
+export type CreatorSettingsAccessId = Extract<SettingsSection, "billing" | "security" | "brand">;
+
+export type CreatorSettingsAccessState = Record<CreatorSettingsAccessId, boolean>;
 
 export type AiSettings = AiBehaviorSettings;
 
@@ -176,10 +178,22 @@ export const settingsMenuItems: SettingsMenuItem[] = [
   { id: "notifications", label: "Notifications", detail: "Alerts & preferences", icon: Bell },
   { id: "quick-replies", label: "Quick Replies", detail: "Inbox reply tabs", icon: MessageSquare },
   { id: "billing", label: "Billing", detail: "Subscription & invoices", icon: CreditCard },
-  { id: "api", label: "API & Webhooks", detail: "Developers", icon: Code2 },
   { id: "security", label: "Security", detail: "Password & access", icon: Shield },
   { id: "brand", label: "Brand Settings", detail: "Your brand & voice", icon: Palette },
 ];
+
+export const creatorSettingsAccessStorageKey = "tractionflo_creator_settings_access";
+export const creatorSettingsAccessChangedEvent = "tractionflo:creator-settings-access-changed";
+export const creatorSettingsAccessIds: CreatorSettingsAccessId[] = ["billing", "security", "brand"];
+export const defaultCreatorSettingsAccess: CreatorSettingsAccessState = {
+  billing: false,
+  security: false,
+  brand: false,
+};
+
+export const creatorSettingsAccessMenuItems = settingsMenuItems.filter((item): item is SettingsMenuItem & { id: CreatorSettingsAccessId } =>
+  creatorSettingsAccessIds.includes(item.id as CreatorSettingsAccessId)
+);
 
 export const defaultSettingsState: AppSettingsState = {
   ai: {
@@ -277,13 +291,50 @@ export const notificationVisuals: Record<string, { icon: LucideIcon }> = {
   escalation: { icon: TriangleAlert },
 };
 
-export function getVisibleSettingsMenuItems(profile: { isAgent: boolean }) {
-  if (!profile.isAgent) {
-    return settingsMenuItems;
+export function normalizeCreatorSettingsAccess(value: unknown): CreatorSettingsAccessState {
+  const parsedValue = value && typeof value === "object" ? value as Partial<Record<CreatorSettingsAccessId, unknown>> : {};
+
+  return creatorSettingsAccessIds.reduce<CreatorSettingsAccessState>(
+    (access, id) => ({
+      ...access,
+      [id]: typeof parsedValue[id] === "boolean" ? parsedValue[id] : defaultCreatorSettingsAccess[id],
+    }),
+    { ...defaultCreatorSettingsAccess }
+  );
+}
+
+export function readCreatorSettingsAccess() {
+  if (typeof window === "undefined") {
+    return { ...defaultCreatorSettingsAccess };
   }
 
-  const agentSections: SettingsSection[] = ["account", "notifications", "security", "brand"];
-  return settingsMenuItems.filter((item) => agentSections.includes(item.id));
+  try {
+    return normalizeCreatorSettingsAccess(JSON.parse(window.localStorage.getItem(creatorSettingsAccessStorageKey) || "{}"));
+  } catch {
+    return { ...defaultCreatorSettingsAccess };
+  }
+}
+
+export function saveCreatorSettingsAccess(access: CreatorSettingsAccessState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const normalizedAccess = normalizeCreatorSettingsAccess(access);
+  window.localStorage.setItem(creatorSettingsAccessStorageKey, JSON.stringify(normalizedAccess));
+  window.dispatchEvent(new CustomEvent(creatorSettingsAccessChangedEvent, { detail: normalizedAccess }));
+}
+
+export function getVisibleSettingsMenuItems(profile: { isAgent: boolean }, creatorSettingsAccess = readCreatorSettingsAccess()) {
+  const controlledSections = new Set<SettingsSection>(creatorSettingsAccessIds);
+  const visibleByAccess = settingsMenuItems.filter((item) => !controlledSections.has(item.id) || creatorSettingsAccess[item.id as CreatorSettingsAccessId]);
+
+  if (!profile.isAgent) {
+    return visibleByAccess;
+  }
+
+  const agentSections: SettingsSection[] = ["account", "notifications", "billing", "security", "brand"];
+  return visibleByAccess.filter((item) => agentSections.includes(item.id));
 }
 
 function mergeArrayById<T extends { id: string }>(defaults: T[], stored?: Partial<T>[]) {
@@ -297,22 +348,35 @@ function mergeArrayById<T extends { id: string }>(defaults: T[], stored?: Partia
   }));
 }
 
+const bookingSheetRouteTypes = new Set(["Cricket ground booking", "Padel ground booking", "All confirmed bookings"]);
+
+function normalizeBookingSheetRouteType(bookingType?: string) {
+  return bookingType && bookingSheetRouteTypes.has(bookingType) ? bookingType : "All confirmed bookings";
+}
+
 function mergeBookingSheetRoutes(stored?: Partial<BookingSheetRoute>[]) {
   if (!Array.isArray(stored)) {
     return defaultSettingsState.bookingIntegrations.routes;
   }
 
   const defaultIds = new Set(defaultSettingsState.bookingIntegrations.routes.map((route) => route.id));
-  const mergedDefaults = defaultSettingsState.bookingIntegrations.routes.map((route) => ({
-    ...route,
-    ...(stored.find((storedRoute) => storedRoute?.id === route.id) || {}),
-  }));
+  const mergedDefaults = defaultSettingsState.bookingIntegrations.routes.map((route) => {
+    const mergedRoute = {
+      ...route,
+      ...(stored.find((storedRoute) => storedRoute?.id === route.id) || {}),
+    };
+
+    return {
+      ...mergedRoute,
+      bookingType: normalizeBookingSheetRouteType(mergedRoute.bookingType),
+    };
+  });
   const customRoutes = stored
     .filter((route): route is Partial<BookingSheetRoute> & { id: string } => Boolean(route?.id && !defaultIds.has(route.id)))
     .map((route) => ({
       id: route.id,
       name: route.name || "Custom booking sheet",
-      bookingType: route.bookingType || "Custom booking type",
+      bookingType: normalizeBookingSheetRouteType(route.bookingType),
       sheetUrl: route.sheetUrl || "",
       worksheetName: route.worksheetName || "Confirmed Bookings",
       enabled: route.enabled !== false,

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import {
   ArrowRight,
-  Bell,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -32,6 +31,7 @@ import {
   getCreatorParticipantName,
   truncateCreatorText,
 } from "../creator-insights";
+import NotificationBell from "../../components/NotificationBell";
 import { BrandMark } from "./BrandMark";
 import type {
   AccountProfile,
@@ -1155,16 +1155,11 @@ export function DashboardOverview({
               <Download size={15} strokeWidth={2.4} />
               Export
             </button>
-            <button
-              type="button"
-              aria-label="Open notifications"
-              title="Open notifications"
-              onClick={() => onNavigate?.(summary.escalationCount > 0 ? "escalations" : "inbox")}
-              className="relative flex h-12 items-center justify-center rounded-[8px] border border-[#e0e4ef] bg-white text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] transition hover:bg-[#fbfbff]"
-            >
-              <Bell size={19} strokeWidth={2.35} />
-              {summary.escalationCount > 0 ? <span className="absolute right-3 top-3 h-2.5 w-2.5 rounded-full bg-[#e81f72]" /> : null}
-            </button>
+            <NotificationBell
+              ariaLabel="Open notifications"
+              buttonClassName="relative flex h-12 w-12 items-center justify-center rounded-[8px] border border-[#e0e4ef] bg-white text-black shadow-[0_12px_36px_rgba(20,28,53,0.025)] transition hover:bg-[#fbfbff]"
+              iconSize={19}
+            />
           </div>
         </header>
 
