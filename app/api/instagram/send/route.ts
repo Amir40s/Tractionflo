@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { createHash } from 'node:crypto';
 import { canAccessConversation, canAccessPage, getUserPermissionProfile } from '@/lib/agent-permissions';
 import { createPendingCommerceOrder, normalizeCommerceOrderDraft, type CommerceOrderDraft } from '@/lib/commerce-orders';
 import { storeInstagramMessage } from '@/lib/instagram-message-store';
@@ -56,6 +57,14 @@ type InstagramSendResult = {
   };
 };
 
+type StoredSendRow = {
+  mid?: string | null;
+  text?: string | null;
+  raw_event?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  timestamp?: number | string | null;
+};
+
 const confirmOrderQuickReplies: InstagramQuickReply[] = [
   {
     content_type: 'text',
@@ -100,6 +109,253 @@ function isMessagingWindowError(error?: InstagramGraphError) {
     (message.includes('24') && message.includes('hour')) ||
     (message.includes('اجازت') && message.includes('مدت'))
   );
+}
+
+function isDuplicateKeyError(error: unknown) {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === '23505');
+}
+
+function isSchemaMismatchError(error: unknown) {
+  const message =
+    error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+      ? error.message.toLowerCase()
+      : '';
+
+  return (
+    message.includes('does not exist') ||
+    message.includes('schema cache') ||
+    message.includes('not found') ||
+    message.includes('column')
+  );
+}
+
+function normalizeIdempotencyKey(value: unknown) {
+  return typeof value === 'string' ? value.trim().slice(0, 1000) : '';
+}
+
+function getIdempotencyLockMid(idempotencyKey: string) {
+  return `send-lock-${createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 40)}`;
+}
+
+function storedSendRowToResult(row: StoredSendRow): InstagramSendResult {
+  const rawEvent = row.raw_event && typeof row.raw_event === 'object' ? row.raw_event : {};
+  const rawAttachment =
+    rawEvent.attachment && typeof rawEvent.attachment === 'object'
+      ? (rawEvent.attachment as InstagramSendResult['attachment'])
+      : undefined;
+
+  return {
+    recipient_id: typeof rawEvent.recipient_id === 'string' ? rawEvent.recipient_id : undefined,
+    message_id: row.mid || (typeof rawEvent.message_id === 'string' ? rawEvent.message_id : undefined),
+    text: row.text || (typeof rawEvent.text === 'string' ? rawEvent.text : undefined),
+    attachment: rawAttachment,
+  };
+}
+
+async function loadIdempotentSendRows({
+  supabase,
+  userId,
+  conversationId,
+  idempotencyKey,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  userId: string;
+  conversationId: string;
+  idempotencyKey: string;
+}) {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('mid,text,raw_event,metadata,timestamp')
+    .eq('user_id', userId)
+    .eq('conversation_id', conversationId)
+    .eq('direction', 'outbound')
+    .contains('metadata', { idempotencyKey })
+    .order('timestamp', { ascending: true })
+    .limit(10);
+
+  if (error) {
+    if (isSchemaMismatchError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as StoredSendRow[]).map(storedSendRowToResult);
+}
+
+async function loadExistingAutomatedReplyAfterLatestInbound({
+  supabase,
+  userId,
+  conversationId,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  userId: string;
+  conversationId: string;
+}) {
+  const { data: latestInbound, error: inboundError } = await supabase
+    .from('messages')
+    .select('timestamp')
+    .eq('user_id', userId)
+    .eq('conversation_id', conversationId)
+    .eq('direction', 'inbound')
+    .order('timestamp', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (inboundError) {
+    if (isSchemaMismatchError(inboundError)) {
+      return [];
+    }
+
+    throw inboundError;
+  }
+
+  const latestInboundTimestamp = Number((latestInbound as StoredSendRow | null)?.timestamp || 0);
+
+  if (!Number.isFinite(latestInboundTimestamp) || latestInboundTimestamp <= 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('mid,text,raw_event,metadata,timestamp')
+    .eq('user_id', userId)
+    .eq('conversation_id', conversationId)
+    .eq('direction', 'outbound')
+    .gte('timestamp', latestInboundTimestamp)
+    .order('timestamp', { ascending: false })
+    .limit(10);
+
+  if (error) {
+    if (isSchemaMismatchError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as StoredSendRow[])
+    .filter((row) => {
+      const source = typeof row.metadata?.source === 'string' ? row.metadata.source : '';
+
+      return (
+        source === 'instagram_webhook_ai' ||
+        source === 'instagram_webhook_welcome' ||
+        source === 'ai_instagram_send'
+      );
+    })
+    .map(storedSendRowToResult);
+}
+
+async function claimIdempotentSend({
+  supabase,
+  userId,
+  conversationId,
+  senderId,
+  recipientId,
+  text,
+  idempotencyKey,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  userId: string;
+  conversationId: string;
+  senderId: string;
+  recipientId: string;
+  text: string;
+  idempotencyKey: string;
+}) {
+  const existing = await loadIdempotentSendRows({ supabase, userId, conversationId, idempotencyKey });
+
+  if (existing.length > 0) {
+    return { claimed: false, lockMid: '', sent: existing };
+  }
+
+  const lockMid = getIdempotencyLockMid(idempotencyKey);
+  const { error } = await supabase.from('messages').insert({
+    mid: lockMid,
+    user_id: userId,
+    conversation_id: conversationId,
+    sender_id: senderId,
+    recipient_id: recipientId,
+    direction: 'outbound',
+    text,
+    timestamp: Date.now(),
+    raw_event: {
+      message_id: lockMid,
+      text,
+    },
+    metadata: {
+      source: 'instagram_send_idempotency_lock',
+      idempotencyKey,
+      idempotencyStatus: 'sending',
+    },
+  });
+
+  if (!error) {
+    return { claimed: true, lockMid, sent: [] };
+  }
+
+  if (isDuplicateKeyError(error)) {
+    const sent = await loadIdempotentSendRows({ supabase, userId, conversationId, idempotencyKey });
+    return {
+      claimed: false,
+      lockMid: '',
+      sent: sent.length > 0 ? sent : [{ message_id: lockMid, text }],
+    };
+  }
+
+  if (isSchemaMismatchError(error)) {
+    return { claimed: true, lockMid: '', sent: [] };
+  }
+
+  throw error;
+}
+
+async function completeIdempotentSendLock({
+  supabase,
+  lockMid,
+  sent,
+  text,
+  orderId,
+  idempotencyKey,
+  automated,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  lockMid: string;
+  sent: InstagramSendResult;
+  text: string;
+  orderId: string;
+  idempotencyKey: string;
+  automated: boolean;
+}) {
+  const { error } = await supabase
+    .from('messages')
+    .update({
+      mid: sent.message_id || lockMid,
+      text: sent.text || text || (sent.attachment ? `[${sent.attachment.type} attachment] ${sent.attachment.url}` : ''),
+      raw_event: sent as Record<string, unknown>,
+      metadata: {
+        orderId,
+        source: automated ? 'ai_instagram_send' : 'manual_instagram_send',
+        idempotencyKey,
+        idempotencyStatus: 'sent',
+      },
+    })
+    .eq('mid', lockMid);
+
+  return error;
+}
+
+async function deleteIdempotentSendLock(
+  supabase: ReturnType<typeof createSupabaseServiceClient>,
+  lockMid: string
+) {
+  const { error } = await supabase.from('messages').delete().eq('mid', lockMid);
+
+  if (error && !isSchemaMismatchError(error)) {
+    console.error('Could not delete Instagram send idempotency lock:', error);
+  }
 }
 
 function isUploadFile(value: FormDataEntryValue): value is File {
@@ -313,6 +569,9 @@ async function uploadAttachment(
 }
 
 export async function POST(request: NextRequest) {
+  let cleanupSupabase: ReturnType<typeof createSupabaseServiceClient> | null = null;
+  let claimedIdempotencyLockMid = '';
+
   try {
     const authSupabase = await createClient();
     const {
@@ -349,6 +608,8 @@ export async function POST(request: NextRequest) {
     let files: File[] = [];
     let remoteAttachments: NormalizedInstagramAttachment[] = [];
     let orderDraft: CommerceOrderDraft | null = null;
+    let automated = false;
+    let idempotencyKey = '';
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData();
@@ -358,6 +619,8 @@ export async function POST(request: NextRequest) {
       files = formData.getAll('files').filter(isUploadFile);
       remoteAttachments = normalizeRemoteAttachments(formData.get('attachmentUrls'));
       orderDraft = normalizeCommerceOrderDraft(formData.get('orderDraft'));
+      automated = String(formData.get('automated') || '') === 'true';
+      idempotencyKey = normalizeIdempotencyKey(formData.get('idempotencyKey'));
     } else {
       const body = (await request.json()) as {
         recipientId?: string;
@@ -365,12 +628,16 @@ export async function POST(request: NextRequest) {
         text?: string;
         attachmentUrls?: unknown;
         orderDraft?: unknown;
+        automated?: boolean;
+        idempotencyKey?: string;
       };
       recipientId = String(body.recipientId || '').trim();
       conversationId = String(body.conversationId || '').trim();
       text = String(body.text || '').trim();
       remoteAttachments = normalizeRemoteAttachments(body.attachmentUrls);
       orderDraft = normalizeCommerceOrderDraft(body.orderDraft);
+      automated = body.automated === true;
+      idempotencyKey = normalizeIdempotencyKey(body.idempotencyKey);
     }
 
     if (!recipientId) {
@@ -384,6 +651,37 @@ export async function POST(request: NextRequest) {
     if (!canAccessConversation(permissions, conversationId)) {
       return NextResponse.json({ error: 'This conversation is not assigned to this agent.' }, { status: 403 });
     }
+
+    cleanupSupabase = supabase;
+    if (automated) {
+      const existingAutomatedReply = await loadExistingAutomatedReplyAfterLatestInbound({
+        supabase,
+        userId: user.id,
+        conversationId,
+      });
+
+      if (existingAutomatedReply.length > 0) {
+        return NextResponse.json({ ok: true, sent: existingAutomatedReply, order: null, deduped: true });
+      }
+    }
+
+    const idempotencyClaim = idempotencyKey
+      ? await claimIdempotentSend({
+          supabase,
+          userId: user.id,
+          conversationId,
+          senderId: account.ig_user_id || user.id,
+          recipientId,
+          text,
+          idempotencyKey,
+        })
+      : null;
+
+    if (idempotencyClaim && !idempotencyClaim.claimed) {
+      return NextResponse.json({ ok: true, sent: idempotencyClaim.sent, order: null, deduped: true });
+    }
+
+    claimedIdempotencyLockMid = idempotencyClaim?.lockMid || '';
 
     const sent: InstagramSendResult[] = [];
     let orderId = '';
@@ -477,8 +775,31 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const sentToStore = [...sent];
+
+    if (claimedIdempotencyLockMid && sentToStore.length > 0) {
+      const firstSent = sentToStore.shift()!;
+      const lockUpdateError = await completeIdempotentSendLock({
+        supabase,
+        lockMid: claimedIdempotencyLockMid,
+        sent: firstSent,
+        text,
+        orderId,
+        idempotencyKey,
+        automated,
+      });
+
+      if (lockUpdateError) {
+        console.error('Could not complete Instagram send idempotency lock:', lockUpdateError);
+        await deleteIdempotentSendLock(supabase, claimedIdempotencyLockMid);
+        sentToStore.unshift(firstSent);
+      }
+
+      claimedIdempotencyLockMid = '';
+    }
+
     await Promise.all(
-      sent.map((message) =>
+      sentToStore.map((message) =>
         storeInstagramMessage({
           supabase,
           mid: message.message_id || '',
@@ -492,7 +813,13 @@ export async function POST(request: NextRequest) {
           rawEvent: message as Record<string, unknown>,
           metadata: {
             orderId,
-            source: 'manual_instagram_send',
+            source: automated ? 'ai_instagram_send' : 'manual_instagram_send',
+            ...(idempotencyKey
+              ? {
+                  idempotencyKey,
+                  idempotencyStatus: 'sent',
+                }
+              : {}),
           },
         }).catch((storeError) => {
           console.error('Could not persist outbound Instagram message:', storeError);
@@ -518,6 +845,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, sent, order });
   } catch (err) {
+    if (claimedIdempotencyLockMid && cleanupSupabase) {
+      await deleteIdempotentSendLock(cleanupSupabase, claimedIdempotencyLockMid);
+    }
+
     if (err instanceof InstagramSendError) {
       console.error('Instagram send error:', err.graphError || err);
       return NextResponse.json(

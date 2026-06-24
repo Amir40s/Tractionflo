@@ -3,6 +3,7 @@ import {
   normalizeRevenueOutcomeProviderSettings,
   revenueOutcomeProvidersMetadataKey,
 } from "@/lib/revenue-outcome-providers";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import {
   loadRevenueOutcomeProviderSettings,
   saveRevenueProviderConnections,
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const metadata = user.user_metadata || {};
+    const metadata = compactUserAuthMetadata(user.user_metadata);
     const outcomeProviders = normalizeRevenueOutcomeProviderSettings(
       payload && typeof payload === "object" && "outcomeProviders" in payload
         ? (payload as { outcomeProviders?: unknown }).outcomeProviders
@@ -80,11 +81,8 @@ export async function POST(request: Request) {
       secrets: providerSecrets,
     });
 
-    const { data, error } = await supabase.auth.updateUser({
-      data: {
-        ...metadata,
-        [revenueOutcomeProvidersMetadataKey]: outcomeProviders,
-      },
+    const { error } = await supabase.auth.updateUser({
+      data: metadata,
     });
 
     if (error) {
@@ -106,7 +104,7 @@ export async function POST(request: Request) {
     const mergedOutcomeProviders = await loadRevenueOutcomeProviderSettings({
       supabase: serviceSupabase,
       userId: user.id,
-      metadataValue: (data.user?.user_metadata || {})[revenueOutcomeProvidersMetadataKey] || outcomeProviders,
+      metadataValue: outcomeProviders,
     });
 
     return NextResponse.json({

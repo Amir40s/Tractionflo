@@ -39,10 +39,6 @@ export const escalationRulesChangedEvent = "tractionflo:escalation-rules-changed
 export const defaultEscalationRuleSettings: EscalationRuleSetting[] = [
   { id: "refunds", label: "Refund requests", action: "Always escalate", priority: "High", enabled: true },
   { id: "complaints", label: "Complaints", action: "High priority", priority: "High", enabled: true },
-  { id: "partnerships", label: "Partnership deals > $2,500", action: "Escalate for approval", priority: "Medium", enabled: true },
-  { id: "vip", label: "High-ticket leads", action: "Escalate immediately", priority: "High", enabled: true },
-  { id: "bulk_orders", label: "Bulk / big orders", action: "Escalate immediately", priority: "High", enabled: true },
-  { id: "urgent_orders", label: "Urgent orders", action: "Escalate immediately", priority: "High", enabled: true },
   { id: "human_handoff", label: "Human handoff requests", action: "Always escalate", priority: "High", enabled: true },
 ];
 

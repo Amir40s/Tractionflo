@@ -66,6 +66,18 @@ type NormalizedAttachment = {
   mime_type: string | undefined;
 };
 
+type CatalogCarouselItem = {
+  orderId?: string;
+  title: string;
+  description?: string;
+  imageUrl?: string;
+  thumbnailUrl?: string;
+  permalink?: string;
+  priceText?: string;
+  priceAmount?: number | null;
+  currency?: string;
+};
+
 type StoredMessageRow = {
   mid?: string | null;
   user_id?: string | null;
@@ -93,6 +105,7 @@ type StoredConversation = {
     sender_profile_pic?: string;
     sender_id: string;
     time: string;
+    catalogItems?: CatalogCarouselItem[];
     reply_to?: {
       mid?: string;
       story?: {
@@ -256,21 +269,61 @@ function getStoredAttachmentType(label: string, url: string) {
   return 'file';
 }
 
-function parseStoredMessageContent(rawText: string) {
+function getStoredCatalogCarouselItems(metadata?: Record<string, unknown> | null) {
+  const rawItems = Array.isArray(metadata?.catalogCarouselItems) ? metadata.catalogCarouselItems : [];
+
+  return rawItems
+    .map((item): CatalogCarouselItem | null => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return null;
+      }
+
+      const record = item as Record<string, unknown>;
+      const title = getStringValue(record.title);
+
+      if (!title) {
+        return null;
+      }
+
+      const rawPriceAmount = record.priceAmount;
+      const priceAmount = typeof rawPriceAmount === 'number' && Number.isFinite(rawPriceAmount) ? rawPriceAmount : null;
+
+      return {
+        orderId: getStringValue(record.orderId) || undefined,
+        title,
+        description: getStringValue(record.description) || undefined,
+        imageUrl: getStringValue(record.imageUrl) || undefined,
+        thumbnailUrl: getStringValue(record.thumbnailUrl) || undefined,
+        permalink: getStringValue(record.permalink) || undefined,
+        priceText: getStringValue(record.priceText) || undefined,
+        priceAmount,
+        currency: getStringValue(record.currency) || undefined,
+      };
+    })
+    .filter((item): item is CatalogCarouselItem => Boolean(item));
+}
+
+function parseStoredMessageContent(rawText: string, metadata?: Record<string, unknown> | null) {
   const storyParsed = parseStoredMessageText(rawText);
+  const catalogItems = getStoredCatalogCarouselItems(metadata);
+
+  if (catalogItems.length > 0) {
+    return { ...storyParsed, text: '', attachments: [] as NormalizedAttachment[], catalogItems };
+  }
+
   const text = storyParsed.text.trim();
   const attachmentMatch = text.match(/^\[([^\]]+)\]\s+(https?:\/\/\S+)\s*$/i);
   const plainUrlMatch = text.match(/^(https?:\/\/\S+)\s*$/i);
   const attachmentUrl = attachmentMatch?.[2] || plainUrlMatch?.[1] || '';
 
   if (!attachmentUrl) {
-    return { ...storyParsed, text: storyParsed.text, attachments: [] as NormalizedAttachment[] };
+    return { ...storyParsed, text: storyParsed.text, attachments: [] as NormalizedAttachment[], catalogItems: [] as CatalogCarouselItem[] };
   }
 
   const type = getStoredAttachmentType(attachmentMatch?.[1] || '', attachmentUrl);
 
   if (type === 'file' && !attachmentMatch) {
-    return { ...storyParsed, text: storyParsed.text, attachments: [] as NormalizedAttachment[] };
+    return { ...storyParsed, text: storyParsed.text, attachments: [] as NormalizedAttachment[], catalogItems: [] as CatalogCarouselItem[] };
   }
 
   return {
@@ -287,7 +340,45 @@ function parseStoredMessageContent(rawText: string) {
         mime_type: getUrlMimeType(attachmentUrl),
       },
     ],
+    catalogItems: [] as CatalogCarouselItem[],
   };
+}
+
+function getStoredMessageKey(row: StoredMessageRow) {
+  return row.mid || `${row.conversation_id || ''}:${row.sender_id || ''}:${row.recipient_id || ''}:${row.timestamp || ''}`;
+}
+
+function getClosestStoredCatalogRow(
+  rows: StoredMessageRow[],
+  createdTime: string,
+  usedKeys: Set<string>,
+  maxDistanceMs = 5 * 60_000
+) {
+  const targetTime = Date.parse(createdTime);
+
+  if (!Number.isFinite(targetTime)) {
+    return null;
+  }
+
+  let closestRow: StoredMessageRow | null = null;
+  let closestDistance = maxDistanceMs + 1;
+
+  for (const row of rows) {
+    const key = getStoredMessageKey(row);
+
+    if (usedKeys.has(key) || getStoredCatalogCarouselItems(row.metadata).length === 0) {
+      continue;
+    }
+
+    const distance = Math.abs(getMessageTimeMillis(row) - targetTime);
+
+    if (distance <= maxDistanceMs && distance < closestDistance) {
+      closestRow = row;
+      closestDistance = distance;
+    }
+  }
+
+  return closestRow;
 }
 
 function getRecord(value: unknown) {
@@ -504,7 +595,7 @@ async function buildStoredConversations({
         },
         updated_time: getMessageTimeIso(latest),
         messages: sortedRows.map((message, index) => {
-          const parsed = parseStoredMessageContent(message.text || '');
+          const parsed = parseStoredMessageContent(message.text || '', message.metadata);
           const isMe =
             message.direction === 'outbound' ||
             (ownIgUserId && message.sender_id === ownIgUserId && message.direction !== 'inbound');
@@ -513,6 +604,7 @@ async function buildStoredConversations({
             id: message.mid || `${conversationId}-${message.timestamp || index}`,
             text: parsed.text,
             attachments: parsed.attachments,
+            catalogItems: parsed.catalogItems,
             from: isMe ? 'me' : 'user',
             sender_name: isMe
               ? 'You'
@@ -697,16 +789,19 @@ export async function GET(request: Request) {
 
         // Fetch matching stored messages from Supabase to parse story reply metadata
         const mids = messages.map((m) => m.id).filter(Boolean);
-        const dbMessagesMap: Record<string, string> = {};
+        const dbMessagesMap: Record<string, { text: string; metadata?: Record<string, unknown> | null }> = {};
         if (mids.length > 0) {
           const { data: dbMessages, error: dbError } = await supabase
             .from('messages')
-            .select('mid, text')
+            .select('mid, text, metadata')
             .in('mid', mids);
-          
+
           if (!dbError && dbMessages) {
             for (const dbMsg of dbMessages) {
-              dbMessagesMap[dbMsg.mid] = dbMsg.text;
+              dbMessagesMap[dbMsg.mid] = {
+                text: dbMsg.text || '',
+                metadata: dbMsg.metadata && typeof dbMsg.metadata === 'object' ? dbMsg.metadata : null,
+              };
             }
           }
         }
@@ -725,6 +820,21 @@ export async function GET(request: Request) {
               name: otherParticipantProfile.name || otherParticipantProfile.username || participantFallbackName,
             }
           : { id: otherParticipantProfileId, name: participantFallbackName };
+        const storedConversationIds = [...new Set([otherParticipantProfileId, conv.id].filter(Boolean))];
+        const { data: storedConversationRows } =
+          storedConversationIds.length > 0
+            ? await supabase
+                .from('messages')
+                .select('mid,user_id,conversation_id,sender_id,recipient_id,direction,text,timestamp,raw_event,metadata,created_at')
+                .eq('user_id', user.id)
+                .in('conversation_id', storedConversationIds)
+                .order('timestamp', { ascending: false })
+                .limit(80)
+            : { data: [] };
+        const storedRows = ((storedConversationRows || []) as StoredMessageRow[]).filter(
+          (row) => getStoredCatalogCarouselItems(row.metadata).length > 0
+        );
+        const usedStoredCatalogKeys = new Set<string>();
 
         return {
           id: conv.id,
@@ -733,8 +843,22 @@ export async function GET(request: Request) {
           messages: messages.map((m) => {
             let text = m.message || '';
             let reply_to = m.reply_to;
+            const normalizedAttachments = normalizeAttachments(m.attachments);
 
-            const dbText = dbMessagesMap[m.id];
+            let dbMessage = dbMessagesMap[m.id];
+            if (!dbMessage && !text && normalizedAttachments.length === 0) {
+              const storedCatalogRow = getClosestStoredCatalogRow(storedRows, m.created_time, usedStoredCatalogKeys);
+
+              if (storedCatalogRow) {
+                usedStoredCatalogKeys.add(getStoredMessageKey(storedCatalogRow));
+                dbMessage = {
+                  text: storedCatalogRow.text || '',
+                  metadata: storedCatalogRow.metadata || null,
+                };
+              }
+            }
+            const dbText = dbMessage?.text || '';
+            const parsedStored = dbMessage ? parseStoredMessageContent(dbText, dbMessage.metadata) : null;
             if (dbText && dbText.startsWith('__STORY_REPLY__:')) {
               try {
                 const parts = dbText.split('__TEXT__:', 2);
@@ -751,11 +875,15 @@ export async function GET(request: Request) {
                 console.error('Failed to parse serialized story reply from DB:', e);
               }
             }
+            if (parsedStored?.catalogItems?.length) {
+              text = parsedStored.text;
+            }
 
             return {
               id: m.id,
               text,
-              attachments: normalizeAttachments(m.attachments),
+              attachments: parsedStored?.catalogItems?.length ? [] : normalizedAttachments,
+              catalogItems: parsedStored?.catalogItems || [],
               from: m.from?.id === ownParticipantId || m.from?.username === meData.username ? 'me' : 'user',
               sender_name: m.from?.name || m.from?.username || (m.from?.id === ownParticipantId ? 'You' : participantProfile.name),
               sender_profile_pic: m.from?.id === otherParticipantProfileId ? otherParticipantProfilePic : undefined,

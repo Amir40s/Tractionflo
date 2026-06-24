@@ -8,6 +8,7 @@ import {
   normalizeOpenAiModel,
   sanitizeAiText,
 } from '@/lib/ai-integration';
+import { compactUserAuthMetadata } from '@/lib/auth-metadata';
 import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createClient } from '@/utils/supabase/server';
 
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    const metadata = user.user_metadata || {};
+    const metadata = compactUserAuthMetadata(user.user_metadata || {});
     const nextMetadata: Record<string, unknown> = { ...metadata };
     const apiKey = payload.apiKey?.trim();
 

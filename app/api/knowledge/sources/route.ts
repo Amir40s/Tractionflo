@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { canAccessPage, getUserPermissionProfile } from "@/lib/agent-permissions";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import {
   buildKnowledgeSourceIndex,
   createKnowledgeStoragePaths,
@@ -155,7 +156,8 @@ export async function POST(request: Request) {
       
       const authSupabase = await createClient();
       await authSupabase.auth.updateUser({ 
-        data: { 
+        data: {
+          ...compactUserAuthMetadata(metadata),
           openai_assistant_id: assistantId,
           openai_vector_store_id: vectorStoreId
         } 

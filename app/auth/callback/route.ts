@@ -1,4 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { compactUserAuthMetadata } from '@/lib/auth-metadata'
+import {
+  normalizeRevenueOutcomeProviderSettings,
+  revenueOutcomeProvidersMetadataKey,
+} from '@/lib/revenue-outcome-providers'
+import { saveRevenueProviderConnections } from '@/lib/revenue-provider-execution'
+import { createSupabaseServiceClient } from '@/lib/supabase'
 import { createClient } from '@/utils/supabase/server'
 
 function shouldShowOnboarding(metadata: Record<string, unknown>) {
@@ -12,6 +19,25 @@ function shouldShowOnboarding(metadata: Record<string, unknown>) {
   const isAgent = metadata.is_agent === true || role === 'agent' || accountRole === 'agent'
 
   return !isSuperAdmin && !isAgent && metadata.onboarding_completed !== true
+}
+
+async function migrateRevenueOutcomeProvidersFromMetadata(userId: string, metadata: Record<string, unknown>) {
+  const metadataValue = metadata[revenueOutcomeProvidersMetadataKey]
+
+  if (!metadataValue) {
+    return
+  }
+
+  try {
+    const settings = normalizeRevenueOutcomeProviderSettings(metadataValue)
+    await saveRevenueProviderConnections({
+      supabase: createSupabaseServiceClient(),
+      userId,
+      providers: settings.providers,
+    })
+  } catch (error) {
+    console.error('Could not migrate revenue provider settings out of auth metadata:', error)
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -28,15 +54,30 @@ export async function GET(request: NextRequest) {
         data: { user },
       } = await supabase.auth.getUser()
 
-      if (user && shouldShowOnboarding(user.user_metadata || {})) {
-        await supabase.auth.updateUser({
-          data: {
-            ...user.user_metadata,
-            onboarding_completed: false,
-          },
-        })
+      if (user) {
+        const metadata = (user.user_metadata || {}) as Record<string, unknown>
+        await migrateRevenueOutcomeProvidersFromMetadata(user.id, metadata)
+        const compactMetadata = compactUserAuthMetadata(metadata)
+        const shouldPruneMetadata =
+          JSON.stringify(compactMetadata) !== JSON.stringify(metadata)
+        const needsOnboarding = shouldShowOnboarding(compactMetadata)
 
-        return NextResponse.redirect(new URL('/onboarding', requestUrl.origin))
+        if (shouldPruneMetadata || needsOnboarding) {
+          const { error: updateError } = await supabase.auth.updateUser({
+            data: {
+              ...compactMetadata,
+              ...(needsOnboarding ? { onboarding_completed: false } : {}),
+            },
+          })
+
+          if (!updateError) {
+            await supabase.auth.refreshSession()
+          }
+        }
+
+        if (needsOnboarding) {
+          return NextResponse.redirect(new URL('/onboarding', requestUrl.origin))
+        }
       }
 
       return NextResponse.redirect(new URL(next, requestUrl.origin))

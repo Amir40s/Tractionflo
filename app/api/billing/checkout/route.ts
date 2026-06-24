@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import { defaultPricingPlans, findPricingPlan, normalizePricingPlans } from "@/lib/pricing";
 import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from "@/lib/pusher";
 import { createSupabaseServiceClient } from "@/lib/supabase";
@@ -8,7 +9,7 @@ import { createClient } from "@/utils/supabase/server";
 export const dynamic = "force-dynamic";
 
 function getMetadata(user?: User | null) {
-  return (user?.user_metadata || {}) as Record<string, unknown>;
+  return compactUserAuthMetadata(user?.user_metadata);
 }
 
 function getMetadataString(metadata: Record<string, unknown>, key: string) {

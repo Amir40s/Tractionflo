@@ -39,6 +39,26 @@ type InstagramMediaMessagePayload = {
   };
 };
 
+type InstagramTemplateButton =
+  | {
+      type: "web_url";
+      title: string;
+      url: string;
+    }
+  | {
+      type: "postback";
+      title: string;
+      payload: string;
+    };
+
+export type InstagramGenericTemplateElement = {
+  title: string;
+  subtitle?: string;
+  imageUrl?: string;
+  defaultActionUrl?: string;
+  buttons: InstagramTemplateButton[];
+};
+
 type InstagramTemplateMessagePayload = {
   attachment: {
     type: "template";
@@ -52,11 +72,7 @@ type InstagramTemplateMessagePayload = {
           type: "web_url";
           url: string;
         };
-        buttons: Array<{
-          type: "web_url";
-          title: string;
-          url: string;
-        }>;
+        buttons: InstagramTemplateButton[];
       }>;
     };
   };
@@ -184,6 +200,48 @@ export function sendInstagramAttachmentMessage(
       type: attachment.type,
       payload: {
         url: attachment.url,
+      },
+    },
+  });
+}
+
+export function sendInstagramGenericTemplate(
+  accessToken: string,
+  recipientId: string,
+  elements: InstagramGenericTemplateElement[]
+) {
+  const templateElements: InstagramTemplateMessagePayload["attachment"]["payload"]["elements"] = elements
+    .slice(0, 10)
+    .map((element) => {
+      const templateElement: InstagramTemplateMessagePayload["attachment"]["payload"]["elements"][number] = {
+        title: truncateInstagramText(element.title || "Instagram product", 80),
+        buttons: element.buttons.slice(0, 3),
+      };
+
+      if (element.subtitle) {
+        templateElement.subtitle = truncateInstagramText(element.subtitle, 80);
+      }
+
+      if (element.imageUrl?.startsWith("https://")) {
+        templateElement.image_url = element.imageUrl;
+      }
+
+      if (element.defaultActionUrl?.startsWith("https://")) {
+        templateElement.default_action = {
+          type: "web_url",
+          url: element.defaultActionUrl,
+        };
+      }
+
+      return templateElement;
+    });
+
+  return sendInstagramApiMessage(accessToken, recipientId, {
+    attachment: {
+      type: "template",
+      payload: {
+        template_type: "generic",
+        elements: templateElements,
       },
     },
   });

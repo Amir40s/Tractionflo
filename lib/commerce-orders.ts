@@ -443,6 +443,83 @@ export async function confirmLatestPendingCommerceOrder(
   return normalizeCommerceOrder(data as CommerceOrderRow);
 }
 
+export async function confirmPendingCommerceOrderById(
+  supabase: SupabaseServiceClient,
+  {
+    userId,
+    orderId,
+    instagramSenderId,
+    conversationId,
+    confirmationText,
+  }: {
+    userId: string;
+    orderId: string;
+    instagramSenderId?: string;
+    conversationId?: string;
+    confirmationText: string;
+  }
+) {
+  const id = compactText(orderId);
+
+  if (!id) {
+    return null;
+  }
+
+  let query = supabase
+    .from("commerce_orders")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .eq("status", "pending_confirmation")
+    .limit(1);
+
+  if (instagramSenderId) {
+    query = query.eq("instagram_sender_id", instagramSenderId);
+  }
+
+  const { data: pendingRows, error: lookupError } = await query;
+
+  if (lookupError) {
+    if (isCommerceOrdersTableMissing(lookupError)) {
+      return null;
+    }
+
+    throw lookupError;
+  }
+
+  const pending = pendingRows?.[0] as CommerceOrderRow | undefined;
+
+  if (!pending?.id) {
+    return null;
+  }
+
+  const confirmedAt = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("commerce_orders")
+    .update({
+      conversation_id: conversationId || pending.conversation_id || null,
+      status: "confirmed",
+      payment_status: pending.payment_status === "paid" ? "paid" : "unpaid",
+      confirmation_text: confirmationText,
+      confirmed_at: confirmedAt,
+      updated_at: confirmedAt,
+    })
+    .eq("id", pending.id)
+    .eq("user_id", userId)
+    .select("*")
+    .single();
+
+  if (error) {
+    if (isCommerceOrdersTableMissing(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  return normalizeCommerceOrder(data as CommerceOrderRow);
+}
+
 export async function getLatestCommerceOrderForSender(
   supabase: SupabaseServiceClient,
   {

@@ -7,6 +7,20 @@ import { createSupabaseServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
+function getOrderConversationId(order: { conversationId?: string; instagramSenderId?: string }) {
+  return order.conversationId || order.instagramSenderId || "";
+}
+
+function addOrderReturnParams(url: URL, order: { id: string; conversationId?: string; instagramSenderId?: string }) {
+  url.searchParams.set("order_id", order.id);
+
+  const conversationId = getOrderConversationId(order);
+
+  if (conversationId) {
+    url.searchParams.set("conversation", conversationId);
+  }
+}
+
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ orderId: string }> }
@@ -31,7 +45,7 @@ export async function GET(
 
     if (order.status === "paid" || order.paymentStatus === "paid") {
       const successUrl = new URL(returnTo === "inbox" ? "/conversations" : "/checkout/success", requestUrl.origin);
-      successUrl.searchParams.set("order_id", order.id);
+      addOrderReturnParams(successUrl, order);
       if (returnTo === "inbox") {
         successUrl.searchParams.set("payment", "success");
       }

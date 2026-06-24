@@ -1,13 +1,18 @@
 import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
 import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
-import { detectConversationEscalation, escalationRulesMetadataKey } from '@/lib/conversation-escalation';
+import {
+  detectConversationEscalation,
+  escalationRulesMetadataKey,
+  shouldPauseAiForEscalation,
+} from '@/lib/conversation-escalation';
 import { buildBookingFollowUpReply, buildBookingMemoryPrompt } from '@/lib/conversation-context';
 import {
   buildCatalogOfferReply,
-  findBestCatalogOffer,
+  findCatalogOffers,
   formatCatalogForPrompt,
   getInstagramProductCatalogForUser,
+  shouldUseSingleCatalogOffer,
 } from '@/lib/instagram-product-catalog';
 import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
 import { runAssistantThread } from '@/lib/openai-assistants';
@@ -29,7 +34,10 @@ type ReplyMessage = {
 type ReplyPayload = {
   assistantId?: string;
   assistant_id?: string;
+  conversationId?: string;
+  conversation_id?: string;
   participant?: {
+    id?: string;
     name?: string;
     username?: string;
   };
@@ -120,23 +128,29 @@ export async function POST(request: Request) {
     const escalation = detectConversationEscalation(payload.messages, {
       rules: metadata[escalationRulesMetadataKey],
     });
+    const pauseForEscalation = shouldPauseAiForEscalation(escalation);
 
-    if (escalation) {
+    if (escalation && pauseForEscalation) {
       const notificationTitle = `${escalation.label} detected`;
       const notificationBody = escalation.summary;
+      const participantId = payload.participant?.id || '';
       const notificationMetadata = {
         assistantId,
+        conversationId: payload.conversationId || payload.conversation_id || '',
+        participantId,
         category: escalation.intent,
         urgency: escalation.urgency,
         urgent: escalation.urgency === 'High',
       };
+      const notificationId = `escalation:${assistantId}:${participantId || notificationMetadata.conversationId}:${escalation.intent}`;
 
       if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
         await triggerRealtimeNotification(getUserChannel(user.id), {
+          id: notificationId,
           type: 'escalation',
           title: notificationTitle,
           body: notificationBody,
-          url: '/conversations',
+          url: '/escalations',
           metadata: notificationMetadata,
         }).catch((notificationError) => {
           logger.error('Realtime handoff reply notification error:', { error: notificationError });
@@ -151,6 +165,11 @@ export async function POST(request: Request) {
         handoff: true,
         escalation,
         knowledge: summarizeKnowledgeForResponse({ mode: 'none', matches: [] }, assistantId),
+      });
+    } else if (escalation) {
+      logger.info('AI reply sales lead signal detected; continuing reply generation without escalation handoff.', {
+        intent: escalation.intent,
+        urgency: escalation.urgency,
       });
     }
 
@@ -205,12 +224,14 @@ export async function POST(request: Request) {
       .map(formatConversationLine)
       .join('\n');
     const catalogQuery = `${latestUserQuestion}\n${conversationLines}`;
+    const catalogSearchText = latestUserQuestion || catalogQuery;
     const productCatalog = await getInstagramProductCatalogForUser(serviceSupabase, user.id).catch((catalogError) => {
       logger.warn('Instagram catalog unavailable during AI reply generation:', { error: catalogError });
       return [];
     });
-    const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogQuery);
-    const catalogOffer = findBestCatalogOffer(catalogQuery, productCatalog);
+    const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogSearchText);
+    const catalogOffers = findCatalogOffers(catalogSearchText, productCatalog);
+    const catalogOffer = shouldUseSingleCatalogOffer(catalogSearchText, catalogOffers) ? catalogOffers[0] : null;
     const reply = await runAssistantThread({
       apiKey,
       assistantId: assistantIdFromMetadata,
@@ -268,6 +289,7 @@ Write the next best reply.`,
       reply: finalReply,
       autoSend: integration.autoSend,
       catalogOffer,
+      catalogOffers,
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
     });
   } catch (error) {

@@ -30,15 +30,17 @@ import {
 import type { EmojiClickData } from "emoji-picker-react";
 import { EmojiStyle, SkinTonePickerLocation, Theme } from "emoji-picker-react";
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AiLeadInsight, AiWorkflowRunResult } from "@/lib/ai-integration";
 import {
   detectConversationEscalations,
   normalizeEscalationRuleSettings,
+  shouldPauseAiForEscalation,
   type ConversationEscalation,
   type ConversationEscalationIntent,
   type EscalationRuleSetting,
 } from "@/lib/conversation-escalation";
+import { upsertLiveEscalationSnapshot } from "@/lib/live-escalation-snapshots";
 import { settingsStateStorageKey } from "@/lib/notification-preferences";
 import {
   quickRepliesChangedEvent,
@@ -80,6 +82,17 @@ type IGMessage = {
     name?: string;
     mime_type?: string;
     local?: boolean;
+  }[];
+  catalogItems?: {
+    orderId?: string;
+    title: string;
+    description?: string;
+    imageUrl?: string;
+    thumbnailUrl?: string;
+    permalink?: string;
+    priceText?: string;
+    priceAmount?: number | null;
+    currency?: string;
   }[];
   from: "me" | "user" | "note";
   sender_name: string;
@@ -143,6 +156,7 @@ type SendAPIResponse = {
     text?: string;
   }[];
   order?: CommerceOrder | null;
+  deduped?: boolean;
   error?: string;
 };
 
@@ -252,6 +266,47 @@ type ConversationTakeoverMode = "ai" | "human";
 
 function getTakeoverLabel(mode: ConversationTakeoverMode) {
   return mode === "human" ? "Human takeover" : "AI takeover";
+}
+
+function InboxSkeletonBlock({ className }: { className: string }) {
+  return <span className={`block animate-pulse rounded-[8px] bg-[#eef1f7] ${className}`} />;
+}
+
+function ConversationListSkeleton() {
+  return (
+    <div className="space-y-2 pt-2">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div key={index} className="flex min-h-[76px] items-center gap-3 rounded-[12px] border border-[#edf0f6] bg-white px-3">
+          <InboxSkeletonBlock className="h-11 w-11 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <InboxSkeletonBlock className="h-3 w-28" />
+            <InboxSkeletonBlock className="h-3 w-40 max-w-full" />
+          </div>
+          <InboxSkeletonBlock className="h-3 w-8" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChatThreadSkeleton() {
+  return (
+    <div className="space-y-4">
+      {Array.from({ length: 5 }).map((_, index) => {
+        const isMe = index % 2 === 1;
+
+        return (
+          <div key={index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[72%] space-y-2 rounded-[14px] p-4 ${isMe ? "bg-[#f0efff]" : "border border-[#edf0f6] bg-white"}`}>
+              <InboxSkeletonBlock className="h-3 w-56 max-w-full" />
+              <InboxSkeletonBlock className="h-3 w-44 max-w-full" />
+              <InboxSkeletonBlock className="h-2.5 w-16" />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function getTakeoverPillClass(mode: ConversationTakeoverMode) {
@@ -378,6 +433,7 @@ type ComposerSubmitPayload = {
   orderDraft?: Record<string, unknown> | null;
   refreshAfter?: boolean;
   automated?: boolean;
+  idempotencyKey?: string;
 };
 
 type ComposerStatus = {
@@ -632,6 +688,68 @@ function CheckoutTemplatePreview({
   );
 }
 
+function CatalogCarouselPreview({ items }: { items: NonNullable<IGMessage["catalogItems"]> }) {
+  return (
+    <div className="mb-2 -mx-1 overflow-x-auto pb-1">
+      <div className="flex w-max gap-2 px-1">
+        {items.map((item, index) => {
+          const imageUrl = item.thumbnailUrl || item.imageUrl || "";
+          const price = formatInboxPriceText(item.priceText, item.priceAmount, item.currency || "USD");
+
+          return (
+            <div
+              key={`${item.orderId || item.title}-${index}`}
+              className="w-[210px] shrink-0 overflow-hidden rounded-[10px] border border-[#dde3ee] bg-white text-left shadow-[0_12px_28px_rgba(20,28,53,0.08)]"
+            >
+              {imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={imageUrl}
+                  alt={item.title || "Catalog product"}
+                  className="h-40 w-full bg-[#f7f8fb] object-contain"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="flex h-24 w-full items-center justify-center bg-[#f4fff7] text-[#14a947]">
+                  <CircleDollarSign size={26} strokeWidth={2.35} />
+                </div>
+              )}
+              <div className="space-y-2 p-2.5">
+                <div>
+                  <p className="line-clamp-2 text-[11px] font-extrabold leading-snug text-[#171c33]">
+                    {item.title || "Instagram product"}
+                  </p>
+                  <p className="mt-1 text-[11px] font-bold text-[#0a9b3f]">{price}</p>
+                  {item.description ? (
+                    <p className="mt-1 line-clamp-2 text-[10px] font-medium leading-[1.25] text-[#596175]">
+                      {item.description}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex h-8 items-center justify-center gap-2 rounded-[8px] bg-[#14a947] px-2 text-[11px] font-extrabold text-white shadow-[0_10px_20px_rgba(20,169,71,0.14)]">
+                  <Check size={13} strokeWidth={2.5} />
+                  Confirm order
+                </div>
+                {item.permalink ? (
+                  <a
+                    href={item.permalink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex h-7 items-center justify-center gap-1.5 rounded-[7px] border border-[#dde3ee] text-[10px] font-extrabold text-[#3044ff]"
+                  >
+                    <ExternalLink size={12} strokeWidth={2.4} />
+                    View product
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function getInboxCommerceCheckoutUrl(order?: CommerceOrder | null) {
   const orderCheckoutPath = getOrderCheckoutPath(order);
 
@@ -710,47 +828,6 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function getCatalogOfferAttachments(offer?: CatalogOffer | null): NonNullable<IGMessage["attachments"]> {
-  const imageUrl = offer?.imageUrl?.trim();
-
-  if (!imageUrl?.startsWith("https://")) {
-    return [];
-  }
-
-  return [
-    {
-      type: "image",
-      url: imageUrl,
-      preview_url: offer?.thumbnailUrl || imageUrl,
-      name: offer?.title || "Instagram product",
-      mime_type: "image/jpeg",
-    },
-  ];
-}
-
-function getCatalogOfferOrderDraft(offer?: CatalogOffer | null) {
-  if (!offer) {
-    return null;
-  }
-
-  return {
-    productId: offer.id || offer.sourceMediaId || offer.title || "instagram-product",
-    sourceMediaId: offer.sourceMediaId || "",
-    productTitle: offer.title || "Instagram product",
-    productDescription: offer.description || "",
-    productImageUrl: offer.imageUrl || "",
-    productPermalink: offer.permalink || "",
-    priceText: offer.priceText || "",
-    amount: offer.priceAmount ?? null,
-    currency: offer.currency || "USD",
-    source: "instagram_ai",
-    metadata: {
-      confidence: offer.confidence || 0,
-      matchScore: offer.matchScore || 0,
-    },
-  };
-}
-
 function mergeCommerceOrders(current: CommerceOrder[], incoming: CommerceOrder[]) {
   const byId = new Map<string, CommerceOrder>();
 
@@ -776,6 +853,9 @@ function getConversationsSignature(conversations: IGConversation[]) {
               message.status || "",
               message.attachments
                 ?.map((attachment) => `${attachment.type}:${attachment.name || ""}:${attachment.mime_type || ""}`)
+                .join(",") || "",
+              message.catalogItems
+                ?.map((item) => `${item.orderId || ""}:${item.title}:${item.priceText || item.priceAmount || ""}`)
                 .join(",") || "",
             ].join("~")
           )
@@ -807,56 +887,6 @@ function clearInstagramOAuthErrorFromLocation() {
 
   url.searchParams.delete("ig_error");
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-}
-
-const instagramAutoSendStorageKey = "tractionflo.instagram.aiAutoSentKeys";
-
-function readInstagramAutoSendKeys() {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  try {
-    const value = window.sessionStorage.getItem(instagramAutoSendStorageKey);
-    const parsed = value ? JSON.parse(value) : [];
-
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function hasInstagramAutoSendKey(key: string) {
-  return readInstagramAutoSendKeys().includes(key);
-}
-
-function rememberInstagramAutoSendKey(key: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  const keys = readInstagramAutoSendKeys().filter((item) => item !== key);
-  keys.push(key);
-
-  try {
-    window.sessionStorage.setItem(instagramAutoSendStorageKey, JSON.stringify(keys.slice(-50)));
-  } catch {
-    // Session storage is best-effort; the in-memory ref still guards this render lifetime.
-  }
-}
-
-function forgetInstagramAutoSendKey(key: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  const keys = readInstagramAutoSendKeys().filter((item) => item !== key);
-
-  try {
-    window.sessionStorage.setItem(instagramAutoSendStorageKey, JSON.stringify(keys));
-  } catch {
-    // Ignore storage failures.
-  }
 }
 
 function getConversationAiMessages(conv: IGConversation) {
@@ -895,8 +925,42 @@ function getInboxEscalationIntent(intent: unknown): ConversationEscalationIntent
     : "complex_question";
 }
 
-function getInboxEscalationId(conversationId: string, escalation: ConversationEscalation) {
-  return `${conversationId}-${inboxEscalationIntentCategories[escalation.intent] || escalation.intent}`;
+function getInboxEscalationSourceKey(conv: IGConversation, escalation: ConversationEscalation) {
+  const rules = readEscalationRulesFromStorage();
+  const getMessageTime = (message: IGMessage) => {
+    const time = Date.parse(message.time || "");
+    return Number.isFinite(time) ? time : 0;
+  };
+  const matchingMessage = [...conv.messages]
+    .filter((message) => message.from === "user" && getMessagePreview(message).trim())
+    .sort((a, b) => getMessageTime(b) - getMessageTime(a))
+    .find((message) =>
+      detectConversationEscalations(
+        [
+          {
+            from: "user",
+            text: getMessagePreview(message),
+            time: message.time,
+          },
+        ],
+        { rules }
+      ).some((detectedEscalation) => detectedEscalation.intent === escalation.intent)
+    );
+  const source = matchingMessage?.id || matchingMessage?.time || conv.updated_time || "current";
+
+  return source.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+function getInboxEscalationId(conv: IGConversation, escalation: ConversationEscalation) {
+  return `${conv.id}-${inboxEscalationIntentCategories[escalation.intent] || escalation.intent}-${getInboxEscalationSourceKey(conv, escalation)}`;
+}
+
+function getInboxDetectedEscalations(conv: IGConversation | null): ConversationEscalation[] {
+  if (!conv) {
+    return [];
+  }
+
+  return detectConversationEscalations(getConversationAiMessages(conv), { rules: readEscalationRulesFromStorage() });
 }
 
 function getInboxEscalations(conv: IGConversation | null, resolvedEscalationIds: string[] = []): ConversationEscalation[] {
@@ -906,8 +970,39 @@ function getInboxEscalations(conv: IGConversation | null, resolvedEscalationIds:
 
   const resolvedIdSet = new Set(resolvedEscalationIds);
 
-  return detectConversationEscalations(getConversationAiMessages(conv), { rules: readEscalationRulesFromStorage() }).filter(
-    (escalation) => !resolvedIdSet.has(getInboxEscalationId(conv.id, escalation))
+  return getInboxDetectedEscalations(conv).filter(
+    (escalation) => shouldPauseAiForEscalation(escalation) && !resolvedIdSet.has(getInboxEscalationId(conv, escalation))
+  );
+}
+
+function getInboxCurrentPauseEscalations(
+  conv: IGConversation | null,
+  resolvedEscalationIds: string[] = []
+): ConversationEscalation[] {
+  if (!conv) {
+    return [];
+  }
+
+  const latestUserMessage = getLatestUserMessage(conv);
+
+  if (!latestUserMessage) {
+    return [];
+  }
+
+  const resolvedIdSet = new Set(resolvedEscalationIds);
+  const latestEscalations = detectConversationEscalations(
+    [
+      {
+        from: "user",
+        text: getMessagePreview(latestUserMessage),
+        time: latestUserMessage.time,
+      },
+    ],
+    { rules: readEscalationRulesFromStorage() }
+  );
+
+  return latestEscalations.filter(
+    (escalation) => shouldPauseAiForEscalation(escalation) && !resolvedIdSet.has(getInboxEscalationId(conv, escalation))
   );
 }
 
@@ -1075,10 +1170,7 @@ function ConvList({
 
       <div className="flex-1 overflow-y-auto px-2.5 pb-3">
         {loading ? (
-          <div className="flex flex-col items-center justify-center gap-3 pt-16 text-center">
-            <Loader2 size={22} className="animate-spin text-[#4b3cff]" />
-            <p className="text-[12px] font-medium text-[#596175]">Loading Instagram DMs…</p>
-          </div>
+          <ConversationListSkeleton />
         ) : needsConnection ? (
           <div className="flex flex-col items-center justify-center gap-3 px-4 pt-16 text-center">
             <div className="relative flex h-14 w-14 items-center justify-center rounded-[18px] bg-gradient-to-tr from-[#ffbd00] via-[#ff2d85] to-[#6d3cff]">
@@ -1160,6 +1252,7 @@ function ConvList({
             const lastMsg = conv.messages.find((message) => message.from !== "note");
             const name = conv.participant.username || conv.participant.name || `User ${conv.participant.id.slice(-6)}`;
             const avatarSrc = conv.participant.profile_pic || "";
+            const hasAiPausedSignal = getInboxCurrentPauseEscalations(conv, resolvedEscalationIds).length > 0;
             const escalations = getInboxEscalations(conv, resolvedEscalationIds);
             const escalation = escalations[0];
             const isStarred = starredConversationIds.includes(conv.id);
@@ -1182,6 +1275,11 @@ function ConvList({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-[13px] font-bold text-black">{name}</span>
+                    {hasAiPausedSignal ? (
+                      <span className="shrink-0 rounded-full border border-[#ffd1dc] bg-[#fff3f7] px-1.5 py-0.5 text-[9px] font-extrabold text-[#df405b]">
+                        AI paused
+                      </span>
+                    ) : null}
                     {escalation ? (
                       <>
                         <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-extrabold ${getInboxEscalationBadgeClass(escalation)}`}>
@@ -1235,6 +1333,7 @@ function ChatBubble({
   const isMe = msg.from === "me" || msg.sender_id === igUserId;
   const hasText = Boolean(msg.text);
   const attachments = msg.attachments || [];
+  const catalogItems = msg.catalogItems || [];
   const showConfirmQuickReplyPreview = isMe && hasConfirmOrderPrompt(msg.text || "");
   const stripeCheckoutUrl = getStripeCheckoutUrlFromText(msg.text || "");
   const checkoutButtonUrl = stripeCheckoutUrl && checkoutRedirectUrl ? checkoutRedirectUrl : "";
@@ -1322,11 +1421,12 @@ function ChatBubble({
             })}
           </div>
         )}
+        {catalogItems.length > 0 ? <CatalogCarouselPreview items={catalogItems} /> : null}
         {hasText ? (
           <MessageTextWithLinks text={msg.text} checkoutRedirectUrl={checkoutRedirectUrl} />
         ) : renderCommerceCheckoutTemplate && commerceOrder && checkoutRedirectUrl ? (
           <CheckoutTemplatePreview order={commerceOrder} checkoutUrl={checkoutRedirectUrl} />
-        ) : attachments.length === 0 ? (
+        ) : attachments.length === 0 && catalogItems.length === 0 ? (
           <p className="text-[#596175]">Unsupported message</p>
         ) : null}
         {checkoutButtonUrl ? (
@@ -1701,6 +1801,7 @@ function ChatComposer({
 
 function ChatThread({
   conv,
+  loading,
   igUserId,
   composerStatus,
   composerDraft,
@@ -1713,6 +1814,7 @@ function ChatThread({
   commerceOrder,
 }: {
   conv: IGConversation | null;
+  loading: boolean;
   igUserId: string;
   composerStatus: ComposerStatus;
   composerDraft: ComposerDraft | null;
@@ -1724,16 +1826,69 @@ function ChatThread({
   onToggleStarred: () => void;
   commerceOrder?: CommerceOrder | null;
 }) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastScrollStateRef = useRef({ conversationId: "", messageCount: 0, lastMessageId: "" });
   const messages = conv ? [...conv.messages].filter((message) => message.from !== "note").reverse() : [];
+  const conversationId = conv?.id || "";
+  const lastMessageId = messages[messages.length - 1]?.id || "";
   const [quickReplies, setQuickReplies] = useState<QuickReplySetting[]>(() => readQuickRepliesFromStorage());
   const [savedReplies, setSavedReplies] = useState<SavedReplySetting[]>(() => readSavedRepliesFromStorage());
   const [welcomeMessage, setWelcomeMessage] = useState<WelcomeMessageSetting>(() => readWelcomeMessageFromStorage());
   const [actionsOpen, setActionsOpen] = useState(false);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conv?.id, messages.length]);
+  useLayoutEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+
+    if (!conversationId || !scrollContainer) {
+      lastScrollStateRef.current = { conversationId: "", messageCount: 0, lastMessageId: "" };
+      return undefined;
+    }
+
+    const previous = lastScrollStateRef.current;
+    const conversationChanged = previous.conversationId !== conversationId;
+    const messageChanged = previous.messageCount !== messages.length || previous.lastMessageId !== lastMessageId;
+
+    if (!conversationChanged && !messageChanged) {
+      return undefined;
+    }
+
+    const jumpToBottom = () => {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    };
+
+    if (conversationChanged) {
+      jumpToBottom();
+      const firstFrame = window.requestAnimationFrame(jumpToBottom);
+      let nestedFrame = 0;
+      const secondFrame = window.requestAnimationFrame(() => {
+        nestedFrame = window.requestAnimationFrame(jumpToBottom);
+      });
+
+      lastScrollStateRef.current = {
+        conversationId,
+        messageCount: messages.length,
+        lastMessageId,
+      };
+
+      return () => {
+        window.cancelAnimationFrame(firstFrame);
+        window.cancelAnimationFrame(secondFrame);
+        if (nestedFrame) {
+          window.cancelAnimationFrame(nestedFrame);
+        }
+      };
+    }
+
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    lastScrollStateRef.current = {
+      conversationId,
+      messageCount: messages.length,
+      lastMessageId,
+    };
+
+    return undefined;
+  }, [conversationId, lastMessageId, messages.length]);
 
   useEffect(() => {
     const refreshComposerShortcuts = () => {
@@ -1776,7 +1931,15 @@ function ChatThread({
           <button type="button" aria-label="Back" className="text-[#1f2638]">
             <ArrowLeft size={20} strokeWidth={2.3} />
           </button>
-          {conv ? (
+          {loading && !conv ? (
+            <>
+              <InboxSkeletonBlock className="h-10 w-10 rounded-full" />
+              <div className="space-y-2">
+                <InboxSkeletonBlock className="h-4 w-36" />
+                <InboxSkeletonBlock className="h-3 w-24" />
+              </div>
+            </>
+          ) : conv ? (
             <>
               <Avatar src={avatarSrc} name={name} size="h-10 w-10" />
               <div className="min-w-0">
@@ -1873,8 +2036,10 @@ function ChatThread({
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-        {!conv ? (
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+        {loading ? (
+          <ChatThreadSkeleton />
+        ) : !conv ? (
           <div className="flex items-center justify-center pt-20 text-[13px] font-medium text-[#596175]">
             Select a conversation to view messages
           </div>
@@ -2089,7 +2254,6 @@ function SummaryPanel({
   takeoverMode,
   onToggleTakeoverMode,
   onDraftSuggestedReply,
-  onAutoSendAiReply,
   agents,
   loadingAgents,
   canManageAgents,
@@ -2110,7 +2274,6 @@ function SummaryPanel({
   takeoverMode: ConversationTakeoverMode;
   onToggleTakeoverMode: () => void;
   onDraftSuggestedReply: (text: string) => void;
-  onAutoSendAiReply: (text: string, conversationId: string, catalogOffer?: CatalogOffer | null) => Promise<void>;
   agents: AgentAccount[];
   loadingAgents: boolean;
   canManageAgents: boolean;
@@ -2154,14 +2317,24 @@ function SummaryPanel({
   const lastUserMsgPreview = getMessagePreview(lastUserMsg);
   const knowledgeSummary = aiWorkflow?.knowledge;
   const hasKnowledgeReply = knowledgeSummary?.mode === "direct" || knowledgeSummary?.mode === "context";
-  const localEscalations = getInboxEscalations(conv, resolvedEscalationIds);
-  const workflowEscalation = normalizeWorkflowEscalation(aiWorkflow?.escalation);
+  const detectedEscalations = getInboxDetectedEscalations(conv);
   const resolvedEscalationIdSet = new Set(resolvedEscalationIds);
+  const localEscalations = conv
+    ? detectedEscalations.filter(
+        (escalation) => shouldPauseAiForEscalation(escalation) && !resolvedEscalationIdSet.has(getInboxEscalationId(conv, escalation))
+      )
+    : [];
+  const workflowEscalation = normalizeWorkflowEscalation(aiWorkflow?.escalation);
+  const workflowEscalationKey = workflowEscalation ? `${workflowEscalation.intent}:${workflowEscalation.urgency}` : "";
   const visibleWorkflowEscalation =
-    conv && workflowEscalation && !resolvedEscalationIdSet.has(getInboxEscalationId(conv.id, workflowEscalation))
+    conv &&
+    workflowEscalation &&
+    shouldPauseAiForEscalation(workflowEscalation) &&
+    !resolvedEscalationIdSet.has(getInboxEscalationId(conv, workflowEscalation))
       ? workflowEscalation
       : null;
   const escalationCards = localEscalations.length > 0 ? localEscalations : visibleWorkflowEscalation ? [visibleWorkflowEscalation] : [];
+  const humanReviewEscalationsKey = escalationCards.map((escalation) => `${escalation.intent}:${escalation.urgency}`).join("|");
   const suggestedReply = isHumanTakeover
     ? ""
     : aiWorkflow?.reply ||
@@ -2181,7 +2354,6 @@ function SummaryPanel({
   const commerceOrderPrice = commerceOrder
     ? formatInboxPriceText(commerceOrder.priceText, commerceOrder.amount, commerceOrder.currency)
     : "Price pending";
-  const lastAutoSendKeyRef = useRef("");
   const confirmationFallbackKeyRef = useRef("");
   const savedConversationNote = conv ? conversationNotes[conv.id] : undefined;
   const noteDraft = conv ? noteDrafts[conv.id] ?? savedConversationNote?.text ?? "" : "";
@@ -2194,10 +2366,22 @@ function SummaryPanel({
       : "No notes yet";
   const canSaveConversationNote = Boolean(conv && hasConversationNoteChanges);
   const autoSendPaused = Boolean(aiWorkflow?.handoff || aiWorkflow?.autoSend === false);
+  const hasAiPausedSignal = getInboxCurrentPauseEscalations(conv, resolvedEscalationIds).length > 0;
+  const isAiAutoPaused = !isHumanTakeover && (autoSendPaused || hasAiPausedSignal);
+  const controlTakeoverLabel = isAiAutoPaused ? "AI paused" : takeoverLabel;
+  const ControlStatusIcon = isAiAutoPaused ? TriangleAlert : TakeoverStatusIcon;
 
   useEffect(() => {
     takeoverModeRef.current = takeoverMode;
   }, [takeoverMode]);
+
+  useEffect(() => {
+    if (!conv || escalationCards.length === 0) {
+      return;
+    }
+
+    upsertLiveEscalationSnapshot(conv);
+  }, [conv, escalationCards.length, humanReviewEscalationsKey, workflowEscalationKey]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -2236,6 +2420,7 @@ function SummaryPanel({
           signal: options?.signal,
           body: JSON.stringify({
             assistantId,
+            conversationId: conv.id,
             participant: conv.participant,
             accountName,
             takeoverMode: requestTakeoverMode,
@@ -2254,6 +2439,9 @@ function SummaryPanel({
         }
 
         setAiWorkflow(data);
+        if (data.escalation) {
+          upsertLiveEscalationSnapshot(conv);
+        }
         setAiStatus(
           data.handoff
             ? data.escalation?.recommendedAction || "Human handoff needed. AI auto-send is paused."
@@ -2314,61 +2502,6 @@ function SummaryPanel({
       controller.abort();
     };
   }, [aiRefreshKey, conv, isHumanTakeover, runAiWorkflow]);
-
-  useEffect(() => {
-    const reply = aiWorkflow?.reply?.trim();
-
-    if (
-      !conv ||
-      isHumanTakeover ||
-      aiLoading ||
-      composerStatus.sending ||
-      latestInboundIsOrderConfirmation ||
-      !reply ||
-      aiWorkflow?.autoSend === false ||
-      aiWorkflow?.handoff ||
-      !latestInboundMessage
-    ) {
-      return;
-    }
-
-    const autoSendKey = `${conv?.id || ""}:${latestInboundMessage?.id || ""}:${reply}`;
-
-    if (lastAutoSendKeyRef.current === autoSendKey || hasInstagramAutoSendKey(autoSendKey)) {
-      return;
-    }
-
-    lastAutoSendKeyRef.current = autoSendKey;
-    rememberInstagramAutoSendKey(autoSendKey);
-    setAiStatus("AI takeover active. Sending reply automatically...");
-
-    void onAutoSendAiReply(reply || "", conv?.id || "", catalogOffer)
-      .then(() => {
-        if (takeoverModeRef.current !== "human") {
-          setAiStatus("AI takeover active. Reply sent automatically.");
-        }
-      })
-      .catch((error) => {
-        lastAutoSendKeyRef.current = "";
-        forgetInstagramAutoSendKey(autoSendKey);
-
-        if (takeoverModeRef.current !== "human") {
-          setAiStatus(error instanceof Error ? error.message : "AI auto-send failed.");
-        }
-      });
-  }, [
-    aiLoading,
-    aiWorkflow?.autoSend,
-    aiWorkflow?.handoff,
-    aiWorkflow?.reply,
-    catalogOffer,
-    composerStatus.sending,
-    conv,
-    isHumanTakeover,
-    latestInboundMessage,
-    latestInboundIsOrderConfirmation,
-    onAutoSendAiReply,
-  ]);
 
   useEffect(() => {
     if (!conv || !latestInboundMessage || !latestInboundIsOrderConfirmation) {
@@ -2442,7 +2575,7 @@ function SummaryPanel({
 
   return (
     <aside className="hidden h-full min-w-0 flex-col overflow-hidden border-l border-[#e7eaf2] bg-white xl:flex">
-      <header className="relative z-10 flex h-[58px] shrink-0 items-center border-b border-[#e7eaf2] bg-white px-3">
+      <header className="relative z-[80] flex h-[58px] shrink-0 items-center border-b border-[#e7eaf2] bg-white px-3">
         {messageSearchOpen ? (
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-[9px] border border-[#dde3ee] bg-white px-3 text-[#596175]">
@@ -2487,7 +2620,7 @@ function SummaryPanel({
             ) : null}
 
             {conv && canManageAgents ? (
-              <div className="relative shrink-0">
+              <div className={`relative shrink-0 ${assignmentOpen ? "z-[90]" : ""}`}>
                 <button
                   type="button"
                   onClick={() => setAssignmentOpen((open) => !open)}
@@ -2502,7 +2635,7 @@ function SummaryPanel({
                 </button>
 
                 {assignmentOpen && (
-                  <div className="absolute right-0 top-10 z-30 w-[292px] rounded-[10px] border border-[#dde3ee] bg-white p-2 shadow-[0_22px_60px_rgba(20,28,53,0.16)]">
+                  <div className="absolute right-0 top-10 z-[100] w-[292px] rounded-[10px] border border-[#dde3ee] bg-white p-2 shadow-[0_22px_60px_rgba(20,28,53,0.16)]">
                     <div className="flex items-center justify-between px-2 py-1">
                       <p className="text-[11px] font-extrabold uppercase text-[#596175]">Assign to agent</p>
                       <button
@@ -2595,7 +2728,7 @@ function SummaryPanel({
         )}
       </header>
 
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="relative z-0 flex-1 overflow-y-auto p-3">
         {conv ? (
           <section className="rounded-[14px] bg-white p-1 shadow-[0_22px_60px_rgba(20,28,53,0.055)]">
             <div className="p-2.5">
@@ -2634,12 +2767,12 @@ function SummaryPanel({
                   <span className="text-[12px] font-normal text-black">Control</span>
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <span
-                      className={`inline-flex h-8 items-center gap-1.5 rounded-[8px] border px-2.5 text-[11px] font-extrabold ${getTakeoverPillClass(
-                        takeoverMode
-                      )}`}
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-[8px] border px-2.5 text-[11px] font-extrabold ${
+                        isAiAutoPaused ? "border-[#ffd1dc] bg-[#fff3f7] text-[#df405b]" : getTakeoverPillClass(takeoverMode)
+                      }`}
                     >
-                      <TakeoverStatusIcon size={13} strokeWidth={2.4} />
-                      {takeoverLabel}
+                      <ControlStatusIcon size={13} strokeWidth={2.4} />
+                      {controlTakeoverLabel}
                     </span>
                     <button
                       type="button"
@@ -3237,6 +3370,8 @@ export default function Inbox() {
           formData.append("recipientId", targetConv.participant.id);
           formData.append("conversationId", targetConv.id);
           formData.append("text", payload.text);
+          formData.append("automated", payload.automated ? "true" : "false");
+          formData.append("idempotencyKey", payload.idempotencyKey || "");
           if (remoteAttachmentPayload.length > 0) {
             formData.append("attachmentUrls", JSON.stringify(remoteAttachmentPayload));
           }
@@ -3262,6 +3397,8 @@ export default function Inbox() {
               text: payload.text,
               attachmentUrls: remoteAttachmentPayload,
               orderDraft,
+              automated: payload.automated === true,
+              idempotencyKey: payload.idempotencyKey || "",
             }),
           });
         }
@@ -3561,30 +3698,6 @@ export default function Inbox() {
     });
   }, []);
 
-  const autoSendAiReply = useCallback(
-    async (text: string, conversationId: string, catalogOffer?: CatalogOffer | null) => {
-      if (activeTakeoverModeRef.current === "human") {
-        throw new Error("AI auto-send is paused while human takeover is active.");
-      }
-
-      const catalogAttachments = getCatalogOfferAttachments(catalogOffer);
-      const orderDraft = getCatalogOfferOrderDraft(catalogOffer);
-
-      await submitComposerMessage({
-        conversationId,
-        mode: "reply",
-        text,
-        files: [],
-        localAttachments: catalogAttachments,
-        attachmentUrls: catalogAttachments,
-        orderDraft,
-        refreshAfter: true,
-        automated: true,
-      });
-    },
-    [submitComposerMessage]
-  );
-
   const generateAiReply = useCallback(async () => {
     const targetConv = convs.find((conv) => conv.id === activeId);
     const requestTakeoverMode = activeTakeoverModeRef.current;
@@ -3605,6 +3718,7 @@ export default function Inbox() {
       },
       body: JSON.stringify({
         assistantId,
+        conversationId: targetConv.id,
         participant: targetConv.participant,
         accountName: formatInstagramAccount(account),
         takeoverMode: requestTakeoverMode,
@@ -3658,6 +3772,7 @@ export default function Inbox() {
       />
       <ChatThread
         conv={activeConv}
+        loading={loading}
         igUserId={igUserId}
         composerStatus={composerStatus}
         composerDraft={composerDraft}
@@ -3679,7 +3794,6 @@ export default function Inbox() {
         takeoverMode={activeTakeoverMode}
         onToggleTakeoverMode={toggleTakeoverMode}
         onDraftSuggestedReply={draftSuggestedReply}
-        onAutoSendAiReply={autoSendAiReply}
         agents={agents}
         loadingAgents={loadingAgents}
         canManageAgents={canManageAgents}

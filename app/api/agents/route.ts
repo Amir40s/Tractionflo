@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { User } from "@supabase/supabase-js";
 import { getUserPermissionProfile, normalizeAllowedPages, type PagePermissionId } from "@/lib/agent-permissions";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from "@/lib/pusher";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
@@ -19,7 +20,7 @@ type AgentPayload = {
 };
 
 function getMetadata(user: User) {
-  return (user.user_metadata || {}) as Record<string, unknown>;
+  return compactUserAuthMetadata(user.user_metadata);
 }
 
 function getAgentName(user: User) {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,7 @@ export async function POST() {
 
     const { error: updateError } = await supabase.auth.updateUser({
       data: {
-        ...user.user_metadata,
+        ...compactUserAuthMetadata(user.user_metadata),
         onboarding_completed: true,
       },
     });

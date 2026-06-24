@@ -130,12 +130,8 @@ export function shouldSuppressRealtimeNotification(
   }
 ) {
   const metadata = notification.metadata || {};
-  const category = typeof metadata.category === "string" ? metadata.category.toLowerCase() : "";
-  const title = notification.title.toLowerCase();
-  const body = notification.body.toLowerCase();
-  const refundPattern = /\b(refund|money back|money-back|chargeback|cancell?ation|cancelled|canceling|return my money)\b/;
 
-  return category === "refund_request" || category.includes("refund") || refundPattern.test(`${title} ${body}`);
+  return metadata.suppress === true || metadata.suppressNotification === true;
 }
 
 function isUrgentNotification(notification: RealtimeNotificationPayload) {

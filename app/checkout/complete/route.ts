@@ -31,18 +31,39 @@ function getReturnTo(requestUrl: URL) {
   return requestUrl.searchParams.get("return_to") === "inbox" ? "inbox" : "";
 }
 
-function getCompletionRedirect(requestUrl: URL, orderId: string) {
+function getOrderConversationId(order: { conversationId?: string; instagramSenderId?: string }) {
+  return order.conversationId || order.instagramSenderId || "";
+}
+
+function setInboxOrderParams(url: URL, order: { id: string; conversationId?: string; instagramSenderId?: string }) {
+  url.searchParams.set("payment", "success");
+  url.searchParams.set("order_id", order.id);
+
+  const conversationId = getOrderConversationId(order);
+
+  if (conversationId) {
+    url.searchParams.set("conversation", conversationId);
+  }
+}
+
+function getCompletionRedirect(requestUrl: URL, order: { id: string; conversationId?: string; instagramSenderId?: string }) {
   const returnTo = getReturnTo(requestUrl);
 
   if (returnTo === "inbox") {
     const inboxUrl = new URL("/conversations", requestUrl.origin);
-    inboxUrl.searchParams.set("payment", "success");
-    inboxUrl.searchParams.set("order_id", orderId);
+    setInboxOrderParams(inboxUrl, order);
     return inboxUrl;
   }
 
   const successUrl = new URL("/checkout/success", requestUrl.origin);
-  successUrl.searchParams.set("order_id", orderId);
+  successUrl.searchParams.set("order_id", order.id);
+
+  const conversationId = getOrderConversationId(order);
+
+  if (conversationId) {
+    successUrl.searchParams.set("conversation", conversationId);
+  }
+
   return successUrl;
 }
 
@@ -128,7 +149,7 @@ export async function GET(request: NextRequest) {
 
     if (order.paymentStatus === "paid" || order.status === "paid") {
       await sendCommerceOrderPaymentThankYou(supabase, order, "stripe-return-already-paid");
-      return NextResponse.redirect(getCompletionRedirect(requestUrl, order.id), 303);
+      return NextResponse.redirect(getCompletionRedirect(requestUrl, order), 303);
     }
 
     const session = await retrieveStripeCheckoutSession(sessionId);
@@ -198,7 +219,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.redirect(getCompletionRedirect(requestUrl, order.id), 303);
+    return NextResponse.redirect(getCompletionRedirect(requestUrl, paidOrder || order), 303);
   } catch (error) {
     logger.error("Stripe checkout completion error:", {
       error,

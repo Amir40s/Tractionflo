@@ -1,5 +1,6 @@
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import type { User } from "@supabase/supabase-js";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 
 export const PASSWORD_RESET_OTP_METADATA_KEY = "password_reset_otp";
@@ -64,7 +65,7 @@ export function buildPasswordResetOtpMetadata(email: string, otp: string): Passw
 }
 
 export function getUserMetadata(user: User) {
-  return (user.user_metadata || {}) as Record<string, unknown>;
+  return compactUserAuthMetadata(user.user_metadata);
 }
 
 export function getPasswordResetOtpMetadata(metadata: Record<string, unknown>) {

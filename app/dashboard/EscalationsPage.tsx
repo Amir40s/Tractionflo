@@ -238,7 +238,7 @@ function EscalationDetailPanel({
         <TriangleAlert className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
         <h2 className="mt-3 text-[15px] font-extrabold text-black">No escalation selected</h2>
         <p className="mx-auto mt-2 max-w-[260px] text-[12px] font-medium leading-relaxed text-[#596175]">
-          Refunds, complaints, damaged orders, brand deals, VIP leads, custom requests, and human handoffs will show details here.
+          Refunds, complaints, damaged orders, complex requests, and human handoffs will show details here.
         </p>
       </aside>
     );
@@ -343,9 +343,6 @@ function escalationMatchesTab(escalation: EscalationItem, tabId: string) {
   if (tabId === "refunds") return escalation.category === "refund";
   if (tabId === "complaints") return ["complaint", "product_issue", "issue"].includes(escalation.category);
   if (tabId === "human") return ["human", "complex"].includes(escalation.category);
-  if (tabId === "brand_deals") return escalation.category === "brand_deal";
-  if (tabId === "orders") return ["custom_bulk", "urgent_order"].includes(escalation.category);
-  if (tabId === "vip_leads") return escalation.category === "vip_lead";
   return true;
 }
 
@@ -499,7 +496,7 @@ export default function EscalationsPage({ summary, isLoading, error }: { summary
                 <TriangleAlert className="mx-auto text-[#3044ff]" size={28} strokeWidth={2.35} />
                 <h2 className="mt-3 text-[15px] font-extrabold text-black">No unresolved escalations</h2>
                 <p className="mx-auto mt-2 max-w-[430px] text-[12px] font-medium leading-relaxed text-[#596175]">
-                  New refunds, complaints, brand deals, urgent orders, VIP leads, and human handoff requests from real Instagram messages will appear here.
+                  New refunds, complaints, damaged-order issues, complex requests, and human handoff requests from real Instagram messages will appear here.
                 </p>
               </section>
             )}

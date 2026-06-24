@@ -16,9 +16,10 @@ import {
 } from '@/lib/ai-integration';
 import {
   buildCatalogOfferReply,
-  findBestCatalogOffer,
+  findCatalogOffers,
   formatCatalogForPrompt,
   getInstagramProductCatalogForUser,
+  shouldUseSingleCatalogOffer,
 } from '@/lib/instagram-product-catalog';
 import { isCommerceOrderConfirmationText } from '@/lib/commerce-orders';
 import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
@@ -181,19 +182,6 @@ function normalizeLeadQualificationCache(value: unknown): Record<string, AiLeadI
   ) as Record<string, AiLeadInsight>;
 }
 
-function withCachedLeadQualification(
-  currentCache: Record<string, AiLeadInsight>,
-  participantId: string,
-  lead: AiLeadInsight
-) {
-  return Object.fromEntries(
-    Object.entries({
-      ...currentCache,
-      [participantId]: lead,
-    }).slice(-maxCachedLeadQualifications)
-  );
-}
-
 function extractJsonObject(value: string) {
   const fencedMatch = value.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = fencedMatch?.[1] || value;
@@ -354,34 +342,36 @@ export async function POST(request: Request) {
     });
     const pauseForEscalation = shouldPauseAiForEscalation(escalation);
 
-    if (escalation) {
+    if (escalation && pauseForEscalation) {
       const notificationTitle = `${escalation.label} detected`;
       const notificationBody = escalation.summary;
       const notificationMetadata = {
         assistantId,
+        conversationId: payload.conversationId || payload.conversation_id || participantId,
+        participantId,
         category: escalation.intent,
         urgency: escalation.urgency,
         urgent: escalation.urgency === 'High',
       };
+      const notificationId = `escalation:${assistantId}:${participantId || notificationMetadata.conversationId}:${escalation.intent}`;
 
       if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
         await triggerRealtimeNotification(getUserChannel(user.id), {
+          id: notificationId,
           type: 'escalation',
           title: notificationTitle,
           body: notificationBody,
-          url: '/conversations',
+          url: '/escalations',
           metadata: notificationMetadata,
         }).catch((notificationError) => {
           logger.error('Realtime workflow escalation notification error:', { error: notificationError });
         });
       }
-
-      if (!pauseForEscalation) {
-        logger.info('Workflow escalation is sales-related; continuing AI auto-reply.', {
-          intent: escalation.intent,
-          urgency: escalation.urgency,
-        });
-      }
+    } else if (escalation) {
+      logger.info('Workflow sales lead signal detected; keeping it in Leads instead of Escalations.', {
+        intent: escalation.intent,
+        urgency: escalation.urgency,
+      });
     }
 
     if (escalation && pauseForEscalation) {
@@ -493,12 +483,14 @@ export async function POST(request: Request) {
       .map(formatConversationLine)
       .join('\n');
     const catalogQuery = `${latestUserQuestion}\n${conversationLines}`;
+    const catalogSearchText = latestUserQuestion || catalogQuery;
     const productCatalog = await getInstagramProductCatalogForUser(serviceSupabase, user.id).catch((catalogError) => {
       logger.warn('Instagram catalog unavailable during AI workflow:', { error: catalogError });
       return [];
     });
-    const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogQuery);
-    const catalogOffer = findBestCatalogOffer(catalogQuery, productCatalog);
+    const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogSearchText);
+    const catalogOffers = findCatalogOffers(catalogSearchText, productCatalog);
+    const catalogOffer = shouldUseSingleCatalogOffer(catalogSearchText, catalogOffers) ? catalogOffers[0] : null;
     const leadSchema = runWorkflows.qualifyLeads
       ? `"lead": {
     "score": 0-100,
@@ -673,38 +665,17 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
           buildFallbackRevenueOperatingSnapshot({
             lead: workflowResult.lead,
             cta: workflowResult.cta || workflowResult.lead.cta || integration.ctaMessage,
-            escalation,
+            escalation: null,
           })
         ),
         {
           latestText: latestUserQuestion,
           hasCatalogOffer: Boolean(catalogOffer),
-          escalation,
+          escalation: null,
         }
       ),
       outcomeProviders
     );
-
-    // Save generated qualification to user metadata cache
-    if (shouldQualifyLeads && participantId) {
-      const nextQualifications = withCachedLeadQualification(leadQualifications, participantId, workflowResult.lead);
-
-      try {
-        const { error: updateError } = await supabase.auth.updateUser({
-          data: {
-            ...metadata,
-            lead_qualifications: nextQualifications,
-          },
-        });
-        if (updateError) {
-          logger.error("Failed to save lead qualification in user metadata:", { error: updateError });
-        } else {
-          logger.info("Successfully cached lead qualification in user metadata", { participantId, lead: workflowResult.lead });
-        }
-      } catch (saveError) {
-        logger.error("Failed to save lead qualification to user metadata:", { error: saveError });
-      }
-    }
 
     await persistRevenueOperatingSnapshot({
       supabase: serviceSupabase,
@@ -713,7 +684,7 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       conversationId: payload.conversationId || payload.conversation_id || participantId,
       messages,
       snapshot: workflowResult.ros,
-      escalation,
+      escalation: null,
       outcomeProviders,
       source: 'ai_workflow',
     }).catch((persistError) => {
@@ -743,9 +714,9 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       assistant_id: assistantId,
       autoSend: integration.autoSend,
       handoff: false,
-      escalation: escalation || undefined,
       ...workflowResult,
       catalogOffer,
+      catalogOffers,
       enabledWorkflows, // Return original workflows configurations to frontend
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
     });

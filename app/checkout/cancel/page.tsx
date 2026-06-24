@@ -1,7 +1,40 @@
 import Link from "next/link";
 import { CreditCard } from "lucide-react";
 
-export default function CheckoutCancelPage() {
+type CheckoutCancelSearchParams = {
+  order_id?: string | string[];
+  reason?: string | string[];
+};
+
+function getSingleSearchParam(value?: string | string[]) {
+  return Array.isArray(value) ? value[0] || "" : value || "";
+}
+
+function buildInboxHref(orderId: string, reason: string) {
+  const params = new URLSearchParams();
+  params.set("payment", "failed");
+
+  if (orderId) {
+    params.set("order_id", orderId);
+  }
+
+  if (reason) {
+    params.set("reason", reason);
+  }
+
+  return `/conversations?${params.toString()}`;
+}
+
+export default async function CheckoutCancelPage({
+  searchParams,
+}: {
+  searchParams: Promise<CheckoutCancelSearchParams>;
+}) {
+  const resolvedSearchParams = await searchParams;
+  const orderId = getSingleSearchParam(resolvedSearchParams.order_id);
+  const reason = getSingleSearchParam(resolvedSearchParams.reason);
+  const closeHref = buildInboxHref(orderId, reason);
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f6f8fb] px-4 py-10">
       <section className="w-full max-w-md rounded-[8px] border border-[#e3e8f2] bg-white p-6 text-center shadow-[0_24px_70px_rgba(20,28,53,0.08)]">
@@ -13,7 +46,7 @@ export default function CheckoutCancelPage() {
           No payment was taken. You can return to Instagram and open the checkout link again when ready.
         </p>
         <Link
-          href="/"
+          href={closeHref}
           className="mt-6 inline-flex h-11 items-center justify-center rounded-[8px] border border-[#dfe5f0] bg-white px-5 text-[13px] font-extrabold text-black"
         >
           Close
