@@ -133,6 +133,18 @@ function normalizeIdempotencyKey(value: unknown) {
   return typeof value === 'string' ? value.trim().slice(0, 1000) : '';
 }
 
+function normalizeMessageText(value: string) {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function normalizeTimestampMillis(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return value < 1_000_000_000_000 ? value * 1000 : value;
+}
+
 function getIdempotencyLockMid(idempotencyKey: string) {
   return `send-lock-${createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 40)}`;
 }
@@ -211,7 +223,7 @@ async function loadExistingAutomatedReplyAfterLatestInbound({
     throw inboundError;
   }
 
-  const latestInboundTimestamp = Number((latestInbound as StoredSendRow | null)?.timestamp || 0);
+  const latestInboundTimestamp = normalizeTimestampMillis(Number((latestInbound as StoredSendRow | null)?.timestamp || 0));
 
   if (!Number.isFinite(latestInboundTimestamp) || latestInboundTimestamp <= 0) {
     return [];
@@ -243,6 +255,58 @@ async function loadExistingAutomatedReplyAfterLatestInbound({
         source === 'instagram_webhook_ai' ||
         source === 'instagram_webhook_welcome' ||
         source === 'ai_instagram_send'
+      );
+    })
+    .map(storedSendRowToResult);
+}
+
+async function loadRecentMatchingOutbound({
+  supabase,
+  userId,
+  conversationId,
+  recipientId,
+  text,
+  sinceMs = 15_000,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  userId: string;
+  conversationId: string;
+  recipientId: string;
+  text: string;
+  sinceMs?: number;
+}) {
+  const normalizedText = normalizeMessageText(text);
+
+  if (!normalizedText) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('mid,text,raw_event,metadata,timestamp,recipient_id')
+    .eq('user_id', userId)
+    .eq('conversation_id', conversationId)
+    .eq('direction', 'outbound')
+    .gte('timestamp', Date.now() - sinceMs)
+    .order('timestamp', { ascending: false })
+    .limit(20);
+
+  if (error) {
+    if (isSchemaMismatchError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return ((data || []) as (StoredSendRow & { recipient_id?: string | null })[])
+    .filter((row) => {
+      const source = typeof row.metadata?.source === 'string' ? row.metadata.source : '';
+
+      return (
+        source !== 'instagram_send_idempotency_lock' &&
+        normalizeMessageText(row.text || '') === normalizedText &&
+        (!recipientId || !row.recipient_id || row.recipient_id === recipientId)
       );
     })
     .map(storedSendRowToResult);
@@ -662,6 +726,20 @@ export async function POST(request: NextRequest) {
 
       if (existingAutomatedReply.length > 0) {
         return NextResponse.json({ ok: true, sent: existingAutomatedReply, order: null, deduped: true });
+      }
+    }
+
+    if (text && files.length === 0 && remoteAttachments.length === 0 && !orderDraft) {
+      const recentMatchingOutbound = await loadRecentMatchingOutbound({
+        supabase,
+        userId: user.id,
+        conversationId,
+        recipientId,
+        text,
+      });
+
+      if (recentMatchingOutbound.length > 0) {
+        return NextResponse.json({ ok: true, sent: recentMatchingOutbound, order: null, deduped: true });
       }
     }
 

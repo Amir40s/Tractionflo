@@ -68,7 +68,12 @@ export async function PATCH(request: Request) {
     const currentState = normalizeOpportunityWorkflowState(metadata[opportunityWorkflowStateMetadataKey]);
     const nextState = mergeOpportunityWorkflowState(currentState, payload.state || {});
     const compactMetadata = compactUserAuthMetadata(metadata);
-    const { error } = await supabase.auth.updateUser({ data: compactMetadata });
+    const { error } = await supabase.auth.updateUser({
+      data: {
+        ...compactMetadata,
+        [opportunityWorkflowStateMetadataKey]: nextState,
+      },
+    });
 
     if (error) {
       throw error;

@@ -470,16 +470,86 @@ function getStoredParticipant(rows: StoredMessageRow[], conversationId: string) 
 function dedupeStoredMessages(rows: StoredMessageRow[]) {
   const seen = new Set<string>();
 
-  return rows.filter((row, index) => {
+  return rows.filter((row) => {
     const key =
       row.mid ||
-      `${row.conversation_id || ''}:${row.sender_id || ''}:${row.recipient_id || ''}:${row.timestamp || ''}:${row.text || ''}:${index}`;
+      [
+        row.conversation_id || '',
+        row.sender_id || '',
+        row.recipient_id || '',
+        row.direction || '',
+        Math.floor(getMessageTimeMillis(row) / 120_000),
+        normalizeDedupeText(row.text || ''),
+      ].join(':');
 
     if (seen.has(key)) {
       return false;
     }
 
     seen.add(key);
+    return true;
+  });
+}
+
+function normalizeDedupeText(value: string) {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function getConversationMessageTimeMillis(message: { time?: string }) {
+  const parsed = message.time ? Date.parse(message.time) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function getAttachmentSignature(attachments?: NormalizedAttachment[]) {
+  return (attachments || [])
+    .map((attachment) => `${attachment.type}:${attachment.url || attachment.preview_url || attachment.name || ''}`)
+    .filter(Boolean)
+    .sort()
+    .join('|');
+}
+
+function getCatalogSignature(items?: CatalogCarouselItem[]) {
+  return (items || [])
+    .map((item) => `${item.title}:${item.permalink || item.imageUrl || item.thumbnailUrl || item.priceText || ''}`)
+    .filter(Boolean)
+    .sort()
+    .join('|');
+}
+
+function dedupeConversationMessages<T extends StoredConversation['messages'][number]>(messages: T[]) {
+  const seenIds = new Set<string>();
+  const seenContent = new Map<string, number>();
+
+  return messages.filter((message) => {
+    if (message.id && seenIds.has(message.id)) {
+      return false;
+    }
+
+    if (message.id) {
+      seenIds.add(message.id);
+    }
+
+    const contentSignature = [
+      normalizeDedupeText(message.text || ''),
+      getAttachmentSignature(message.attachments),
+      getCatalogSignature(message.catalogItems),
+    ]
+      .filter(Boolean)
+      .join('|');
+
+    if (!contentSignature) {
+      return true;
+    }
+
+    const senderSignature = `${message.from}:${message.sender_id || ''}:${contentSignature}`;
+    const timestamp = getConversationMessageTimeMillis(message);
+    const previousTimestamp = seenContent.get(senderSignature);
+
+    if (previousTimestamp !== undefined && Math.abs(previousTimestamp - timestamp) <= 120_000) {
+      return false;
+    }
+
+    seenContent.set(senderSignature, timestamp);
     return true;
   });
 }
@@ -594,7 +664,7 @@ async function buildStoredConversations({
           profile_pic: participantProfile.profile_pic,
         },
         updated_time: getMessageTimeIso(latest),
-        messages: sortedRows.map((message, index) => {
+        messages: dedupeConversationMessages(sortedRows.map((message, index) => {
           const parsed = parseStoredMessageContent(message.text || '', message.metadata);
           const isMe =
             message.direction === 'outbound' ||
@@ -614,7 +684,7 @@ async function buildStoredConversations({
             time: getMessageTimeIso(message),
             reply_to: parsed.reply_to,
           };
-        }),
+        })),
       } satisfies StoredConversation;
     })
   );
@@ -840,7 +910,7 @@ export async function GET(request: Request) {
           id: conv.id,
           participant: participantProfile,
           updated_time: conv.updated_time,
-          messages: messages.map((m) => {
+          messages: dedupeConversationMessages(messages.map((m) => {
             let text = m.message || '';
             let reply_to = m.reply_to;
             const normalizedAttachments = normalizeAttachments(m.attachments);
@@ -891,7 +961,7 @@ export async function GET(request: Request) {
               time: m.created_time,
               reply_to,
             };
-          }),
+          })),
         };
       })
     );

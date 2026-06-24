@@ -24,8 +24,13 @@ import {
   loadEscalationWorkflowStateFromDatabase,
   readStoredEscalationWorkflowState,
   saveEscalationWorkflowStateToDatabase,
+  writeStoredEscalationWorkflowState,
 } from "./escalation-resolution";
-import { emptyEscalationWorkflowState } from "@/lib/escalation-workflow-state";
+import {
+  emptyEscalationWorkflowState,
+  mergeEscalationWorkflowState,
+  type EscalationWorkflowStatePatch,
+} from "@/lib/escalation-workflow-state";
 
 type EscalationTab = {
   id: string;
@@ -418,15 +423,24 @@ export default function EscalationsPage({ summary, isLoading, error }: { summary
       return;
     }
 
+    applyEscalationWorkflowPatch({ workingIds: [escalationId], readIds: [escalationId] });
     void saveEscalationWorkflowStateToDatabase({ workingIds: [escalationId], readIds: [escalationId] }).catch((error) => {
       console.error("Escalation working state save error:", error);
     });
+  }
+
+  function applyEscalationWorkflowPatch(patch: EscalationWorkflowStatePatch) {
+    const nextState = mergeEscalationWorkflowState(readStoredEscalationWorkflowState(), patch);
+
+    writeStoredEscalationWorkflowState(nextState);
+    setEscalationWorkflowState(nextState);
   }
 
   function handleResolveEscalation(escalationId: string) {
     const nextFilteredCount = filteredEscalations.filter((escalation) => escalation.id !== escalationId).length;
     const nextTotalPages = Math.max(1, Math.ceil(nextFilteredCount / pageSize));
 
+    applyEscalationWorkflowPatch({ resolvedIds: [escalationId] });
     void saveEscalationWorkflowStateToDatabase({ resolvedIds: [escalationId] }).catch((error) => {
       console.error("Escalation resolve state save error:", error);
     });

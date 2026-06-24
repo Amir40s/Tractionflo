@@ -1,7 +1,5 @@
 const oversizedAuthMetadataKeys = [
   "lead_qualifications",
-  "opportunity_workflow_state",
-  "escalation_workflow_state",
   "revenue_outcome_providers",
 ];
 

@@ -3080,6 +3080,7 @@ export default function Inbox() {
   const hasLoadedInboxRef = useRef(false);
   const activeIdRef = useRef<string | null>(null);
   const activeTakeoverModeRef = useRef<ConversationTakeoverMode>("ai");
+  const sendInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     activeIdRef.current = activeId;
@@ -3319,8 +3320,26 @@ export default function Inbox() {
         return;
       }
 
+      const sendFingerprint = JSON.stringify({
+        conversationId: targetConv.id,
+        mode: payload.mode,
+        text: payload.text.trim(),
+        files: payload.files.map((file) => `${file.name}:${file.size}:${file.lastModified}`),
+        attachments: attachmentUrls.map((attachment) => `${attachment.type}:${attachment.url}`),
+        orderDraft: payload.orderDraft || null,
+      });
+
+      if (sendInFlightRef.current.has(sendFingerprint)) {
+        return;
+      }
+
+      sendInFlightRef.current.add(sendFingerprint);
+
       const localAttachments = payload.localAttachments.length > 0 ? payload.localAttachments : attachmentUrls;
       const localId = `local-${Date.now()}-${globalThis.crypto.randomUUID()}`;
+      const sendIdempotencyKey =
+        payload.idempotencyKey ||
+        `${payload.automated ? "ai" : "manual"}:${targetConv.id}:${Math.floor(Date.now() / 10_000)}:${sendFingerprint}`;
       const localMessage: IGMessage = {
         id: localId,
         text: payload.text,
@@ -3371,7 +3390,7 @@ export default function Inbox() {
           formData.append("conversationId", targetConv.id);
           formData.append("text", payload.text);
           formData.append("automated", payload.automated ? "true" : "false");
-          formData.append("idempotencyKey", payload.idempotencyKey || "");
+          formData.append("idempotencyKey", sendIdempotencyKey);
           if (remoteAttachmentPayload.length > 0) {
             formData.append("attachmentUrls", JSON.stringify(remoteAttachmentPayload));
           }
@@ -3398,7 +3417,7 @@ export default function Inbox() {
               attachmentUrls: remoteAttachmentPayload,
               orderDraft,
               automated: payload.automated === true,
-              idempotencyKey: payload.idempotencyKey || "",
+              idempotencyKey: sendIdempotencyKey,
             }),
           });
         }
@@ -3505,6 +3524,8 @@ export default function Inbox() {
         );
         setComposerStatus({ sending: false, error: message, notice: null });
         throw new Error(message);
+      } finally {
+        sendInFlightRef.current.delete(sendFingerprint);
       }
     },
     [account?.name, account?.username, activeId, convs, fetchConvs, igUserId]

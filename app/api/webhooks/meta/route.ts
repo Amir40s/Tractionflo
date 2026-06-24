@@ -272,6 +272,57 @@ async function hasStoredMessage(supabase: SupabaseServiceClient, mid: string) {
   return Boolean(data?.length);
 }
 
+function normalizeWebhookTimestampMillis(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return Date.now();
+  }
+
+  return value < 1_000_000_000_000 ? value * 1000 : value;
+}
+
+async function hasAutomatedReplyAfterInbound({
+  supabase,
+  userId,
+  conversationId,
+  inboundTimestamp,
+}: {
+  supabase: SupabaseServiceClient;
+  userId: string;
+  conversationId: string;
+  inboundTimestamp: number;
+}) {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('metadata,timestamp')
+    .eq('user_id', userId)
+    .eq('conversation_id', conversationId)
+    .eq('direction', 'outbound')
+    .gte('timestamp', inboundTimestamp)
+    .order('timestamp', { ascending: false })
+    .limit(10);
+
+  if (error) {
+    logger.warn('Could not check existing automated reply for webhook event.', {
+      error,
+      userId,
+      conversationId,
+    });
+    return false;
+  }
+
+  return (data || []).some((row) => {
+    const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : {};
+    const source = typeof metadata.source === 'string' ? metadata.source : '';
+
+    return (
+      source === 'instagram_webhook_ai' ||
+      source === 'instagram_webhook_welcome' ||
+      source === 'ai_instagram_send' ||
+      source === 'manual_instagram_send'
+    );
+  });
+}
+
 async function getSenderMessageCount(supabase: SupabaseServiceClient, senderId: string) {
   const { count, error } = await supabase
     .from('messages')
@@ -1136,6 +1187,22 @@ async function processInstagramAutomations(
 
       if (!reply.trim()) {
         logger.info("processInstagramAutomations: Generated reply is empty. Skipping message send.");
+        continue;
+      }
+
+      const alreadyReplied = await hasAutomatedReplyAfterInbound({
+        supabase,
+        userId: user.id,
+        conversationId: event.senderId,
+        inboundTimestamp: normalizeWebhookTimestampMillis(Number(event.timestamp || 0)),
+      });
+
+      if (alreadyReplied) {
+        logger.info("processInstagramAutomations: Existing reply found after inbound event. Skipping duplicate send.", {
+          userId: user.id,
+          senderId: event.senderId,
+          mid: event.mid,
+        });
         continue;
       }
 
