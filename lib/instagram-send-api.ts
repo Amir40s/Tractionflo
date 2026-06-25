@@ -312,34 +312,39 @@ export async function sendInstagramCommercePaymentMessage({
 
   const shouldTryButton = Boolean(checkoutUrl && sendCheckoutButton);
 
+  if (shouldTryButton) {
+    try {
+      const sentButton = await sendInstagramCheckoutButtonTemplate(accessToken, recipientId, order, checkoutUrl);
+      result.checkoutButtonMessageId = sentButton.message_id || "";
+      result.checkoutButtonSent = true;
+      result.messageId = result.checkoutButtonMessageId || result.messageId;
+      return result;
+    } catch (error) {
+      result.checkoutButtonError = error instanceof Error ? error.message : "Instagram checkout button failed.";
+    }
+  }
+
   if (sendText) {
     const text = buildCommerceOrderPaymentReply(order, checkoutUrl, alreadyConfirmed, {
-      includeCheckoutUrl: !shouldTryButton,
+      includeCheckoutUrl: Boolean(checkoutUrl),
     });
     const sentText = await sendInstagramTextMessage(accessToken, recipientId, text);
     result.textMessageId = sentText.message_id || "";
+    if (shouldTryButton && result.checkoutButtonError) {
+      result.checkoutFallbackMessageId = result.textMessageId;
+      result.checkoutFallbackSent = true;
+    }
     result.messageId = result.textMessageId;
-  }
-
-  if (!checkoutUrl || !sendCheckoutButton) {
     return result;
   }
 
-  try {
-    const sentButton = await sendInstagramCheckoutButtonTemplate(accessToken, recipientId, order, checkoutUrl);
-    result.checkoutButtonMessageId = sentButton.message_id || "";
-    result.checkoutButtonSent = true;
-    result.messageId = result.checkoutButtonMessageId || result.messageId;
-    return result;
-  } catch (error) {
-    result.checkoutButtonError = error instanceof Error ? error.message : "Instagram checkout button failed.";
+  if (checkoutUrl && shouldTryButton) {
+    const fallbackText = buildCheckoutFallbackText(checkoutUrl);
+    const fallback = await sendInstagramTextMessage(accessToken, recipientId, fallbackText);
+    result.checkoutFallbackMessageId = fallback.message_id || "";
+    result.checkoutFallbackSent = true;
+    result.messageId = result.checkoutFallbackMessageId || result.messageId;
   }
-
-  const fallbackText = buildCheckoutFallbackText(checkoutUrl);
-  const fallback = await sendInstagramTextMessage(accessToken, recipientId, fallbackText);
-  result.checkoutFallbackMessageId = fallback.message_id || "";
-  result.checkoutFallbackSent = true;
-  result.messageId = result.checkoutFallbackMessageId || result.messageId;
 
   return result;
 }

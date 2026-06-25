@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { canAccessPage, getUserPermissionProfile } from "@/lib/agent-permissions";
 import { getAiBehaviorPrompt } from "@/lib/ai-integration";
+import { getConditionalCtaPrompt, removeUnrequestedBookingCta } from "@/lib/booking-cta-policy";
 import { searchKnowledgeSources } from "@/lib/knowledge-base";
 import { requestOpenAiChatCompletion } from "@/lib/openai-chat";
 import { recordOpenAiUsage } from "@/lib/openai-usage";
@@ -116,7 +117,7 @@ ${knowledge.context}`
 ${getAiBehaviorPrompt(integration.behavior)}
 
 Lead qualification rules: ${integration.leadQualificationRules}
-Preferred CTA: ${integration.ctaMessage}
+${getConditionalCtaPrompt(integration.ctaMessage, commentText)}
 
 You write public Instagram comment replies for the connected business.
 Return only the reply text. Keep it friendly, specific, and under 280 characters unless exact saved knowledge requires more.
@@ -139,7 +140,7 @@ Write the best public reply.`,
       ],
     });
 
-    const finalReply = clampReply(reply);
+    const finalReply = clampReply(removeUnrequestedBookingCta(reply, commentText));
 
     await triggerRealtimeNotification(getUserChannel(user.id), {
       type: "ai",

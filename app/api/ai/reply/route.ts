@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
 import { getAiBehaviorPrompt } from '@/lib/ai-integration';
+import { getConditionalCtaPrompt, removeUnrequestedBookingCta } from '@/lib/booking-cta-policy';
 import {
   detectConversationEscalation,
   escalationRulesMetadataKey,
@@ -8,10 +9,14 @@ import {
 } from '@/lib/conversation-escalation';
 import { buildBookingFollowUpReply, buildBookingMemoryPrompt } from '@/lib/conversation-context';
 import {
+  buildCatalogSearchText,
   buildCatalogOfferReply,
   findCatalogOffers,
   formatCatalogForPrompt,
+  getCatalogDiscoveryState,
   getInstagramProductCatalogForUser,
+  isFreshCatalogCategoryRequest,
+  isCatalogDiscoveryOnlyRequest,
   shouldUseSingleCatalogOffer,
 } from '@/lib/instagram-product-catalog';
 import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
@@ -230,13 +235,15 @@ export async function POST(request: Request) {
       .slice(-12)
       .map(formatConversationLine)
       .join('\n');
-    const catalogQuery = `${latestUserQuestion}\n${conversationLines}`;
-    const catalogSearchText = latestUserQuestion || catalogQuery;
+    const catalogSearchText = buildCatalogSearchText(latestUserQuestion, conversationLines);
+    const freshCatalogCategoryRequest = isFreshCatalogCategoryRequest(latestUserQuestion, conversationLines);
     const productCatalog = await getInstagramProductCatalogForUser(serviceSupabase, user.id).catch((catalogError) => {
       logger.warn('Instagram catalog unavailable during AI reply generation:', { error: catalogError });
       return [];
     });
     const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogSearchText);
+    const catalogDiscoveryRequired = isCatalogDiscoveryOnlyRequest(catalogSearchText);
+    const catalogDiscoveryState = getCatalogDiscoveryState(catalogSearchText);
     const catalogOffers = findCatalogOffers(catalogSearchText, productCatalog);
     const catalogOffer = shouldUseSingleCatalogOffer(catalogSearchText, catalogOffers) ? catalogOffers[0] : null;
     const previousBuyerProfile = await loadRosProspectBuyerProfile({
@@ -268,10 +275,22 @@ IMPORTANT: The attached files and vector store contain the primary truth for thi
 ${getAiBehaviorPrompt(integration.behavior)}
 
 Lead qualification rules: ${integration.leadQualificationRules}
-Preferred CTA: ${integration.ctaMessage}
+${getConditionalCtaPrompt(integration.ctaMessage, latestUserQuestion)}
 
 Auto-detected Instagram product catalog:
 ${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
+
+Product discovery status: ${catalogDiscoveryRequired ? 'needs_questions' : 'ready_or_not_needed'}
+- New product category inquiry: ${freshCatalogCategoryRequest ? 'yes' : 'no'}
+- If new product category inquiry is yes, answer only the latest category question. Do not continue, confirm, re-show, or send checkout/payment steps for any previous order.
+- If new product category inquiry is yes and no relevant catalog product was detected, say that no matching option is currently available in the catalog/knowledge instead of offering the previous product.
+- If relevant catalog products are listed for a new product category inquiry, say they are available and answer from those products. Do not say the category is unavailable.
+- For availability or browse questions, do not ask for checkout or order confirmation unless the customer explicitly chooses a product and confirms purchase intent.
+- If product discovery status is needs_questions, do not list specific products, send catalog options, mention checkout, or ask for order confirmation yet.
+- Only ask for missing core details: budget and product goal/desired item/use-case.
+- Known core details: budget=${catalogDiscoveryState.hasBudget ? 'yes' : 'no'}, product_goal=${catalogDiscoveryState.hasGoal ? 'yes' : 'no'}.
+- Once budget and product goal are known, stop asking more discovery questions and show the best matching product option.
+- If the customer asks for details of one specific product/type, answer only that product/type. Do not list the full catalog or multiple unrelated products.
 
 Saved buyer memory for this Instagram participant:
 ${buyerMemoryPrompt}
@@ -307,7 +326,7 @@ Write the next best reply.`,
     });
 
 
-    const finalReply = buildCatalogOfferReply(reply, catalogOffer);
+    const finalReply = buildCatalogOfferReply(removeUnrequestedBookingCta(reply, latestUserQuestion), catalogOffer);
 
     await triggerRealtimeNotification(getUserChannel(user.id), {
       type: 'ai',

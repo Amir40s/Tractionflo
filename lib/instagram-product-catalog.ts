@@ -106,6 +106,27 @@ const productIntentWords = [
   "photo",
   "product",
   "item",
+  "option",
+  "options",
+  "catalog",
+  "collection",
+  "collections",
+  "sell",
+  "selling",
+  "jewelry",
+  "jewellery",
+  "clothes",
+  "clothing",
+  "outfit",
+  "outfits",
+  "dress",
+  "dresses",
+  "kurta",
+  "kurtas",
+  "necklace",
+  "necklaces",
+  "choker",
+  "chokers",
   "package",
   "plan",
   "size",
@@ -160,6 +181,21 @@ const stopWords = new Set([
   "need",
   "interested",
   "available",
+  "budget",
+  "range",
+  "dollar",
+  "dollars",
+  "pkr",
+  "rs",
+  "usd",
+  "have",
+  "having",
+  "any",
+  "thing",
+  "things",
+  "new",
+  "fancy",
+  "regarding",
 ]);
 
 const genericCatalogSearchWords = new Set([
@@ -195,6 +231,94 @@ const genericCatalogSearchWords = new Set([
   "orders",
 ]);
 
+const broadCatalogCategoryWords = new Set([
+  "product",
+  "products",
+  "item",
+  "items",
+  "option",
+  "options",
+  "catalog",
+  "collection",
+  "collections",
+  "design",
+  "designs",
+  "jewelry",
+  "jewellery",
+  "clothes",
+  "clothing",
+  "wear",
+  "things",
+  "stuff",
+]);
+
+const catalogGoalWords = new Set([
+  "wedding",
+  "bridal",
+  "bride",
+  "groom",
+  "engagement",
+  "party",
+  "gift",
+  "birthday",
+  "eid",
+  "daily",
+  "office",
+  "formal",
+  "casual",
+  "school",
+  "event",
+]);
+
+const specificCatalogProductTypeWords = new Set([
+  "jewelry",
+  "jewellery",
+  "clothes",
+  "clothing",
+  "outfit",
+  "outfits",
+  "necklace",
+  "necklaces",
+  "choker",
+  "chokers",
+  "earring",
+  "earrings",
+  "bracelet",
+  "bracelets",
+  "ring",
+  "rings",
+  "bangle",
+  "bangles",
+  "pendant",
+  "pendants",
+  "chain",
+  "chains",
+  "set",
+  "sets",
+  "dress",
+  "dresses",
+  "frock",
+  "frocks",
+  "shirt",
+  "shirts",
+  "tshirt",
+  "tshirts",
+  "tee",
+  "tees",
+  "denim",
+  "jeans",
+  "kurta",
+  "kurtas",
+  "suit",
+  "suits",
+  "course",
+  "courses",
+  "program",
+  "programs",
+  "package",
+  "packages",
+]);
+
 const catalogSearchSynonymGroups = [
   ["kid", "kids", "child", "children", "boy", "boys", "girl", "girls", "toddler", "toddlers", "baby", "babies"],
   [
@@ -226,6 +350,10 @@ const catalogSearchSynonymGroups = [
     "suits",
   ],
   ["dress", "dresses", "frock", "frocks"],
+  ["necklace", "necklaces", "choker", "chokers", "pendant", "pendants"],
+  ["earring", "earrings", "jhumka", "jhumkas"],
+  ["bracelet", "bracelets", "bangle", "bangles"],
+  ["ring", "rings"],
   ["shirt", "shirts", "tshirt", "tshirts", "tee", "tees"],
   ["denim", "jean", "jeans"],
   ["kurta", "kurtas", "kameez", "suit", "suits"],
@@ -494,6 +622,190 @@ function getMeaningfulCatalogTokens(value: string) {
   ];
 }
 
+function getCatalogProductTypeTokens(value: string) {
+  return [
+    ...new Set(getSearchTokens(value).filter((token) => specificCatalogProductTypeWords.has(token))),
+  ];
+}
+
+function getCatalogTokenSynonyms(token: string) {
+  return getCatalogSynonymGroup(token) || [token];
+}
+
+function catalogTokenSetsOverlap(first: string[], second: string[]) {
+  const expandedSecond = new Set(second.flatMap(getCatalogTokenSynonyms));
+  return first.some((token) => getCatalogTokenSynonyms(token).some((synonym) => expandedSecond.has(synonym)));
+}
+
+function stripConversationLabel(line: string) {
+  return line.replace(/^\s*(instagram user|customer|lead|user|business|assistant|internal note)\s*:\s*/i, "").trim();
+}
+
+function isSameCatalogText(first = "", second = "") {
+  return normalizeSearchText(stripConversationLabel(first)) === normalizeSearchText(stripConversationLabel(second));
+}
+
+function isBusinessCatalogContextLine(line: string) {
+  return /^\s*(business|assistant|internal note)\s*:/i.test(line);
+}
+
+function isCatalogConfirmationOnlyLine(text: string) {
+  const normalized = normalizeSearchText(text);
+  return /^(confirm|confirmed|confirm order|confirmed order|approve order|approved order|order confirmed)$/i.test(normalized);
+}
+
+function hasCatalogBudgetSignal(normalized: string) {
+  return (
+    /\b(budget|under|below|less than|around|about|between|from|to|rs|pkr|usd|dollar|dollars|price range)\b/.test(normalized) ||
+    /[$€£¥₨]\s*\d+|\b\d+\s*(rs|pkr|usd|dollars?|bucks?)\b/.test(normalized)
+  );
+}
+
+function hasCatalogStyleOrMaterialSignal(normalized: string) {
+  return /\b(gold|silver|rose gold|plated|diamond|pearl|stone|beads|traditional|modern|classic|antique|indian|pakistani|western|simple|heavy|light|premium|custom|customized|elegant|trendy|casual|formal|bridal|wedding|party|daily|office|gift|birthday|eid|black|white|pink|red|blue|green|yellow|purple|brown)\b/.test(
+    normalized
+  );
+}
+
+function hasCatalogGoalSignal(normalized: string) {
+  const tokens = getSearchTokens(normalized);
+  const hasBroadCategory = tokens.some((token) => broadCatalogCategoryWords.has(token));
+  const hasSpecificProductType = tokens.some((token) => specificCatalogProductTypeWords.has(token));
+  const hasGoalWord = tokens.some((token) => catalogGoalWords.has(token));
+
+  return hasSpecificProductType || hasGoalWord || (hasBroadCategory && hasCatalogStyleOrMaterialSignal(normalized));
+}
+
+function isCatalogContextUseful(line: string) {
+  const normalized = normalizeSearchText(line);
+  return (
+    hasCatalogBudgetSignal(normalized) ||
+    hasCatalogGoalSignal(normalized) ||
+    hasCatalogShoppingIntent(normalized) ||
+    /\b(show|send|see|view|browse|catalog|carousel|slider|options?|images?|pictures?|photos?|details?|designs?|collection|available|availability|what kind|what type|what do you have)\b/.test(
+      normalized
+    )
+  );
+}
+
+export function isCatalogAvailabilityRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized || isCatalogDeclineRequest(normalized) || isCatalogBookingOnlyRequest(normalized)) {
+    return false;
+  }
+
+  if (getCatalogProductTypeTokens(normalized).length === 0) {
+    return false;
+  }
+
+  const directCheckoutIntent =
+    /\b(confirm order|place order|order it|checkout|payment|pay|paid|buy now|purchase now|send payment link|pay now)\b/.test(normalized);
+
+  if (directCheckoutIntent) {
+    return false;
+  }
+
+  return (
+    /\b(?:do you|you|u|we)\s+have\b/.test(normalized) ||
+    /\b(any|available|availability|in stock|stock|option|options|collection|collections|sell|selling|carry|offer|offers)\b/.test(normalized) ||
+    /\bwhat\s+(?:kind|kinds|type|types)\b/.test(normalized)
+  );
+}
+
+export function isFreshCatalogCategoryRequest(latestText = "", conversationContext = "") {
+  const latest = normalizeSearchText(stripConversationLabel(latestText));
+
+  if (!latest || isCatalogDeclineRequest(latest) || isCatalogBookingOnlyRequest(latest)) {
+    return false;
+  }
+
+  const latestProductTypes = getCatalogProductTypeTokens(latest);
+
+  if (latestProductTypes.length === 0) {
+    return false;
+  }
+
+  const asksCategoryQuestion =
+    isCatalogAvailabilityRequest(latest) ||
+    /\b(any|available|availability|option|options|collection|collections|sell|selling|show|send|see|view|browse)\b/.test(latest);
+
+  if (!asksCategoryQuestion) {
+    return false;
+  }
+
+  const previousProductTypes = getCatalogProductTypeTokens(
+    conversationContext
+      .split(/\r?\n/)
+      .filter((line) => !isBusinessCatalogContextLine(line))
+      .map(stripConversationLabel)
+      .filter((line) => line && !isSameCatalogText(line, latest))
+      .join(" ")
+  );
+
+  return previousProductTypes.length === 0 || !catalogTokenSetsOverlap(latestProductTypes, previousProductTypes);
+}
+
+export function getCatalogDiscoveryState(text: string) {
+  const normalized = normalizeSearchText(text);
+  const hasBudget = hasCatalogBudgetSignal(normalized);
+  const hasGoal = hasCatalogGoalSignal(normalized);
+
+  return {
+    hasBudget,
+    hasGoal,
+    ready: hasBudget && hasGoal,
+    missing: [
+      !hasGoal ? "product goal" : "",
+      !hasBudget ? "budget" : "",
+    ].filter(Boolean),
+  };
+}
+
+export function buildCatalogSearchText(latestText = "", conversationContext = "") {
+  if (isFreshCatalogCategoryRequest(latestText, conversationContext)) {
+    return compactText(stripConversationLabel(latestText));
+  }
+
+  const lines = `${conversationContext}\n${latestText}`
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const relevantLines: string[] = [];
+
+  lines.forEach((line) => {
+    if (isBusinessCatalogContextLine(line)) {
+      return;
+    }
+
+    const text = stripConversationLabel(line);
+
+    if (!text) {
+      return;
+    }
+
+    if (isCatalogConfirmationOnlyLine(text)) {
+      return;
+    }
+
+    if (isCatalogDeclineRequest(text)) {
+      relevantLines.length = 0;
+      return;
+    }
+
+    if (isCatalogContextUseful(text)) {
+      relevantLines.push(text);
+    }
+  });
+
+  const latest = compactText(stripConversationLabel(latestText));
+  if (latest && !relevantLines.includes(latest) && !isCatalogDeclineRequest(latest)) {
+    relevantLines.push(latest);
+  }
+
+  return compactText(relevantLines.join("\n")) || latest;
+}
+
 function getCatalogSynonymGroup(token: string) {
   return catalogSearchSynonymGroups.find((group) => group.includes(token));
 }
@@ -507,6 +819,15 @@ function catalogTokenMatchesText(text: string, token: string) {
   return Boolean(synonymGroup?.some((synonym) => text.includes(synonym)));
 }
 
+function catalogItemMatchesAnyProductType(item: InstagramProductCatalogItem, productTypeTokens: string[]) {
+  if (productTypeTokens.length === 0) {
+    return true;
+  }
+
+  const itemText = normalizeSearchText(`${item.title} ${item.description} ${item.tags.join(" ")} ${item.sourceCaption}`);
+  return productTypeTokens.some((token) => catalogTokenMatchesText(itemText, token));
+}
+
 function getSpecificCatalogMatchCount(item: InstagramProductCatalogItem, text: string) {
   const tokens = getMeaningfulCatalogTokens(text);
   const itemText = normalizeSearchText(`${item.title} ${item.description} ${item.tags.join(" ")} ${item.sourceCaption}`);
@@ -516,7 +837,7 @@ function getSpecificCatalogMatchCount(item: InstagramProductCatalogItem, text: s
 
 export function isCatalogBrowseRequest(text: string) {
   const normalized = normalizeSearchText(text);
-  if (isCatalogDeclineRequest(normalized)) {
+  if (isCatalogDeclineRequest(normalized) || isCatalogDiscoveryOnlyRequest(normalized) || isCatalogSingleProductDetailRequest(normalized)) {
     return false;
   }
 
@@ -551,7 +872,67 @@ export function hasCatalogShoppingIntent(text: string) {
     return false;
   }
 
-  return productIntentWords.some((word) => normalized.includes(word));
+  return productIntentWords.some((word) => normalized.includes(word)) || getCatalogProductTypeTokens(normalized).length > 0;
+}
+
+export function isCatalogSingleProductDetailRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized || isCatalogDeclineRequest(normalized) || isCatalogBookingOnlyRequest(normalized)) {
+    return false;
+  }
+
+  const asksForDetails =
+    /\b(detail|details|description|describe|information|info|more info|material|materials|design|designs)\b/.test(normalized) ||
+    /\bshow\b.*\b(detail|details|description|information|info)\b/.test(normalized);
+
+  if (!asksForDetails) {
+    return false;
+  }
+
+  const hasBroadCatalogRequest = /\b(all|whole|full|every|catalog|collection|products|items|options)\b/.test(normalized);
+  const productTypeCount = getCatalogProductTypeTokens(normalized).length;
+  const meaningfulCount = getMeaningfulCatalogTokens(normalized).length;
+
+  return productTypeCount > 0 || (!hasBroadCatalogRequest && meaningfulCount >= 2);
+}
+
+export function isCatalogDiscoveryOnlyRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized || isCatalogDeclineRequest(normalized) || isCatalogBookingOnlyRequest(normalized)) {
+    return false;
+  }
+
+  const directCheckoutIntent =
+    /\b(confirm order|place order|order it|checkout|payment|pay|paid|buy now|purchase now|send payment link|pay now)\b/.test(normalized);
+
+  if (directCheckoutIntent) {
+    return false;
+  }
+
+  if (isCatalogAvailabilityRequest(normalized)) {
+    return false;
+  }
+
+  const asksToBrowseOrLearn =
+    /\b(show|send|see|view|browse|catalog|carousel|slider|options?|images?|pictures?|photos?|details?|designs?|collection|available|availability|price|pricing|cost|how much|what kind|what type|what do you have)\b/.test(
+      normalized
+    );
+
+  if (!asksToBrowseOrLearn && !hasCatalogShoppingIntent(normalized)) {
+    return false;
+  }
+
+  const tokens = getSearchTokens(normalized);
+  const hasBroadCategory = tokens.some((token) => broadCatalogCategoryWords.has(token));
+  const discoveryState = getCatalogDiscoveryState(normalized);
+
+  if (discoveryState.ready) {
+    return false;
+  }
+
+  return asksToBrowseOrLearn && (hasBroadCategory || discoveryState.hasGoal || hasCatalogShoppingIntent(normalized));
 }
 
 export function isCatalogBookingOnlyRequest(text: string) {
@@ -610,11 +991,18 @@ function toCatalogOffer(match: CatalogOfferMatch): InstagramCatalogOffer {
 }
 
 function getCatalogOfferMatches(text: string, catalog: InstagramProductCatalogItem[]) {
-  if (catalog.length === 0 || isCatalogDeclineRequest(text) || !hasCatalogShoppingIntent(text) || isCatalogBookingOnlyRequest(text)) {
+  if (
+    catalog.length === 0 ||
+    isCatalogDeclineRequest(text) ||
+    isCatalogDiscoveryOnlyRequest(text) ||
+    !hasCatalogShoppingIntent(text) ||
+    isCatalogBookingOnlyRequest(text)
+  ) {
     return [];
   }
 
   const meaningfulTokenCount = getMeaningfulCatalogTokens(text).length;
+  const requestedProductTypes = getCatalogProductTypeTokens(text);
   const minimumScore = meaningfulTokenCount > 0 ? 18 : 30;
 
   return catalog
@@ -624,6 +1012,10 @@ function getCatalogOfferMatches(text: string, catalog: InstagramProductCatalogIt
       specificMatchCount: getSpecificCatalogMatchCount(item, text),
     }))
     .filter((match) => {
+      if (!catalogItemMatchesAnyProductType(match.item, requestedProductTypes)) {
+        return false;
+      }
+
       if (meaningfulTokenCount > 0 && match.specificMatchCount === 0) {
         return false;
       }
@@ -646,7 +1038,11 @@ export function shouldUseSingleCatalogOffer(text: string, offers: InstagramCatal
     return false;
   }
 
-  if (isCatalogBrowseRequest(text) && offers.length > 1) {
+  if (isCatalogSingleProductDetailRequest(text)) {
+    return true;
+  }
+
+  if (isCatalogAvailabilityRequest(text) || isCatalogBrowseRequest(text)) {
     return false;
   }
 
@@ -659,12 +1055,14 @@ export function findBestCatalogOffer(text: string, catalog: InstagramProductCata
 }
 
 export function formatCatalogForPrompt(catalog: InstagramProductCatalogItem[], text: string, maxItems = 6) {
-  if (catalog.length === 0 || isCatalogDeclineRequest(text) || !hasCatalogShoppingIntent(text)) {
+  if (catalog.length === 0 || isCatalogDeclineRequest(text) || isCatalogDiscoveryOnlyRequest(text) || !hasCatalogShoppingIntent(text)) {
     return "";
   }
 
+  const promptItemLimit = isCatalogSingleProductDetailRequest(text) ? 1 : maxItems;
+
   return getCatalogOfferMatches(text, catalog)
-    .slice(0, maxItems)
+    .slice(0, promptItemLimit)
     .map(({ item }, index) => {
       const price = item.priceText ? `Price: ${item.priceText}` : "Price: not detected";
       const link = item.permalink ? `Post: ${item.permalink}` : "Post: unavailable";

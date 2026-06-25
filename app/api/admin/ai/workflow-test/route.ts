@@ -5,6 +5,7 @@ import {
   getEnabledWorkflowMap,
   type AiLeadInsight,
 } from "@/lib/ai-integration";
+import { getConditionalCtaPrompt, removeUnrequestedBookingCta } from "@/lib/booking-cta-policy";
 import { requestOpenAiChatCompletion } from "@/lib/openai-chat";
 import { recordOpenAiUsage } from "@/lib/openai-usage";
 import { isSuperAdminUser, resolvePlatformAiConfig } from "@/lib/platform-ai-config";
@@ -111,7 +112,7 @@ export async function POST() {
 ${getAiBehaviorPrompt(integration.behavior)}
 
 Lead qualification rules: ${integration.leadQualificationRules}
-Preferred CTA: ${integration.ctaMessage}
+${getConditionalCtaPrompt(integration.ctaMessage, "I need more leads quickly. I can start this week if the package is a good fit.")}
 
 Return JSON only with keys: starter, reply, cta, lead. If a workflow is disabled, set that field to an empty string, and set lead to null when lead qualification is disabled.`,
         },
@@ -131,9 +132,9 @@ Lead: I need more leads quickly. I can start this week if the package is a good 
     const lead = enabledWorkflows.qualifyLeads ? normalizeLead(parsed.lead) : null;
 
     return NextResponse.json({
-      starter: enabledWorkflows.startConversation ? normalizeText(parsed.starter) : "",
-      reply: enabledWorkflows.answerQuestions ? normalizeText(parsed.reply) : "",
-      cta: enabledWorkflows.moveToCta ? normalizeText(parsed.cta) : "",
+      starter: enabledWorkflows.startConversation ? removeUnrequestedBookingCta(normalizeText(parsed.starter), "") : "",
+      reply: enabledWorkflows.answerQuestions ? removeUnrequestedBookingCta(normalizeText(parsed.reply), "") : "",
+      cta: enabledWorkflows.moveToCta ? removeUnrequestedBookingCta(normalizeText(parsed.cta), "") : "",
       lead,
       enabledWorkflows,
     });
