@@ -161,14 +161,6 @@ type InstagramQuickReply = {
   payload: string;
 };
 
-const confirmOrderQuickReplies: InstagramQuickReply[] = [
-  {
-    content_type: 'text',
-    title: 'Confirm order',
-    payload: 'CONFIRM_ORDER',
-  },
-];
-
 const confirmOrderPayloadPrefix = 'CONFIRM_ORDER:';
 const catalogCarouselMaxItems = 6;
 
@@ -179,6 +171,16 @@ type CatalogCarouselCard = {
 
 function getConfirmOrderPayload(orderId: string) {
   return `${confirmOrderPayloadPrefix}${orderId}`;
+}
+
+function getConfirmOrderQuickReplies(orderId = ""): InstagramQuickReply[] {
+  return [
+    {
+      content_type: 'text',
+      title: 'Confirm order',
+      payload: orderId ? getConfirmOrderPayload(orderId) : 'CONFIRM_ORDER',
+    },
+  ];
 }
 
 function getConfirmOrderIdFromPayload(text: string) {
@@ -1266,18 +1268,7 @@ async function processInstagramAutomations(
               });
               return null;
             })
-          : await confirmLatestPendingCommerceOrder(supabase, {
-              userId: user.id,
-              instagramSenderId: event.senderId,
-              confirmationText,
-            }).catch((orderError) => {
-              logger.error('processInstagramAutomations: Could not confirm pending commerce order.', {
-                error: orderError,
-                userId: user.id,
-                senderId: event.senderId,
-              });
-              return null;
-            });
+          : null;
 
         if (!confirmedOrder && !explicitConfirmOrderId) {
           const participant = await fetchParticipantProfile(account.access_token, event.senderId);
@@ -1289,19 +1280,37 @@ async function processInstagramAutomations(
           });
 
           if (recoveredOrder) {
-            confirmedOrder = await confirmLatestPendingCommerceOrder(supabase, {
+            confirmedOrder = await confirmPendingCommerceOrderById(supabase, {
               userId: user.id,
+              orderId: recoveredOrder.id,
               instagramSenderId: event.senderId,
+              conversationId: event.senderId,
               confirmationText,
             }).catch((orderError) => {
               logger.error('processInstagramAutomations: Could not confirm recovered commerce order.', {
                 error: orderError,
                 userId: user.id,
                 senderId: event.senderId,
+                orderId: recoveredOrder.id,
               });
               return null;
             });
           }
+        }
+
+        if (!confirmedOrder && !explicitConfirmOrderId) {
+          confirmedOrder = await confirmLatestPendingCommerceOrder(supabase, {
+            userId: user.id,
+            instagramSenderId: event.senderId,
+            confirmationText,
+          }).catch((orderError) => {
+            logger.error('processInstagramAutomations: Could not confirm pending commerce order.', {
+              error: orderError,
+              userId: user.id,
+              senderId: event.senderId,
+            });
+            return null;
+          });
         }
 
         const alreadyConfirmedOrder = confirmedOrder || explicitConfirmOrderId
@@ -1705,7 +1714,7 @@ async function processInstagramAutomations(
         account.access_token,
         event.senderId,
         reply.trim(),
-        pendingOrder ? confirmOrderQuickReplies : []
+        pendingOrder ? getConfirmOrderQuickReplies(pendingOrder.id) : []
       );
       logger.info("processInstagramAutomations: Instagram text message sent successfully", { message_id: sent.message_id });
 
@@ -1940,7 +1949,7 @@ export async function POST(request: Request) {
             attachmentText ||
             postbackTitle ||
             (postbackPayload.startsWith(confirmOrderPayloadPrefix) ? 'Confirm order' : postbackPayload) ||
-            (quickReplyPayload === 'CONFIRM_ORDER' ? 'Confirm order' : quickReplyPayload);
+            (quickReplyPayload === 'CONFIRM_ORDER' || quickReplyPayload.startsWith(confirmOrderPayloadPrefix) ? 'Confirm order' : quickReplyPayload);
           const automationText = postbackPayload || quickReplyPayload || displayText;
           const mid =
             msg.message?.mid ||
