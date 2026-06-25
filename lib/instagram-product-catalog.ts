@@ -661,6 +661,26 @@ function hasCatalogBudgetSignal(normalized: string) {
   );
 }
 
+function getCatalogBudgetAmount(normalized: string) {
+  if (!hasCatalogBudgetSignal(normalized)) {
+    return null;
+  }
+
+  const amounts = [
+    ...normalized.matchAll(/[$€£¥₨]\s*(\d+(?:[.,]\d+)?)/g),
+    ...normalized.matchAll(/\b(\d+(?:[.,]\d+)?)\s*(?:rs|pkr|usd|dollars?|bucks?)\b/g),
+    ...normalized.matchAll(/\b(?:budget|under|below|less than|around|about|price range|range)\D{0,18}(\d+(?:[.,]\d+)?)/g),
+  ]
+    .map((match) => Number(String(match[1] || "").replace(/,/g, "")))
+    .filter((amount) => Number.isFinite(amount) && amount > 0);
+
+  if (amounts.length === 0) {
+    return null;
+  }
+
+  return Math.max(...amounts);
+}
+
 function hasCatalogStyleOrMaterialSignal(normalized: string) {
   return /\b(gold|silver|rose gold|plated|diamond|pearl|stone|beads|traditional|modern|classic|antique|indian|pakistani|western|simple|heavy|light|premium|custom|customized|elegant|trendy|casual|formal|bridal|wedding|party|daily|office|gift|birthday|eid|black|white|pink|red|blue|green|yellow|purple|brown)\b/.test(
     normalized
@@ -957,6 +977,7 @@ export function scoreCatalogItemForText(item: InstagramProductCatalogItem, text:
   const tokens = getSearchTokens(text);
   const itemText = normalizeSearchText(`${item.title} ${item.description} ${item.tags.join(" ")} ${item.sourceCaption}`);
   const itemTitle = normalizeSearchText(item.title);
+  const budgetAmount = getCatalogBudgetAmount(normalizedText);
   let score = 0;
 
   tokens.forEach((token) => {
@@ -967,6 +988,7 @@ export function scoreCatalogItemForText(item: InstagramProductCatalogItem, text:
 
   if (hasCatalogShoppingIntent(normalizedText)) score += 14;
   if (item.priceText && /\b(price|pricing|cost|how much|rate)\b/.test(normalizedText)) score += 14;
+  if (budgetAmount && item.priceAmount && item.priceAmount <= budgetAmount) score += 18;
   if (item.imageUrl && /\b(image|picture|photo|show|send)\b/.test(normalizedText)) score += 8;
   score += Math.min(12, Math.round(item.confidence / 10));
 
@@ -1003,6 +1025,7 @@ function getCatalogOfferMatches(text: string, catalog: InstagramProductCatalogIt
 
   const meaningfulTokenCount = getMeaningfulCatalogTokens(text).length;
   const requestedProductTypes = getCatalogProductTypeTokens(text);
+  const budgetAmount = getCatalogBudgetAmount(normalizeSearchText(text));
   const minimumScore = meaningfulTokenCount > 0 ? 18 : 30;
 
   return catalog
@@ -1013,6 +1036,10 @@ function getCatalogOfferMatches(text: string, catalog: InstagramProductCatalogIt
     }))
     .filter((match) => {
       if (!catalogItemMatchesAnyProductType(match.item, requestedProductTypes)) {
+        return false;
+      }
+
+      if (budgetAmount && match.item.priceAmount && match.item.priceAmount > budgetAmount) {
         return false;
       }
 
@@ -1042,7 +1069,7 @@ export function shouldUseSingleCatalogOffer(text: string, offers: InstagramCatal
     return true;
   }
 
-  if (isCatalogAvailabilityRequest(text) || isCatalogBrowseRequest(text)) {
+  if ((isCatalogAvailabilityRequest(text) || isCatalogBrowseRequest(text)) && !getCatalogDiscoveryState(text).ready) {
     return false;
   }
 

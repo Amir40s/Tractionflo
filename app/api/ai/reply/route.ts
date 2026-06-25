@@ -64,8 +64,14 @@ function formatConversationLine(message: ReplyMessage) {
   const attachmentSummary = message.attachments?.length
     ? ` [${message.attachments.map((attachment) => attachment.type || attachment.name || 'attachment').join(', ')}]`
     : '';
+  const body = `${text || 'Sent an attachment'}${attachmentSummary}`;
 
-  return `${sender}: ${text || 'Sent an attachment'}${attachmentSummary}`;
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `${sender}: ${line}`)
+    .join('\n');
 }
 
 function getLatestUserQuestion(messages: ReplyMessage[] = []) {
@@ -281,6 +287,7 @@ Auto-detected Instagram product catalog:
 ${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
 
 Product discovery status: ${catalogDiscoveryRequired ? 'needs_questions' : 'ready_or_not_needed'}
+- The Instagram product catalog above is the source of truth for currently loaded posts/products. If it lists a category or product, do not contradict it using older conversation context or general business assumptions.
 - New product category inquiry: ${freshCatalogCategoryRequest ? 'yes' : 'no'}
 - If new product category inquiry is yes, answer only the latest category question. Do not continue, confirm, re-show, or send checkout/payment steps for any previous order.
 - If new product category inquiry is yes and no relevant catalog product was detected, say that no matching option is currently available in the catalog/knowledge instead of offering the previous product.

@@ -152,6 +152,7 @@ type WebhookAiReplyResult = {
   reply: string;
   catalogOffer: InstagramCatalogOffer | null;
   catalogOffers: InstagramCatalogOffer[];
+  catalogCheckoutReady: boolean;
 };
 
 type InstagramQuickReply = {
@@ -173,7 +174,7 @@ const catalogCarouselMaxItems = 6;
 
 type CatalogCarouselCard = {
   offer: InstagramCatalogOffer;
-  orderId: string;
+  orderId?: string;
 };
 
 function getConfirmOrderPayload(orderId: string) {
@@ -223,11 +224,15 @@ function buildCatalogCarouselElements(cards: CatalogCarouselCard[]): InstagramGe
     imageUrl: card.offer.imageUrl || card.offer.thumbnailUrl,
     defaultActionUrl: card.offer.permalink,
     buttons: [
-      {
-        type: 'postback',
-        title: 'Confirm order',
-        payload: getConfirmOrderPayload(card.orderId),
-      },
+      ...(card.orderId
+        ? [
+            {
+              type: 'postback' as const,
+              title: 'Confirm order',
+              payload: getConfirmOrderPayload(card.orderId),
+            },
+          ]
+        : []),
       ...(card.offer.permalink
         ? [
             {
@@ -251,9 +256,18 @@ function getCatalogCarouselStoredText(cards: CatalogCarouselCard[]) {
   ].join('\n');
 }
 
+function formatLabeledConversationText(label: string, text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `${label}: ${line}`)
+    .join('\n');
+}
+
 function getCatalogCarouselMetadataItems(cards: CatalogCarouselCard[]) {
   return cards.map((card) => ({
-    orderId: card.orderId,
+    orderId: card.orderId || '',
     productId: card.offer.id,
     sourceMediaId: card.offer.sourceMediaId,
     title: card.offer.title,
@@ -835,21 +849,21 @@ async function generateWebhookAiReply({
 
   if (!integration.autoSend || !enabledWorkflows.answerQuestions) {
     logger.info("generateWebhookAiReply: Bailing out because autoSend or answerQuestions workflow is disabled.");
-    return { reply: '', catalogOffer: null, catalogOffers: [] } satisfies WebhookAiReplyResult;
+    return { reply: '', catalogOffer: null, catalogOffers: [], catalogCheckoutReady: false } satisfies WebhookAiReplyResult;
   }
 
   const apiKey = platformConfig.apiKey;
 
   if (!apiKey) {
     logger.info("generateWebhookAiReply: Bailing out because no OpenAI API key was found.");
-    return { reply: '', catalogOffer: null, catalogOffers: [] } satisfies WebhookAiReplyResult;
+    return { reply: '', catalogOffer: null, catalogOffers: [], catalogCheckoutReady: false } satisfies WebhookAiReplyResult;
   }
 
   const assistantId = metadata.openai_assistant_id as string | undefined;
 
   if (!assistantId) {
     logger.info("generateWebhookAiReply: Bailing out because no OpenAI Assistant ID was found in metadata.");
-    return { reply: '', catalogOffer: null, catalogOffers: [] } satisfies WebhookAiReplyResult;
+    return { reply: '', catalogOffer: null, catalogOffers: [], catalogCheckoutReady: false } satisfies WebhookAiReplyResult;
   }
   const participantName = participant.username || participant.name || 'this Instagram lead';
   const conversationId = participant.id || participant.username || participant.name || '';
@@ -918,6 +932,7 @@ Auto-detected Instagram product catalog:
 ${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
 
 Product discovery status: ${catalogDiscoveryRequired ? 'needs_questions' : 'ready_or_not_needed'}
+- The Instagram product catalog above is the source of truth for currently loaded posts/products. If it lists a category or product, do not contradict it using older conversation context or general business assumptions.
 - New product category inquiry: ${freshCatalogCategoryRequest ? 'yes' : 'no'}
 - If new product category inquiry is yes, answer only the latest category question. Do not continue, confirm, re-show, or send checkout/payment steps for any previous order.
 - If new product category inquiry is yes and no relevant catalog product was detected, say that no matching option is currently available in the catalog/knowledge instead of offering the previous product.
@@ -969,11 +984,14 @@ Return only the Instagram DM reply text. Keep it natural, brief, and useful. Do 
     ],
   });
   const guardedReply = removeUnrequestedBookingCta(reply, latestText);
+  const catalogCheckoutReady = catalogDiscoveryState.ready;
+  const checkoutCatalogOffer = catalogCheckoutReady ? catalogOffer : null;
 
   return {
-    reply: buildCatalogOfferReply(guardedReply, catalogOffer),
-    catalogOffer,
+    reply: buildCatalogOfferReply(guardedReply, checkoutCatalogOffer),
+    catalogOffer: checkoutCatalogOffer,
     catalogOffers,
+    catalogCheckoutReady,
   } satisfies WebhookAiReplyResult;
 }
 
@@ -1035,7 +1053,7 @@ async function getRecentWebhookConversationLines({
         ? rawText.split('__TEXT__:', 2)[1]
         : rawText;
 
-      return text ? `${label}: ${text}` : '';
+      return text ? formatLabeledConversationText(label, text) : '';
     })
     .filter(Boolean)
     .join('\n');
@@ -1133,16 +1151,23 @@ async function createCatalogCarouselCards({
   event,
   participant,
   offers,
+  allowConfirm,
 }: {
   supabase: SupabaseServiceClient;
   user: User;
   event: AutomationMessageEvent;
   participant: InstagramParticipantProfile;
   offers: InstagramCatalogOffer[];
+  allowConfirm: boolean;
 }) {
   const cards: CatalogCarouselCard[] = [];
 
   for (const offer of offers.slice(0, catalogCarouselMaxItems)) {
+    if (!allowConfirm) {
+      cards.push({ offer });
+      continue;
+    }
+
     const order = await createPendingCommerceOrder(supabase, user.id, {
       instagramSenderId: event.senderId,
       instagramUsername: participant.username || participant.name || '',
@@ -1541,6 +1566,7 @@ async function processInstagramAutomations(
       let reply = '';
       let catalogOffer: InstagramCatalogOffer | null = null;
       let catalogOffers: InstagramCatalogOffer[] = [];
+      let catalogCheckoutReady = false;
       if (isFirstInboundDm && welcome.enabled) {
         logger.info("processInstagramAutomations: Generating Welcome Message.");
         reply = renderInstagramWelcomeMessage({
@@ -1560,6 +1586,7 @@ async function processInstagramAutomations(
         reply = aiResult.reply;
         catalogOffer = aiResult.catalogOffer;
         catalogOffers = aiResult.catalogOffers;
+        catalogCheckoutReady = aiResult.catalogCheckoutReady;
       }
 
       if (!reply.trim()) {
@@ -1649,6 +1676,7 @@ async function processInstagramAutomations(
             event,
             participant,
             offers: catalogOffers,
+            allowConfirm: catalogCheckoutReady,
           })
         : [];
 
@@ -1743,7 +1771,7 @@ async function processInstagramAutomations(
               source: 'instagram_webhook_catalog_carousel',
               catalogCarousel: true,
               catalogCarouselItems: getCatalogCarouselMetadataItems(catalogCarouselCards),
-              orderIds: catalogCarouselCards.map((card) => card.orderId),
+              orderIds: catalogCarouselCards.map((card) => card.orderId).filter(Boolean),
             },
           }).catch((storeError) => {
             logger.warn('processInstagramAutomations: Could not persist outbound catalog carousel message.', { error: storeError });
@@ -1793,7 +1821,7 @@ async function processInstagramAutomations(
       const rosSnapshot = buildWebhookRevenueOperatingSnapshot({
         latestText: event.text,
         catalogOffer: catalogOffer || catalogCarouselCards[0]?.offer || null,
-        pendingOrderId: orderId || catalogCarouselCards[0]?.orderId || '',
+        pendingOrderId: orderId || catalogCarouselCards.find((card) => card.orderId)?.orderId || '',
         escalation,
         outcomeProviders,
         previousBuyerProfile,
