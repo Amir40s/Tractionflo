@@ -40,6 +40,7 @@ export type AccountProfile = {
 
 export type Opportunity = {
   id?: string;
+  conversationId?: string;
   title: string;
   eyebrow: string;
   body: string[];

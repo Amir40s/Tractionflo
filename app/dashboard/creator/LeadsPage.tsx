@@ -251,7 +251,7 @@ function OpportunityPageCardView({
               tone={tone.action}
               onClick={() => {
                 onMarkWorking();
-                window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.id)}`;
+                window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.conversationId || opportunity.id)}`;
               }}
             >
               {opportunity.action}

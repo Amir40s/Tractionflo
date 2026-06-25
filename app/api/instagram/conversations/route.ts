@@ -890,6 +890,7 @@ export async function GET(request: Request) {
               name: otherParticipantProfile.name || otherParticipantProfile.username || participantFallbackName,
             }
           : { id: otherParticipantProfileId, name: participantFallbackName };
+        const participantUsername = 'username' in participantProfile ? participantProfile.username : '';
         const storedConversationIds = [...new Set([otherParticipantProfileId, conv.id].filter(Boolean))];
         const { data: storedConversationRows } =
           storedConversationIds.length > 0
@@ -901,67 +902,91 @@ export async function GET(request: Request) {
                 .order('timestamp', { ascending: false })
                 .limit(80)
             : { data: [] };
-        const storedRows = ((storedConversationRows || []) as StoredMessageRow[]).filter(
+        const storedRows = (storedConversationRows || []) as StoredMessageRow[];
+        const storedCatalogRows = storedRows.filter(
           (row) => getStoredCatalogCarouselItems(row.metadata).length > 0
         );
         const usedStoredCatalogKeys = new Set<string>();
+
+        const graphMessages = messages.map((m) => {
+          let text = m.message || '';
+          let reply_to = m.reply_to;
+          const normalizedAttachments = normalizeAttachments(m.attachments);
+
+          let dbMessage = dbMessagesMap[m.id];
+          if (!dbMessage && !text && normalizedAttachments.length === 0) {
+            const storedCatalogRow = getClosestStoredCatalogRow(storedCatalogRows, m.created_time, usedStoredCatalogKeys);
+
+            if (storedCatalogRow) {
+              usedStoredCatalogKeys.add(getStoredMessageKey(storedCatalogRow));
+              dbMessage = {
+                text: storedCatalogRow.text || '',
+                metadata: storedCatalogRow.metadata || null,
+              };
+            }
+          }
+          const dbText = dbMessage?.text || '';
+          const parsedStored = dbMessage ? parseStoredMessageContent(dbText, dbMessage.metadata) : null;
+          if (dbText && dbText.startsWith('__STORY_REPLY__:')) {
+            try {
+              const parts = dbText.split('__TEXT__:', 2);
+              if (parts.length === 2) {
+                const storyStr = parts[0].substring('__STORY_REPLY__:'.length);
+                const story = JSON.parse(storyStr);
+                text = parts[1];
+                reply_to = {
+                  ...reply_to,
+                  story
+                };
+              }
+            } catch (e) {
+              console.error('Failed to parse serialized story reply from DB:', e);
+            }
+          }
+          if (parsedStored?.catalogItems?.length) {
+            text = parsedStored.text;
+          }
+
+          const isMe = m.from?.id === ownParticipantId || m.from?.username === meData.username;
+
+          return {
+            id: m.id,
+            text,
+            attachments: parsedStored?.catalogItems?.length ? [] : normalizedAttachments,
+            catalogItems: parsedStored?.catalogItems || [],
+            from: isMe ? 'me' as const : 'user' as const,
+            sender_name: m.from?.name || m.from?.username || (isMe ? 'You' : participantProfile.name),
+            sender_profile_pic: m.from?.id === otherParticipantProfileId ? otherParticipantProfilePic : undefined,
+            sender_id: m.from?.id || (isMe ? ownParticipantId : otherParticipantProfileId),
+            time: m.created_time,
+            reply_to,
+          };
+        });
+        const storedSupplementMessages = storedRows.map((message, index) => {
+          const parsed = parseStoredMessageContent(message.text || '', message.metadata);
+          const isMe =
+            message.direction === 'outbound' ||
+            (real_ig_user_id && message.sender_id === real_ig_user_id && message.direction !== 'inbound');
+
+          return {
+            id: message.mid || `${conv.id}-${message.timestamp || index}`,
+            text: parsed.text,
+            attachments: parsed.attachments,
+            catalogItems: parsed.catalogItems,
+            from: isMe ? 'me' as const : 'user' as const,
+            sender_name: isMe ? 'You' : participantProfile.name || participantUsername || 'Instagram user',
+            sender_profile_pic: isMe ? undefined : otherParticipantProfilePic,
+            sender_id: message.sender_id || (isMe ? real_ig_user_id : otherParticipantProfileId),
+            time: getMessageTimeIso(message),
+            reply_to: parsed.reply_to,
+          };
+        });
 
         return {
           id: conv.id,
           participant: participantProfile,
           updated_time: conv.updated_time,
-          messages: dedupeConversationMessages(messages.map((m) => {
-            let text = m.message || '';
-            let reply_to = m.reply_to;
-            const normalizedAttachments = normalizeAttachments(m.attachments);
-
-            let dbMessage = dbMessagesMap[m.id];
-            if (!dbMessage && !text && normalizedAttachments.length === 0) {
-              const storedCatalogRow = getClosestStoredCatalogRow(storedRows, m.created_time, usedStoredCatalogKeys);
-
-              if (storedCatalogRow) {
-                usedStoredCatalogKeys.add(getStoredMessageKey(storedCatalogRow));
-                dbMessage = {
-                  text: storedCatalogRow.text || '',
-                  metadata: storedCatalogRow.metadata || null,
-                };
-              }
-            }
-            const dbText = dbMessage?.text || '';
-            const parsedStored = dbMessage ? parseStoredMessageContent(dbText, dbMessage.metadata) : null;
-            if (dbText && dbText.startsWith('__STORY_REPLY__:')) {
-              try {
-                const parts = dbText.split('__TEXT__:', 2);
-                if (parts.length === 2) {
-                  const storyStr = parts[0].substring('__STORY_REPLY__:'.length);
-                  const story = JSON.parse(storyStr);
-                  text = parts[1];
-                  reply_to = {
-                    ...reply_to,
-                    story
-                  };
-                }
-              } catch (e) {
-                console.error('Failed to parse serialized story reply from DB:', e);
-              }
-            }
-            if (parsedStored?.catalogItems?.length) {
-              text = parsedStored.text;
-            }
-
-            return {
-              id: m.id,
-              text,
-              attachments: parsedStored?.catalogItems?.length ? [] : normalizedAttachments,
-              catalogItems: parsedStored?.catalogItems || [],
-              from: m.from?.id === ownParticipantId || m.from?.username === meData.username ? 'me' : 'user',
-              sender_name: m.from?.name || m.from?.username || (m.from?.id === ownParticipantId ? 'You' : participantProfile.name),
-              sender_profile_pic: m.from?.id === otherParticipantProfileId ? otherParticipantProfilePic : undefined,
-              sender_id: m.from?.id || (m.from?.id === ownParticipantId ? ownParticipantId : otherParticipantProfileId),
-              time: m.created_time,
-              reply_to,
-            };
-          })),
+          messages: dedupeConversationMessages([...graphMessages, ...storedSupplementMessages]),
         };
       })
     );

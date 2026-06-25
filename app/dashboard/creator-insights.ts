@@ -66,6 +66,7 @@ type AdminDateRangePreset = "7d" | "30d" | "90d";
 
 type Opportunity = {
   id?: string;
+  conversationId?: string;
   title: string;
   eyebrow: string;
   body: string[];
@@ -85,6 +86,7 @@ type PipelineStep = {
 
 type OpportunityPageCard = {
   id: string;
+  conversationId: string;
   name: string;
   subtitle: string;
   detail: string;
@@ -882,6 +884,40 @@ function getCreatorEscalationSourceKey(conversation: InstagramSettingsConversati
   return source.replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
+function sanitizeCreatorStateKey(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function getCreatorOpportunitySourceKey(
+  conversation: InstagramSettingsConversation,
+  opportunity: { badge: string }
+) {
+  const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
+  const matcher = (text: string) => {
+    const buyerHits = countCreatorKeywordHits(text, creatorBuyerKeywords);
+
+    if (opportunity.badge === "PARTNERSHIP") {
+      return countCreatorKeywordHits(text, creatorPartnershipKeywords) > 0;
+    }
+
+    if (opportunity.badge === "COMMUNITY") {
+      return countCreatorKeywordHits(text, creatorCommunityKeywords) > 0;
+    }
+
+    return hasCreatorSalesLeadSignal(text, buyerHits, inboundCount);
+  };
+  const matchingMessage = getCreatorSortedMessages(conversation).find(
+    (message) => message.from === "user" && matcher(getCreatorMessageText(message))
+  );
+  const source = matchingMessage?.id || matchingMessage?.time || String(getCreatorConversationTime(conversation));
+
+  return [
+    sanitizeCreatorStateKey(conversation.id),
+    sanitizeCreatorStateKey(opportunity.badge.toLowerCase()),
+    sanitizeCreatorStateKey(source),
+  ].join("-");
+}
+
 function isCreatorEscalationRuleEnabled(rules: EscalationRuleSetting[], ruleId: string) {
   const rule = normalizeEscalationRuleSettings(rules).find((item) => item.id === ruleId);
   return !rule || (rule.enabled && rule.action !== "Monitor only");
@@ -1168,9 +1204,11 @@ export function buildCreatorLiveSummary(
   const opportunityCards: OpportunityPageCard[] = opportunityRecords.map(({ conversation, opportunity }) => {
     const preview = getCreatorConversationPreview(conversation);
     const score = opportunity.score;
+    const opportunityId = getCreatorOpportunitySourceKey(conversation, opportunity);
 
     return {
-      id: conversation.id,
+      id: opportunityId,
+      conversationId: conversation.id,
       name: getCreatorParticipantName(conversation),
       subtitle: opportunity.subtitle,
       detail: preview === "No messages" ? "Real conversation loaded from Instagram. No user message text is available yet." : truncateCreatorText(preview),
@@ -1199,6 +1237,7 @@ export function buildCreatorLiveSummary(
 
   const dashboardOpportunities: Opportunity[] = opportunityCards.slice(0, 4).map((card) => ({
     id: card.id,
+    conversationId: card.conversationId,
     title: card.subtitle,
     eyebrow: card.badge,
     body: [card.name, card.detail],

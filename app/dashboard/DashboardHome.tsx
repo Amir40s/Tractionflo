@@ -743,8 +743,12 @@ function DashboardContent() {
 
     async function loadCreatorConversations() {
       try {
+        const shouldScanForLeadSignals = ["dashboard", "opportunities", "audience", "analytics"].includes(activeTab);
+        const conversationsUrl = shouldScanForLeadSignals
+          ? "/api/instagram/conversations?scan=1"
+          : "/api/instagram/conversations";
         const [conversationResponse, orderResponse] = await Promise.all([
-          fetch("/api/instagram/conversations", {
+          fetch(conversationsUrl, {
             headers: { Accept: "application/json" },
             cache: "no-store",
           }),
@@ -802,7 +806,7 @@ function DashboardContent() {
       }
       window.removeEventListener("focus", handleWindowFocus);
     };
-  }, [creatorAutoRefreshOn]);
+  }, [activeTab, creatorAutoRefreshOn]);
 
   function handleTabChange(tab: DashboardTab) {
     if (!canOpenDashboardTab(accountProfile, tab)) {

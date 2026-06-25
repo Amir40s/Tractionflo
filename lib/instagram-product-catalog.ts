@@ -516,6 +516,10 @@ function getSpecificCatalogMatchCount(item: InstagramProductCatalogItem, text: s
 
 export function isCatalogBrowseRequest(text: string) {
   const normalized = normalizeSearchText(text);
+  if (isCatalogDeclineRequest(normalized)) {
+    return false;
+  }
+
   const asksForGallery = /\b(show|send|see|view|browse|catalog|carousel|slider|options?|images?|pictures?|photos?)\b/.test(
     normalized
   );
@@ -526,9 +530,45 @@ export function isCatalogBrowseRequest(text: string) {
   return asksForGallery && !directCheckoutIntent;
 }
 
+export function isCatalogDeclineRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    /\b(no thanks|no thank you|not now|maybe later|later|not interested|not looking|not required|not needed|no need|hold off|stop)\b/.test(normalized) ||
+    /\b(?:don'?t|do not|dont|no)\s+(?:need|want|send|show|share|give|require|order|buy|purchase|checkout)\b/.test(normalized) ||
+    /\b(?:don'?t|do not|dont)\s+(?:need|want|require)\b.*\b(?:product|products|item|items|detail|details|price|pricing|cost|offer|offers|option|options)\b/.test(normalized) ||
+    /\b(?:product|products|item|items|detail|details|price|pricing|cost|offer|offers|option|options)\b.*\b(?:not needed|not required|no need|not now)\b/.test(normalized)
+  );
+}
+
 export function hasCatalogShoppingIntent(text: string) {
   const normalized = normalizeSearchText(text);
+  if (isCatalogDeclineRequest(normalized)) {
+    return false;
+  }
+
   return productIntentWords.some((word) => normalized.includes(word));
+}
+
+export function isCatalogBookingOnlyRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized) {
+    return false;
+  }
+
+  const asksForAppointment =
+    /\b(book|booking|schedule|scheduled|set up|arrange)\b.*\b(call|appointment|meeting|consult|consultation|demo)\b/.test(normalized) ||
+    /\b(call|appointment|meeting|consult|consultation|demo)\b.*\b(book|booking|schedule|scheduled|set up|arrange)\b/.test(normalized) ||
+    /\b(book a call|book call|schedule a call|schedule call|book appointment|schedule appointment|book meeting|schedule meeting)\b/.test(normalized);
+  const hasProductCheckoutIntent =
+    /\b(confirm order|place order|order it|checkout|payment|pay|buy|purchase|product|item|size|variant|shipping|delivery)\b/.test(normalized);
+
+  return asksForAppointment && !hasProductCheckoutIntent;
 }
 
 export function scoreCatalogItemForText(item: InstagramProductCatalogItem, text: string) {
@@ -570,7 +610,7 @@ function toCatalogOffer(match: CatalogOfferMatch): InstagramCatalogOffer {
 }
 
 function getCatalogOfferMatches(text: string, catalog: InstagramProductCatalogItem[]) {
-  if (catalog.length === 0 || !hasCatalogShoppingIntent(text)) {
+  if (catalog.length === 0 || isCatalogDeclineRequest(text) || !hasCatalogShoppingIntent(text) || isCatalogBookingOnlyRequest(text)) {
     return [];
   }
 
@@ -619,7 +659,7 @@ export function findBestCatalogOffer(text: string, catalog: InstagramProductCata
 }
 
 export function formatCatalogForPrompt(catalog: InstagramProductCatalogItem[], text: string, maxItems = 6) {
-  if (catalog.length === 0 || !hasCatalogShoppingIntent(text)) {
+  if (catalog.length === 0 || isCatalogDeclineRequest(text) || !hasCatalogShoppingIntent(text)) {
     return "";
   }
 

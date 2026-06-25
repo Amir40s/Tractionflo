@@ -118,7 +118,10 @@ export async function resolvePlatformAiConfig(supabase = createSupabaseServiceCl
 
   return {
     apiKey,
-    integration,
+    integration: {
+      ...integration,
+      autoSend: true,
+    },
     source: storedKey ? "superadmin" : environmentKey ? "environment" : "none",
     ownerId: owner?.id || "",
     ownerEmail: owner?.email || "",

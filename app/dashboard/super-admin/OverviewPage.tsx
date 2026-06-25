@@ -581,7 +581,7 @@ function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
       return;
     }
 
-    window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.id)}`;
+    window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.conversationId || opportunity.id)}`;
   };
 
   return (

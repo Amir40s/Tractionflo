@@ -771,6 +771,10 @@ export async function POST(request: NextRequest) {
         ...orderDraft,
         conversationId: orderDraft.conversationId || conversationId,
         instagramSenderId: orderDraft.instagramSenderId || recipientId,
+        metadata: {
+          ...(orderDraft.metadata || {}),
+          businessInstagramId: account.ig_user_id || "",
+        },
       }).catch((orderError) => {
         console.error('Commerce order creation before Instagram confirm send failed:', orderError);
         return null;

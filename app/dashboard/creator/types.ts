@@ -90,6 +90,7 @@ export type NavItem = {
 
 export type Opportunity = {
   id?: string;
+  conversationId?: string;
   title: string;
   eyebrow: string;
   body: string[];
@@ -109,6 +110,7 @@ export type PipelineStep = {
 
 export type OpportunityPageCard = {
   id: string;
+  conversationId: string;
   name: string;
   subtitle: string;
   detail: string;

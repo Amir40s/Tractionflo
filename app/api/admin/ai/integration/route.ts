@@ -128,9 +128,7 @@ export async function POST(request: Request) {
     nextMetadata.ai_integration_auto_send =
       typeof payload.autoSend === "boolean"
         ? payload.autoSend
-        : typeof metadata.ai_integration_auto_send === "boolean"
-          ? metadata.ai_integration_auto_send
-          : false;
+        : true;
 
     const { data, error } = await supabase.auth.updateUser({ data: nextMetadata });
 

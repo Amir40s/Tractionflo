@@ -4,13 +4,18 @@ import { CreditCard } from "lucide-react";
 type CheckoutCancelSearchParams = {
   order_id?: string | string[];
   reason?: string | string[];
+  return_to?: string | string[];
 };
 
 function getSingleSearchParam(value?: string | string[]) {
   return Array.isArray(value) ? value[0] || "" : value || "";
 }
 
-function buildInboxHref(orderId: string, reason: string) {
+function buildReturnHref(orderId: string, reason: string, returnTo: string) {
+  if (returnTo !== "inbox") {
+    return "https://www.instagram.com/direct/inbox/";
+  }
+
   const params = new URLSearchParams();
   params.set("payment", "failed");
 
@@ -33,7 +38,8 @@ export default async function CheckoutCancelPage({
   const resolvedSearchParams = await searchParams;
   const orderId = getSingleSearchParam(resolvedSearchParams.order_id);
   const reason = getSingleSearchParam(resolvedSearchParams.reason);
-  const closeHref = buildInboxHref(orderId, reason);
+  const returnTo = getSingleSearchParam(resolvedSearchParams.return_to);
+  const closeHref = buildReturnHref(orderId, reason, returnTo);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f6f8fb] px-4 py-10">
@@ -49,7 +55,7 @@ export default async function CheckoutCancelPage({
           href={closeHref}
           className="mt-6 inline-flex h-11 items-center justify-center rounded-[8px] border border-[#dfe5f0] bg-white px-5 text-[13px] font-extrabold text-black"
         >
-          Close
+          {returnTo === "inbox" ? "Open inbox" : "Return to Instagram"}
         </Link>
       </section>
     </main>

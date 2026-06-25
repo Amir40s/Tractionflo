@@ -63,7 +63,7 @@ export type CommerceCheckoutPreparationResult = {
   error?: string;
 };
 
-export type CommerceCheckoutReturnTo = "inbox" | "";
+export type CommerceCheckoutReturnTo = "instagram" | "inbox" | "";
 
 type CommerceOrderRow = {
   id?: string;
@@ -141,14 +141,25 @@ function getCommerceCheckoutBaseUrl(baseUrl?: string) {
   return (explicit || fallback).replace(/\/+$/, "");
 }
 
-export function getCommerceOrderPublicCheckoutUrl(orderOrId: CommerceOrder | string, baseUrl?: string) {
+export function getCommerceOrderPublicCheckoutUrl(
+  orderOrId: CommerceOrder | string,
+  baseUrl?: string,
+  returnTo: CommerceCheckoutReturnTo | string = "instagram"
+) {
   const orderId = typeof orderOrId === "string" ? orderOrId : orderOrId.id;
 
   if (!orderId) {
     return "";
   }
 
-  return `${getCommerceCheckoutBaseUrl(baseUrl)}/checkout/order/${encodeURIComponent(orderId)}`;
+  const checkoutUrl = new URL(`${getCommerceCheckoutBaseUrl(baseUrl)}/checkout/order/${encodeURIComponent(orderId)}`);
+  const normalizedReturnTo = normalizeCommerceCheckoutReturnTo(returnTo);
+
+  if (normalizedReturnTo) {
+    checkoutUrl.searchParams.set("return_to", normalizedReturnTo);
+  }
+
+  return checkoutUrl.toString();
 }
 
 function getStripeUnitAmount(order: CommerceOrder) {
@@ -272,8 +283,8 @@ export function isCommerceOrderConfirmationText(text: string) {
 
   return (
     normalized === "confirm_order" ||
-    /^(confirm|confirmed|approve|approved|yes|ok|okay|go ahead|done|book it|order it|place order|place the order)$/i.test(normalized) ||
-    /\b(confirm order|confirmed order|approve order|approved order|go ahead|place order|book it|order it|yes confirm|yes please)\b/i.test(normalized)
+    /^(confirm|confirmed|approve order|approved order|order it|place order|place the order|confirm order|confirmed order)$/i.test(normalized) ||
+    /\b(confirm order|confirmed order|approve order|approved order|place order|place the order|order it|yes confirm|confirm checkout|send payment link|pay now|checkout now)\b/i.test(normalized)
   );
 }
 
@@ -520,6 +531,84 @@ export async function confirmPendingCommerceOrderById(
   return normalizeCommerceOrder(data as CommerceOrderRow);
 }
 
+export async function cancelPendingCommerceOrdersForSender(
+  supabase: SupabaseServiceClient,
+  {
+    userId,
+    instagramSenderId,
+    reason,
+    source = "instagram_ai",
+  }: {
+    userId: string;
+    instagramSenderId: string;
+    reason: string;
+    source?: string;
+  }
+) {
+  if (!instagramSenderId) {
+    return [];
+  }
+
+  const { data: pendingRows, error: lookupError } = await supabase
+    .from("commerce_orders")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("instagram_sender_id", instagramSenderId)
+    .eq("status", "pending_confirmation")
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (lookupError) {
+    if (isCommerceOrdersTableMissing(lookupError)) {
+      return [];
+    }
+
+    throw lookupError;
+  }
+
+  const pending = (pendingRows || []) as CommerceOrderRow[];
+
+  if (pending.length === 0) {
+    return [];
+  }
+
+  const cancelledAt = new Date().toISOString();
+  const cancelled = await Promise.all(
+    pending.map(async (order) => {
+      const metadata = {
+        ...((order.metadata && typeof order.metadata === "object" ? order.metadata : {}) as Record<string, unknown>),
+        cancelledAt,
+        cancellationReason: reason,
+        cancellationSource: source,
+      };
+
+      const { data, error } = await supabase
+        .from("commerce_orders")
+        .update({
+          status: "cancelled",
+          metadata,
+          updated_at: cancelledAt,
+        })
+        .eq("id", order.id)
+        .eq("user_id", userId)
+        .select("*")
+        .single();
+
+      if (error) {
+        if (isCommerceOrdersTableMissing(error)) {
+          return null;
+        }
+
+        throw error;
+      }
+
+      return data ? normalizeCommerceOrder(data as CommerceOrderRow) : null;
+    })
+  );
+
+  return cancelled.filter((order): order is CommerceOrder => Boolean(order));
+}
+
 export async function getLatestCommerceOrderForSender(
   supabase: SupabaseServiceClient,
   {
@@ -653,6 +742,10 @@ export function hasCommerceOrderCheckoutButtonMessage(order: CommerceOrder) {
 }
 
 function normalizeCommerceCheckoutReturnTo(value?: string): CommerceCheckoutReturnTo {
+  if (value === "instagram") {
+    return "instagram";
+  }
+
   return value === "inbox" ? "inbox" : "";
 }
 
@@ -679,7 +772,7 @@ async function createStripeCheckoutSession(
   }
 
   const appBaseUrl = getCommerceCheckoutBaseUrl(baseUrl);
-  const normalizedReturnTo = normalizeCommerceCheckoutReturnTo(returnTo);
+  const normalizedReturnTo = normalizeCommerceCheckoutReturnTo(returnTo || "instagram");
   const successUrl = new URL("/checkout/complete", appBaseUrl);
   successUrl.searchParams.set("order_id", order.id);
   successUrl.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
@@ -716,6 +809,7 @@ async function createStripeCheckoutSession(
   params.set("metadata[order_id]", order.id);
   params.set("metadata[user_id]", order.userId);
   params.set("metadata[instagram_sender_id]", order.instagramSenderId || "");
+  params.set("metadata[return_to]", normalizedReturnTo || "");
   params.set("metadata[product_title]", truncateForStripe(order.productTitle || "Instagram order", 300));
   params.set("payment_intent_data[metadata][order_id]", order.id);
   params.set("payment_intent_data[metadata][user_id]", order.userId);
@@ -753,7 +847,7 @@ export async function prepareCommerceOrderCheckout(
     order,
     baseUrl,
     forceNew = false,
-    returnTo = "",
+    returnTo = "instagram",
   }: {
     userId: string;
     order: CommerceOrder;
@@ -763,6 +857,8 @@ export async function prepareCommerceOrderCheckout(
   }
 ): Promise<CommerceCheckoutPreparationResult> {
   const existingCheckoutUrl = getCommerceOrderCheckoutUrl(order);
+  const normalizedReturnTo = normalizeCommerceCheckoutReturnTo(returnTo || "instagram");
+  const existingReturnTo = getMetadataString(order.metadata || {}, ["checkoutReturnTo", "returnTo", "return_to"]);
 
   if (order.paymentStatus === "paid" || order.status === "paid") {
     return {
@@ -773,7 +869,7 @@ export async function prepareCommerceOrderCheckout(
     };
   }
 
-  if (existingCheckoutUrl && !forceNew) {
+  if (existingCheckoutUrl && !forceNew && existingReturnTo === normalizedReturnTo) {
     return {
       order,
       checkoutUrl: existingCheckoutUrl,
@@ -795,7 +891,7 @@ export async function prepareCommerceOrderCheckout(
   try {
     const session = await createStripeCheckoutSession(order, {
       baseUrl,
-      returnTo,
+      returnTo: normalizedReturnTo,
     });
     const now = new Date().toISOString();
     const metadata = {
@@ -803,6 +899,7 @@ export async function prepareCommerceOrderCheckout(
       stripeCheckoutSessionId: session.id,
       stripeCheckoutUrl: session.url || "",
       stripeCheckoutCreatedAt: now,
+      checkoutReturnTo: normalizedReturnTo,
       stripePaymentIntentId: session.payment_intent || "",
       stripePaymentStatus: session.payment_status || "unpaid",
     };

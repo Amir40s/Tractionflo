@@ -325,21 +325,7 @@ export async function POST(request: Request) {
       return null;
     });
     const revenueMemoryPrompt = formatRevenueMemoryForPrompt(previousRevenueMemory);
-
-    if (lastMessage?.from === 'me') {
-      logger.info("Skipping OpenAI Assistant run because the last message in the conversation is from the business.");
-      return NextResponse.json({
-        starter: '',
-        reply: '',
-        cta: '',
-        lead: cachedLead || {
-          ...defaultAiLeadInsight,
-          summary: 'Waiting for the user to respond.',
-          recommendedAction: 'Wait for user response.',
-        },
-        enabledWorkflows,
-      } satisfies AiWorkflowRunResult);
-    }
+    const latestMessageIsFromBusiness = lastMessage?.from === 'me';
 
     if (lastMessage?.from === 'user' && isCommerceOrderConfirmationText(lastMessage.text || '')) {
       logger.info("Skipping OpenAI Assistant run because the latest user message is an order confirmation.");
@@ -683,6 +669,12 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       workflowResult.reply = buildCatalogOfferReply(workflowResult.reply, catalogOffer);
       workflowResult.starter = buildCatalogOfferReply(workflowResult.starter, catalogOffer);
       workflowResult.cta = buildCatalogOfferReply(workflowResult.cta, catalogOffer);
+    }
+
+    if (latestMessageIsFromBusiness) {
+      workflowResult.starter = '';
+      workflowResult.reply = '';
+      workflowResult.cta = '';
     }
 
     // Apply mock or cached lead details if we did not run qualification
