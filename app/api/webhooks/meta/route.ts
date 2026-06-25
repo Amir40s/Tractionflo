@@ -23,8 +23,6 @@ import {
 import {
   getAiBehaviorPrompt,
   getEnabledWorkflowMap,
-  getStoredOpenAiKey,
-  normalizeAiIntegrationMetadata,
 } from '@/lib/ai-integration';
 import { getFreshInstagramAccountByIgUserId } from '@/lib/instagram-token';
 import {
@@ -52,9 +50,17 @@ import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferenc
 import { runAssistantThread } from '@/lib/openai-assistants';
 import {
   buildFallbackRevenueOperatingSnapshot,
+  formatBuyerIntelligenceForPrompt,
+  formatRevenueMemoryForPrompt,
+  loadRosProspectBuyerProfile,
+  loadRosProspectRevenueMemory,
+  mergeBuyerIntelligenceProfiles,
+  mergeRevenueMemoryProfiles,
   normalizeRevenueOperatingSnapshot,
   persistRevenueOperatingSnapshot,
   recordRevenueConversionEvent,
+  type RevenueBuyerIntelligence,
+  type RevenueMemoryContext,
 } from '@/lib/revenue-intelligence';
 import { applyRevenueOutcomeAction } from '@/lib/revenue-outcome-actions';
 import {
@@ -65,6 +71,7 @@ import {
 import { loadRevenueOutcomeProviderSettings } from '@/lib/revenue-provider-execution';
 import { formatRevenueLearningForPrompt } from '@/lib/revenue-learning';
 import { applyRevenueStrategy } from '@/lib/revenue-strategy';
+import { resolvePlatformAiConfig } from '@/lib/platform-ai-config';
 
 import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -500,12 +507,16 @@ function buildWebhookRevenueOperatingSnapshot({
   pendingOrderId,
   escalation,
   outcomeProviders,
+  previousBuyerProfile,
+  previousRevenueMemory,
 }: {
   latestText: string;
   catalogOffer?: InstagramCatalogOffer | null;
   pendingOrderId?: string;
   escalation?: ConversationEscalation | null;
   outcomeProviders?: RevenueOutcomeProviderSettings;
+  previousBuyerProfile?: RevenueBuyerIntelligence | null;
+  previousRevenueMemory?: RevenueMemoryContext | null;
 }) {
   const normalizedText = latestText.toLowerCase();
   const hasPriceSignal = /\b(price|pricing|cost|expensive|budget|how much|payment)\b/.test(normalizedText);
@@ -569,19 +580,33 @@ function buildWebhookRevenueOperatingSnapshot({
     cta,
     escalation,
   });
+  const mergedRevenueMemory = mergeRevenueMemoryProfiles(previousRevenueMemory?.memory, fallback.memory);
+  const memoryWithPriceObjection = hasPriceSignal
+    ? mergeRevenueMemoryProfiles(mergedRevenueMemory, { objections: ['price'] })
+    : mergedRevenueMemory;
+  const memoryWithCatalogOffer = catalogOffer
+    ? mergeRevenueMemoryProfiles(memoryWithPriceObjection, {
+      offersPresented: [catalogOffer.title, catalogOffer.priceText].filter(Boolean),
+    })
+    : memoryWithPriceObjection;
+  const fallbackWithBuyerMemory = {
+    ...fallback,
+    buyerIntelligence: mergeBuyerIntelligenceProfiles(previousBuyerProfile, fallback.buyerIntelligence),
+    memory: mergedRevenueMemory,
+  };
 
   return applyRevenueOutcomeAction(
     applyRevenueStrategy(
       normalizeRevenueOperatingSnapshot(
         {
-          ...fallback,
+          ...fallbackWithBuyerMemory,
           outcomeProbabilities: {
-            ...fallback.outcomeProbabilities,
-            book_call: Math.max(fallback.outcomeProbabilities.book_call || 0, catalogOffer ? 84 : 35),
-            purchase_product: Math.max(fallback.outcomeProbabilities.purchase_product || 0, pendingOrderId ? 92 : catalogOffer ? 86 : 25),
+            ...fallbackWithBuyerMemory.outcomeProbabilities,
+            book_call: Math.max(fallbackWithBuyerMemory.outcomeProbabilities.book_call || 0, catalogOffer ? 84 : 35),
+            purchase_product: Math.max(fallbackWithBuyerMemory.outcomeProbabilities.purchase_product || 0, pendingOrderId ? 92 : catalogOffer ? 86 : 25),
           },
           decision: {
-            ...fallback.decision,
+            ...fallbackWithBuyerMemory.decision,
             bestNextAction: pendingOrderId
               ? 'confirm_order_then_send_checkout'
               : catalogOffer
@@ -591,14 +616,12 @@ function buildWebhookRevenueOperatingSnapshot({
             rationale: summary,
           },
           memory: {
-            ...fallback.memory,
-            objections: hasPriceSignal ? ['price'] : fallback.memory.objections,
-            offersPresented: catalogOffer
-              ? [catalogOffer.title, catalogOffer.priceText].filter(Boolean)
-              : fallback.memory.offersPresented,
+            ...fallbackWithBuyerMemory.memory,
+            objections: memoryWithPriceObjection.objections,
+            offersPresented: memoryWithCatalogOffer.offersPresented,
           },
         },
-        fallback
+        fallbackWithBuyerMemory
       ),
       {
         latestText,
@@ -624,8 +647,9 @@ async function generateWebhookAiReply({
 }) {
   logger.info("generateWebhookAiReply: Starting generation", { latestText, participantId: participant.id });
   const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-  const integration = normalizeAiIntegrationMetadata(metadata);
   const serviceSupabase = createSupabaseServiceClient();
+  const platformConfig = await resolvePlatformAiConfig(serviceSupabase);
+  const integration = platformConfig.integration;
   const outcomeProviders = await loadRevenueOutcomeProviderSettings({
     supabase: serviceSupabase,
     userId: user.id,
@@ -646,7 +670,7 @@ async function generateWebhookAiReply({
 
   const messages = [{ from: 'user' as const, text: latestText, time: new Date().toISOString() }];
 
-  const apiKey = getStoredOpenAiKey(metadata);
+  const apiKey = platformConfig.apiKey;
 
   if (!apiKey) {
     logger.info("generateWebhookAiReply: Bailing out because no OpenAI API key was found.");
@@ -667,6 +691,32 @@ async function generateWebhookAiReply({
   const catalogPrompt = formatCatalogForPrompt(productCatalog, latestText);
   const catalogOffers = findCatalogOffers(latestText, productCatalog, catalogCarouselMaxItems);
   const catalogOffer = shouldUseSingleCatalogOffer(latestText, catalogOffers) ? catalogOffers[0] : null;
+  const previousBuyerProfile = await loadRosProspectBuyerProfile({
+    supabase: serviceSupabase,
+    userId: user.id,
+    participant: {
+      id: participant.id,
+      username: participant.username,
+      name: participant.name,
+    },
+  }).catch((buyerMemoryError) => {
+    logger.warn('Could not load saved buyer memory for webhook AI prompt:', { error: buyerMemoryError, participantId: participant.id });
+    return null;
+  });
+  const buyerMemoryPrompt = formatBuyerIntelligenceForPrompt(previousBuyerProfile);
+  const previousRevenueMemory = await loadRosProspectRevenueMemory({
+    supabase: serviceSupabase,
+    userId: user.id,
+    participant: {
+      id: participant.id,
+      username: participant.username,
+      name: participant.name,
+    },
+  }).catch((revenueMemoryError) => {
+    logger.warn('Could not load saved revenue memory for webhook AI prompt:', { error: revenueMemoryError, participantId: participant.id });
+    return null;
+  });
+  const revenueMemoryPrompt = formatRevenueMemoryForPrompt(previousRevenueMemory);
 
   logger.info("generateWebhookAiReply: Proceeding to request OpenAI Assistant Thread...", { participantName });
   const reply = await runAssistantThread({
@@ -690,6 +740,22 @@ ${formatRevenueOutcomeProvidersForPrompt(outcomeProviders) || 'No external outco
 
 Creator-specific revenue learning:
 ${revenueLearningPrompt || 'No creator-specific learning is available yet. Use the default ROS strategy and persist the decision for future learning.'}
+
+Saved buyer memory for this Instagram participant:
+${buyerMemoryPrompt}
+
+Buyer memory rules:
+- Use saved buyer memory as known context for this same participant.
+- Do not ask again for known goal, problem, budget, authority, need, or timeline unless the latest message clearly changes them.
+- Personalize the reply to the saved buyer profile when it helps the sale.
+
+Saved revenue memory for this Instagram participant:
+${revenueMemoryPrompt}
+
+Revenue memory rules:
+- Use saved revenue memory as the cumulative customer relationship.
+- Remember previous objections, questions asked, offers presented, purchases, and follow-up history.
+- Do not restart discovery or repeat an already-presented offer unless the latest message makes that useful.
 
 Return only the Instagram DM reply text. Keep it natural, brief, and useful. Do not mention being an AI unless asked.`,
     messages: [
@@ -872,7 +938,7 @@ async function processInstagramAutomations(
       }
 
       const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-      const integration = normalizeAiIntegrationMetadata(metadata);
+      const integration = (await resolvePlatformAiConfig(supabase)).integration;
       const outcomeProviders = await loadRevenueOutcomeProviderSettings({
         supabase,
         userId: user.id,
@@ -1340,12 +1406,44 @@ async function processInstagramAutomations(
         }
       }
 
+      const previousBuyerProfile = await loadRosProspectBuyerProfile({
+        supabase,
+        userId: user.id,
+        participant: {
+          id: event.senderId,
+          username: participant.username,
+          name: participant.name,
+        },
+      }).catch((buyerMemoryError) => {
+        logger.warn('processInstagramAutomations: Could not load saved buyer memory for ROS snapshot.', {
+          error: buyerMemoryError,
+          senderId: event.senderId,
+        });
+        return null;
+      });
+      const previousRevenueMemory = await loadRosProspectRevenueMemory({
+        supabase,
+        userId: user.id,
+        participant: {
+          id: event.senderId,
+          username: participant.username,
+          name: participant.name,
+        },
+      }).catch((revenueMemoryError) => {
+        logger.warn('processInstagramAutomations: Could not load saved revenue memory for ROS snapshot.', {
+          error: revenueMemoryError,
+          senderId: event.senderId,
+        });
+        return null;
+      });
       const rosSnapshot = buildWebhookRevenueOperatingSnapshot({
         latestText: event.text,
         catalogOffer: catalogOffer || catalogCarouselCards[0]?.offer || null,
         pendingOrderId: orderId || catalogCarouselCards[0]?.orderId || '',
         escalation,
         outcomeProviders,
+        previousBuyerProfile,
+        previousRevenueMemory,
       });
       await persistRevenueOperatingSnapshot({
         supabase,

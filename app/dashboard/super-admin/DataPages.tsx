@@ -35,7 +35,8 @@ import {
   TrendingUp,
   User,
 } from "lucide-react";
-import { SettingsSelect } from "../SettingsPage";
+import { defaultAiBehaviorSettings, defaultAiIntegrationSettings } from "@/lib/ai-integration";
+import { SettingsAiIntegrationSection, SettingsSelect } from "../SettingsPage";
 import type { PricingPlan, PricingResponse } from "../settings-state";
 import {
   formatAdminCurrency,
@@ -1405,7 +1406,7 @@ function buildAiConfig({
         insightItems: [
           { label: "AI-ready chats", value: formatAdminPercent(aiReadyMessages, totalMessages), detail: "Stored messages without handoff keywords", tone: "bg-[#eafaf0] text-[#13a84f]", icon: Check },
           { label: "Auto-send creators", value: formatAdminNumber(metrics?.autoSendCreators), detail: "Creators with automatic AI replies enabled", tone: "bg-[#f0edff] text-[#4b3cff]", icon: Sparkles },
-          { label: "Configured creators", value: formatAdminNumber(metrics?.configuredCreators), detail: "Creators with an OpenAI key saved", tone: "bg-[#eaf4ff] text-[#246bff]", icon: BrainCircuit },
+          { label: "Platform key", value: metrics?.platformKeyConfigured ? "Connected" : "Missing", detail: metrics?.platformKeyConfigured ? `${formatAdminNumber(metrics?.configuredCreators)} creators covered` : "Add it in AI Integration", tone: metrics?.platformKeyConfigured ? "bg-[#eaf4ff] text-[#246bff]" : "bg-[#fff4df] text-[#c07800]", icon: BrainCircuit },
         ],
       },
       emptyText: "No real AI usage records found.",
@@ -2004,6 +2005,25 @@ function SuperAdminCreatorLifecyclePage({
   );
 }
 
+function SuperAdminAiIntegrationPage() {
+  const [integration, setIntegration] = useState(defaultAiIntegrationSettings);
+
+  return (
+    <SettingsAiIntegrationSection
+      integration={integration}
+      assistantSettings={defaultAiBehaviorSettings}
+      onChange={setIntegration}
+      onAssistantChange={(behavior) => setIntegration((current) => ({ ...current, behavior }))}
+      integrationEndpoint="/api/admin/ai/integration"
+      testEndpoint="/api/admin/ai/test"
+      workflowTestEndpoint="/api/admin/ai/workflow-test"
+      hideWorkflowJobs
+      hideAssistantSettings
+      hideLiveBehavior
+    />
+  );
+}
+
 export function SuperAdminDetailPage({
   page,
   refreshKey = 0,
@@ -2025,6 +2045,10 @@ export function SuperAdminDetailPage({
 
   if (page === "platform-instagram" || page === "platform-api" || page === "platform-queue") {
     return <SuperAdminPlatformPage page={page} refreshKey={refreshKey} />;
+  }
+
+  if (page === "ai-integration") {
+    return <SuperAdminAiIntegrationPage />;
   }
 
   if (page === "ai-usage" || page === "ai-costs" || page === "ai-escalations") {

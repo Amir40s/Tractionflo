@@ -76,6 +76,7 @@ export const superAdminNavGroups: {
     label: "AI",
     icon: Sparkles,
     children: [
+      { label: "Integration", page: "ai-integration" },
       { label: "Usage", page: "ai-usage" },
       { label: "Costs", page: "ai-costs" },
       { label: "Escalations", page: "ai-escalations" },
@@ -133,6 +134,10 @@ export const superAdminPageMeta: Record<SuperAdminPage, { title: string; subtitl
     title: "Queue Monitoring",
     subtitle: "Webhook queues, retries, stuck jobs, and processing latency.",
   },
+  "ai-integration": {
+    title: "AI Integration",
+    subtitle: "Shared OpenAI key, model, and automation behavior for all creators.",
+  },
   "ai-usage": {
     title: "AI Usage",
     subtitle: "Message processing, AI conversations, and automation coverage.",
@@ -163,7 +168,7 @@ export const superAdminPageMeta: Record<SuperAdminPage, { title: string; subtitl
   },
 };
 
-export const superAdminDetailConfigs: Record<Exclude<SuperAdminPage, "overview" | "profile" | "settings">, SuperAdminDetailConfig> = {
+export const superAdminDetailConfigs: Record<Exclude<SuperAdminPage, "overview" | "profile" | "settings" | "ai-integration">, SuperAdminDetailConfig> = {
   "creators-connected": {
     metrics: [
       { label: "Total connected", value: "1,284", detail: "Instagram accounts", change: "+18.6%", tone: "bg-[#f0edff] text-[#4b3cff]", icon: Globe2 },

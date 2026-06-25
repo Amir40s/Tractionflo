@@ -1495,16 +1495,28 @@ const aiWorkflowVisuals: Record<AiWorkflowSetting["id"], { icon: LucideIcon; ton
   moveToCta: { icon: ArrowRight, tone: "bg-[#fff3e6] text-[#ff850d]" },
 };
 
-function SettingsAiIntegrationSection({
+export function SettingsAiIntegrationSection({
   integration,
   assistantSettings,
   onChange,
   onAssistantChange,
+  integrationEndpoint = "/api/ai/integration",
+  testEndpoint = "/api/ai/test",
+  workflowTestEndpoint = "/api/ai/workflow",
+  hideWorkflowJobs = false,
+  hideAssistantSettings = false,
+  hideLiveBehavior = false,
 }: {
   integration: AiIntegrationSettings;
   assistantSettings: AiSettings;
   onChange: (integration: AiIntegrationSettings) => void;
   onAssistantChange: (settings: AiSettings) => void;
+  integrationEndpoint?: string;
+  testEndpoint?: string;
+  workflowTestEndpoint?: string;
+  hideWorkflowJobs?: boolean;
+  hideAssistantSettings?: boolean;
+  hideLiveBehavior?: boolean;
 }) {
   const [draft, setDraft] = useState<AiIntegrationSettings>({
     ...integration,
@@ -1536,7 +1548,7 @@ function SettingsAiIntegrationSection({
       setIsLoading(true);
 
       try {
-        const response = await fetch("/api/ai/integration", {
+        const response = await fetch(integrationEndpoint, {
           headers: { Accept: "application/json" },
           cache: "no-store",
         });
@@ -1550,7 +1562,7 @@ function SettingsAiIntegrationSection({
           setDraft(data.integration);
           onChangeRef.current(data.integration);
           onAssistantChangeRef.current(data.integration.behavior);
-          setStatus(data.integration.apiKeySaved ? "OpenAI key is connected." : "Add an OpenAI key to turn on AI replies.");
+          setStatus(data.integration.apiKeySaved ? "OpenAI key is connected." : "Add the platform OpenAI key to turn on AI replies.");
         }
       } catch (error) {
         if (isMounted) {
@@ -1571,7 +1583,7 @@ function SettingsAiIntegrationSection({
       isMounted = false;
       window.clearTimeout(timeout);
     };
-  }, []);
+  }, [integrationEndpoint]);
 
   function updateDraft(partial: Partial<AiIntegrationSettings>) {
     setDraft((current) => ({
@@ -1600,7 +1612,7 @@ function SettingsAiIntegrationSection({
     setWorkflowTest(null);
 
     try {
-      const response = await fetch("/api/ai/integration", {
+      const response = await fetch(integrationEndpoint, {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -1643,7 +1655,7 @@ function SettingsAiIntegrationSection({
     setWorkflowTest(null);
 
     try {
-      const response = await fetch("/api/ai/test", {
+      const response = await fetch(testEndpoint, {
         method: "POST",
         headers: { Accept: "application/json" },
       });
@@ -1669,7 +1681,7 @@ function SettingsAiIntegrationSection({
     setWorkflowTest(null);
 
     try {
-      const response = await fetch("/api/ai/workflow", {
+      const response = await fetch(workflowTestEndpoint, {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -1727,7 +1739,7 @@ function SettingsAiIntegrationSection({
         }
       />
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]">
+      <div className={hideWorkflowJobs ? "grid gap-5" : "grid gap-5 xl:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]"}>
         <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
           <div className="flex items-center gap-2">
             <BrainCircuit size={17} className="text-[#3044ff]" strokeWidth={2.35} />
@@ -1801,115 +1813,119 @@ function SettingsAiIntegrationSection({
           </div>
         </section>
 
-        <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
-          <div className="flex items-center gap-2">
-            <Sparkles size={17} className="text-[#3044ff]" strokeWidth={2.35} />
-            <h2 className="text-[15px] font-extrabold text-black">Instagram AI Jobs</h2>
-          </div>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {draft.workflows.map((workflow) => {
-              const visual = aiWorkflowVisuals[workflow.id];
-              const Icon = visual.icon;
-
-              return (
-                <div key={workflow.id} className="rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] ${visual.tone}`}>
-                      <Icon size={18} strokeWidth={2.35} />
-                    </span>
-                    <SettingsToggle
-                      ariaLabel={`Toggle ${workflow.label}`}
-                      checked={workflow.enabled}
-                      onChange={(checked) => updateWorkflow(workflow.id, checked)}
-                    />
-                  </div>
-                  <h3 className="mt-4 text-[13px] font-extrabold text-black">{workflow.label}</h3>
-                  <p className="mt-2 text-[11px] font-medium leading-relaxed text-[#46506a]">{workflow.detail}</p>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-5 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-[13px] font-extrabold text-black">Workflow test</h3>
-                <p className="mt-1 text-[11px] font-medium leading-relaxed text-[#46506a]">
-                  Runs opener, answer, lead qualification, and CTA against a sample Instagram thread.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void testAllWorkflows()}
-                disabled={isTestingWorkflows || !draft.apiKeySaved}
-                className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-[8px] bg-[#0d1118] px-3 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                {isTestingWorkflows ? <RefreshCw size={13} className="animate-spin" /> : <Sparkles size={13} strokeWidth={2.35} />}
-                Test all jobs
-              </button>
+        {!hideWorkflowJobs && (
+          <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+            <div className="flex items-center gap-2">
+              <Sparkles size={17} className="text-[#3044ff]" strokeWidth={2.35} />
+              <h2 className="text-[15px] font-extrabold text-black">Instagram AI Jobs</h2>
             </div>
 
-            {workflowTest && (
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-[8px] bg-white p-3">
-                  <p className="text-[10px] font-extrabold uppercase text-[#596175]">Opener</p>
-                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">{workflowTest.starter || "Off"}</p>
-                </div>
-                <div className="rounded-[8px] bg-white p-3">
-                  <p className="text-[10px] font-extrabold uppercase text-[#596175]">Answer</p>
-                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">{workflowTest.reply || "Off"}</p>
-                </div>
-                <div className="rounded-[8px] bg-white p-3">
-                  <p className="text-[10px] font-extrabold uppercase text-[#596175]">Lead</p>
-                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">
-                    {workflowTest.lead ? `${workflowTest.lead.score}/100 ${workflowTest.lead.stage}: ${workflowTest.lead.summary}` : "Off"}
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {draft.workflows.map((workflow) => {
+                const visual = aiWorkflowVisuals[workflow.id];
+                const Icon = visual.icon;
+
+                return (
+                  <div key={workflow.id} className="rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] ${visual.tone}`}>
+                        <Icon size={18} strokeWidth={2.35} />
+                      </span>
+                      <SettingsToggle
+                        ariaLabel={`Toggle ${workflow.label}`}
+                        checked={workflow.enabled}
+                        onChange={(checked) => updateWorkflow(workflow.id, checked)}
+                      />
+                    </div>
+                    <h3 className="mt-4 text-[13px] font-extrabold text-black">{workflow.label}</h3>
+                    <p className="mt-2 text-[11px] font-medium leading-relaxed text-[#46506a]">{workflow.detail}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-[13px] font-extrabold text-black">Workflow test</h3>
+                  <p className="mt-1 text-[11px] font-medium leading-relaxed text-[#46506a]">
+                    Runs opener, answer, lead qualification, and CTA against a sample Instagram thread.
                   </p>
                 </div>
-                <div className="rounded-[8px] bg-white p-3">
-                  <p className="text-[10px] font-extrabold uppercase text-[#596175]">CTA</p>
-                  <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">{workflowTest.cta || "Off"}</p>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => void testAllWorkflows()}
+                  disabled={isTestingWorkflows || !draft.apiKeySaved}
+                  className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-[8px] bg-[#0d1118] px-3 text-[11px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-55"
+                >
+                  {isTestingWorkflows ? <RefreshCw size={13} className="animate-spin" /> : <Sparkles size={13} strokeWidth={2.35} />}
+                  Test all jobs
+                </button>
               </div>
-            )}
-          </div>
-        </section>
+
+              {workflowTest && (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-[8px] bg-white p-3">
+                    <p className="text-[10px] font-extrabold uppercase text-[#596175]">Opener</p>
+                    <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">{workflowTest.starter || "Off"}</p>
+                  </div>
+                  <div className="rounded-[8px] bg-white p-3">
+                    <p className="text-[10px] font-extrabold uppercase text-[#596175]">Answer</p>
+                    <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">{workflowTest.reply || "Off"}</p>
+                  </div>
+                  <div className="rounded-[8px] bg-white p-3">
+                    <p className="text-[10px] font-extrabold uppercase text-[#596175]">Lead</p>
+                    <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">
+                      {workflowTest.lead ? `${workflowTest.lead.score}/100 ${workflowTest.lead.stage}: ${workflowTest.lead.summary}` : "Off"}
+                    </p>
+                  </div>
+                  <div className="rounded-[8px] bg-white p-3">
+                    <p className="text-[10px] font-extrabold uppercase text-[#596175]">CTA</p>
+                    <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#253049]">{workflowTest.cta || "Off"}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-        <SettingsAssistantCard settings={draft.behavior} onChange={updateBehavior} />
-        <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
-          <div className="flex items-center gap-2">
-            <Bot size={17} className="text-[#3044ff]" strokeWidth={2.35} />
-            <h2 className="text-[15px] font-extrabold text-black">AI behavior preview</h2>
-          </div>
-          <div className="mt-5 rounded-[12px] bg-[#f6f7fb] p-4">
-            <p className="text-[12px] font-semibold leading-relaxed text-[#253049]">
-              {getAiBehaviorSummary(draft.behavior)}
-            </p>
-            <p className="mt-3 text-[12px] font-medium leading-relaxed text-[#46506a]">
-              Proactive outreach is {draft.behavior.proactiveOutreach ? "on" : "off"} and auto tagging is {draft.behavior.autoTagging ? "on" : "off"}.
-            </p>
-          </div>
-          <div className="mt-4 rounded-[12px] border border-[#edf0f6] bg-white p-4">
-            <p className="text-[10px] font-extrabold uppercase text-[#596175]">Sample Instagram reply</p>
-            <p className="mt-2 text-[13px] font-semibold leading-relaxed text-[#253049]">
-              {getAiBehaviorPreview(draft.behavior)}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void saveIntegration()}
-            disabled={isSaving}
-            className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_30px_rgba(48,68,255,0.22)] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} strokeWidth={2.4} />}
-            Save AI tone
-          </button>
-        </section>
-      </div>
+      {!hideAssistantSettings && (
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+          <SettingsAssistantCard settings={draft.behavior} onChange={updateBehavior} />
+          <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
+            <div className="flex items-center gap-2">
+              <Bot size={17} className="text-[#3044ff]" strokeWidth={2.35} />
+              <h2 className="text-[15px] font-extrabold text-black">AI behavior preview</h2>
+            </div>
+            <div className="mt-5 rounded-[12px] bg-[#f6f7fb] p-4">
+              <p className="text-[12px] font-semibold leading-relaxed text-[#253049]">
+                {getAiBehaviorSummary(draft.behavior)}
+              </p>
+              <p className="mt-3 text-[12px] font-medium leading-relaxed text-[#46506a]">
+                Proactive outreach is {draft.behavior.proactiveOutreach ? "on" : "off"} and auto tagging is {draft.behavior.autoTagging ? "on" : "off"}.
+              </p>
+            </div>
+            <div className="mt-4 rounded-[12px] border border-[#edf0f6] bg-white p-4">
+              <p className="text-[10px] font-extrabold uppercase text-[#596175]">Sample Instagram reply</p>
+              <p className="mt-2 text-[13px] font-semibold leading-relaxed text-[#253049]">
+                {getAiBehaviorPreview(draft.behavior)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void saveIntegration()}
+              disabled={isSaving}
+              className="mt-5 flex h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_16px_30px_rgba(48,68,255,0.22)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} strokeWidth={2.4} />}
+              Save AI tone
+            </button>
+          </section>
+        </div>
+      )}
 
-      <section className="grid gap-5 rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <section className={`grid gap-5 rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-[0_22px_60px_rgba(20,28,53,0.025)] ${hideLiveBehavior ? "" : "lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"}`}>
         <div className="grid gap-4">
           <div className="flex items-center gap-2">
             <Bot size={17} className="text-[#3044ff]" strokeWidth={2.35} />
@@ -1935,30 +1951,32 @@ function SettingsAiIntegrationSection({
           </label>
         </div>
 
-        <div className="grid gap-4">
-          <div className="rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-4">
-            <div className="flex items-center justify-between gap-4">
-              <span>
-                <span className="block text-[13px] font-extrabold text-black">Auto-send AI replies</span>
-                <span className="mt-1 block text-[11px] font-medium leading-relaxed text-[#46506a]">
-                  Keep off while testing. When off, AI drafts replies for approval.
+        {!hideLiveBehavior && (
+          <div className="grid gap-4">
+            <div className="rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-4">
+              <div className="flex items-center justify-between gap-4">
+                <span>
+                  <span className="block text-[13px] font-extrabold text-black">Auto-send AI replies</span>
+                  <span className="mt-1 block text-[11px] font-medium leading-relaxed text-[#46506a]">
+                    Keep off while testing. When off, AI drafts replies for approval.
+                  </span>
                 </span>
-              </span>
-              <SettingsToggle
-                ariaLabel="Toggle auto-send AI replies"
-                checked={draft.autoSend}
-                onChange={(autoSend) => updateDraft({ autoSend })}
-              />
+                <SettingsToggle
+                  ariaLabel="Toggle auto-send AI replies"
+                  checked={draft.autoSend}
+                  onChange={(autoSend) => updateDraft({ autoSend })}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-[10px] bg-[#f6f7fb] p-4">
+              <h3 className="text-[13px] font-extrabold text-black">Live inbox behavior</h3>
+              <p className="mt-2 text-[12px] font-medium leading-relaxed text-[#46506a]">
+                The inbox AI Reply button uses this OpenAI connection. Lead qualification and CTA guidance are included in generated replies.
+              </p>
             </div>
           </div>
-
-          <div className="rounded-[10px] bg-[#f6f7fb] p-4">
-            <h3 className="text-[13px] font-extrabold text-black">Live inbox behavior</h3>
-            <p className="mt-2 text-[12px] font-medium leading-relaxed text-[#46506a]">
-              The inbox AI Reply button uses this OpenAI connection. Lead qualification and CTA guidance are included in generated replies.
-            </p>
-          </div>
-        </div>
+        )}
       </section>
     </div>
   );
@@ -3259,7 +3277,38 @@ const outcomeProviderLabels: Record<string, string> = {
   collect_testimonial: "Collect testimonial",
 };
 
-const hiddenOutcomeProviderTypes = new Set(["follow_creator", "join_newsletter", "start_trial", "upgrade_plan", "renew_subscription"]);
+function isOutcomeProviderConfigured(provider: RevenueOutcomeProviderConfig) {
+  return Boolean(
+    provider.enabled &&
+      (
+        provider.actionUrl ||
+        provider.webhookUrl ||
+        provider.apiEndpoint ||
+        provider.outcomeType === "purchase_product" ||
+        provider.outcomeType === "follow_creator"
+      )
+  );
+}
+
+function getOutcomeProviderRouteLabel(provider: RevenueOutcomeProviderConfig) {
+  if (provider.outcomeType === "purchase_product") {
+    return "Stripe commerce";
+  }
+
+  if (provider.outcomeType === "follow_creator") {
+    return "Instagram native";
+  }
+
+  if (provider.executionMode === "webhook") {
+    return "Webhook";
+  }
+
+  if (provider.executionMode === "api") {
+    return "API";
+  }
+
+  return "Link";
+}
 
 function SettingsRevenueOutcomeProvidersSection({
   outcomeProviders,
@@ -3271,8 +3320,8 @@ function SettingsRevenueOutcomeProvidersSection({
   const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [providerSecrets, setProviderSecrets] = useState<Record<string, string>>({});
-  const visibleProviders = outcomeProviders.providers.filter((provider) => !hiddenOutcomeProviderTypes.has(provider.outcomeType));
-  const connectedCount = visibleProviders.filter((provider) => provider.enabled && (provider.actionUrl || provider.outcomeType === "purchase_product")).length;
+  const visibleProviders = outcomeProviders.providers;
+  const connectedCount = visibleProviders.filter(isOutcomeProviderConfigured).length;
 
   function updateProvider(outcomeType: RevenueOutcomeProviderConfig["outcomeType"], partial: Partial<RevenueOutcomeProviderConfig>) {
     onChange({
@@ -3333,7 +3382,7 @@ function SettingsRevenueOutcomeProvidersSection({
         <div className="min-w-0">
           <h3 className="text-[15px] font-extrabold text-black">Revenue outcome providers</h3>
           <p className="mt-1 max-w-[760px] text-[12px] font-medium leading-relaxed text-[#46506a]">
-            Connect the links ROS should use when it chooses booking, product purchase, cart recovery, or testimonial outcomes.
+            Connect the links or endpoints ROS should use when it chooses follow, newsletter, booking, trial, purchase, upgrade, cart recovery, renewal, or testimonial outcomes.
           </p>
         </div>
         <span className="rounded-[8px] bg-[#f0edff] px-3 py-1.5 text-[11px] font-extrabold text-[#3044ff]">
@@ -3344,7 +3393,15 @@ function SettingsRevenueOutcomeProvidersSection({
       <div className="mt-5 grid gap-3">
         {visibleProviders.map((provider) => {
           const isPurchase = provider.outcomeType === "purchase_product";
-          const ready = provider.enabled && (provider.actionUrl || isPurchase);
+          const isNative = isPurchase || provider.outcomeType === "follow_creator";
+          const ready = isOutcomeProviderConfigured(provider);
+          const routeLabel = getOutcomeProviderRouteLabel(provider);
+          const routePlaceholder =
+            provider.executionMode === "webhook"
+              ? "https://your-webhook.example.com/tractionflo"
+              : provider.executionMode === "api"
+                ? "https://api.example.com/revenue-outcomes"
+                : "https://...";
 
           return (
             <div key={provider.outcomeType} className="rounded-[10px] border border-[#edf0f6] p-4">
@@ -3355,7 +3412,7 @@ function SettingsRevenueOutcomeProvidersSection({
                 </div>
                 <div className="flex items-center gap-3">
                   <span className={`rounded-[8px] px-2.5 py-1 text-[10px] font-extrabold ${ready ? "bg-[#e7f8ed] text-[#0a9b3f]" : "bg-[#fff3e6] text-[#c77800]"}`}>
-                    {ready ? "Ready" : "Needs link"}
+                    {ready ? `${routeLabel} ready` : "Needs route"}
                   </span>
                   <SettingsToggle
                     ariaLabel={`Toggle ${outcomeProviderLabels[provider.outcomeType] || provider.outcomeType}`}
@@ -3365,24 +3422,68 @@ function SettingsRevenueOutcomeProvidersSection({
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
+              <div className="mt-4 grid gap-3 lg:grid-cols-[180px_170px_minmax(0,1fr)]">
                 <label className="block">
                   <span className="text-[11px] font-extrabold text-[#46506a]">Provider</span>
                   <input
                     value={provider.provider}
                     onChange={(event) => updateProvider(provider.outcomeType, { provider: event.target.value })}
-                    disabled={isPurchase}
+                    disabled={isNative}
                     className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
                   />
                 </label>
                 <label className="block">
-                  <span className="text-[11px] font-extrabold text-[#46506a]">Action link</span>
+                  <span className="text-[11px] font-extrabold text-[#46506a]">Route type</span>
+                  <select
+                    value={provider.executionMode}
+                    onChange={(event) =>
+                      updateProvider(provider.outcomeType, {
+                        executionMode: event.target.value as RevenueOutcomeProviderConfig["executionMode"],
+                      })
+                    }
+                    disabled={isNative}
+                    className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
+                  >
+                    <option value="link">Link</option>
+                    <option value="webhook">Webhook</option>
+                    <option value="api">API</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[11px] font-extrabold text-[#46506a]">
+                    {provider.executionMode === "webhook" ? "Webhook URL" : provider.executionMode === "api" ? "API endpoint" : "Action link"}
+                  </span>
                   <div className="mt-2 flex gap-2">
                     <input
-                      value={provider.actionUrl}
-                      onChange={(event) => updateProvider(provider.outcomeType, { actionUrl: event.target.value, enabled: Boolean(event.target.value.trim()) || isPurchase })}
-                      placeholder={isPurchase ? "Existing Stripe checkout is used for product purchases" : "https://..."}
-                      disabled={isPurchase}
+                      value={
+                        provider.executionMode === "webhook"
+                          ? provider.webhookUrl
+                          : provider.executionMode === "api"
+                            ? provider.apiEndpoint
+                            : provider.actionUrl
+                      }
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        const routePatch =
+                          provider.executionMode === "webhook"
+                            ? { webhookUrl: nextValue }
+                            : provider.executionMode === "api"
+                              ? { apiEndpoint: nextValue }
+                              : { actionUrl: nextValue };
+
+                        updateProvider(provider.outcomeType, {
+                          ...routePatch,
+                          enabled: Boolean(nextValue.trim()) || isNative,
+                        });
+                      }}
+                      placeholder={
+                        isPurchase
+                          ? "Existing Stripe checkout is used for product purchases"
+                          : provider.outcomeType === "follow_creator"
+                            ? "Instagram follow is native"
+                            : routePlaceholder
+                      }
+                      disabled={isNative}
                       className="h-10 min-w-0 flex-1 rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10 disabled:bg-[#f6f7fb] disabled:text-[#8a91a3]"
                     />
                     <button
@@ -3407,6 +3508,39 @@ function SettingsRevenueOutcomeProvidersSection({
                 />
               </label>
 
+              {(provider.executionMode === "webhook" || provider.executionMode === "api") && !isNative ? (
+                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
+                  <label className="block">
+                    <span className="text-[11px] font-extrabold text-[#46506a]">
+                      Secret token {provider.secretSaved ? "(saved)" : "(optional)"}
+                    </span>
+                    <input
+                      type="password"
+                      value={providerSecrets[provider.outcomeType] || ""}
+                      onChange={(event) =>
+                        setProviderSecrets((current) => ({
+                          ...current,
+                          [provider.outcomeType]: event.target.value,
+                        }))
+                      }
+                      placeholder={provider.secretSaved ? "Leave blank to keep saved token" : "Bearer token for endpoint"}
+                      className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+                    />
+                  </label>
+                  <div className="flex items-end justify-between gap-3 rounded-[8px] border border-[#edf0f6] bg-[#fbfcff] px-3 py-2">
+                    <div>
+                      <p className="text-[11px] font-extrabold text-[#46506a]">Auto execute</p>
+                      <p className="mt-1 text-[10px] font-semibold text-[#8a91a3]">Run when ROS picks this route.</p>
+                    </div>
+                    <SettingsToggle
+                      ariaLabel={`Auto execute ${outcomeProviderLabels[provider.outcomeType] || provider.outcomeType}`}
+                      checked={provider.autoExecute}
+                      onChange={(autoExecute) => updateProvider(provider.outcomeType, { autoExecute })}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
               {(provider.lastStatus || provider.lastSyncAt) && (
                 <p className="mt-3 text-[10px] font-semibold text-[#8a91a3]">
                   Last sync: {provider.lastStatus || "unknown"} {provider.lastSyncAt ? `at ${new Date(provider.lastSyncAt).toLocaleString()}` : ""}
@@ -3419,7 +3553,7 @@ function SettingsRevenueOutcomeProvidersSection({
 
       <div className="mt-5 flex flex-col gap-3 border-t border-[#edf0f6] pt-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-[11px] font-semibold text-[#46506a]">
-          These links are included in ROS decisions, outcome metadata, and AI prompts.
+          These routes are included in ROS decisions, outcome metadata, provider execution, and AI prompts.
         </p>
         <button
           type="button"

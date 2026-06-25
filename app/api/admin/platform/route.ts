@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { User } from "@supabase/supabase-js";
 import { isEmailConfigured } from "@/lib/mailer";
+import { resolvePlatformAiConfig } from "@/lib/platform-ai-config";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 
@@ -171,11 +172,15 @@ export async function GET() {
       return NextResponse.json({ error: "Only superadmins can view platform health." }, { status: 403 });
     }
 
-    const [instagramAccounts, messages] = await Promise.all([getTableCount("instagram_accounts"), getMessageStats()]);
+    const [instagramAccounts, messages, platformConfig] = await Promise.all([
+      getTableCount("instagram_accounts"),
+      getMessageStats(),
+      resolvePlatformAiConfig(),
+    ]);
     const databaseHealthy = !instagramAccounts.error;
     const metaConfigured = Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET && process.env.META_VERIFY_TOKEN);
     const webhookConfigured = Boolean(process.env.META_VERIFY_TOKEN);
-    const openAiConfigured = Boolean(process.env.OPENAI_API_KEY);
+    const openAiConfigured = Boolean(platformConfig.apiKey);
     const emailConfigured = isEmailConfigured();
     const paymentConfigured = Boolean(process.env.STRIPE_SECRET_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
     const serviceRows: ServiceRow[] = [
@@ -195,7 +200,11 @@ export async function GET() {
         status: openAiConfigured ? "Configured" : "Not configured",
         tone: openAiConfigured ? "green" : "amber",
         latency: "On demand",
-        config: openAiConfigured ? "Configured" : "Missing key",
+        config: openAiConfigured
+          ? platformConfig.source === "superadmin"
+            ? "Superadmin key"
+            : "Environment key"
+          : "Missing key",
         incidents: "0",
         owner: "AI",
       },

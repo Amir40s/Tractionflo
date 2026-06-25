@@ -13,8 +13,8 @@ import {
 } from "@/lib/knowledge-base";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
-import { getStoredOpenAiKey } from "@/lib/ai-integration";
 import { removeFileFromVectorStore, uploadFileToVectorStore } from "@/lib/openai-assistants";
+import { resolvePlatformAiConfig } from "@/lib/platform-ai-config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -383,7 +383,7 @@ export async function PATCH(request: Request, context: { params: { sourceId: str
 
       if (nextSource.openAiFileId) {
         const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-        const apiKey = getStoredOpenAiKey(metadata);
+        const { apiKey } = await resolvePlatformAiConfig(supabase);
         const vectorStoreId = metadata.openai_vector_store_id as string | undefined;
         if (apiKey && vectorStoreId) {
           try {
@@ -454,7 +454,7 @@ export async function DELETE(_request: Request, context: { params: { sourceId: s
 
     if (source.openAiFileId) {
       const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-      const apiKey = getStoredOpenAiKey(metadata);
+      const { apiKey } = await resolvePlatformAiConfig(supabase);
       const vectorStoreId = metadata.openai_vector_store_id as string | undefined;
       if (apiKey && vectorStoreId) {
         await removeFileFromVectorStore({ apiKey, vectorStoreId, fileId: source.openAiFileId });

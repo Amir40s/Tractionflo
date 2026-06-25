@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import { normalizeAiIntegrationMetadata } from "@/lib/ai-integration";
 import { getUserPermissionProfile } from "@/lib/agent-permissions";
+import { resolvePlatformAiConfig } from "@/lib/platform-ai-config";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 
@@ -444,7 +444,7 @@ function normalizeIssueRow(row: AnyRow, index: number): SupportIssueAdminRow {
   };
 }
 
-function getCreatorIssues(users: User[]) {
+function getCreatorIssues(users: User[], platformKeyConfigured: boolean) {
   const issues: SupportIssueAdminRow[] = [];
 
   users.forEach((user) => {
@@ -452,7 +452,6 @@ function getCreatorIssues(users: User[]) {
     const name = getUserName(user);
     const detail = user.email || "Creator account";
     const updatedAt = getTimestamp(user.updated_at || user.last_sign_in_at || user.created_at);
-    const aiIntegration = normalizeAiIntegrationMetadata(metadata);
     const status = getMetadataString(metadata, "status").toLowerCase();
     const riskSignal = getMetadataString(metadata, "risk_signal") || getMetadataString(metadata, "churn_signal");
     const paymentFailed = getMetadataBoolean(metadata, "payment_failed") || getMetadataString(metadata, "payment_status").toLowerCase().includes("failed");
@@ -488,21 +487,6 @@ function getCreatorIssues(users: User[]) {
       });
     }
 
-    if (!aiIntegration.apiKeySaved) {
-      issues.push({
-        id: `${user.id}-ai`,
-        name: `${name} has no OpenAI key saved`,
-        detail,
-        category: "AI",
-        impact: "Medium",
-        age: formatAge(updatedAt),
-        owner: "AI",
-        nextStep: "Save OpenAI key",
-        status: "Setup",
-        tone: "amber",
-      });
-    }
-
     if (status.includes("inactive") || status.includes("suspend") || issueCount > 0) {
       issues.push({
         id: `${user.id}-account`,
@@ -519,16 +503,16 @@ function getCreatorIssues(users: User[]) {
     }
   });
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (!platformKeyConfigured) {
     issues.push({
-      id: "env-openai",
+      id: "platform-openai",
       name: "OpenAI platform key missing",
-      detail: "OPENAI_API_KEY is not configured",
+      detail: "No superadmin OpenAI key is configured",
       category: "AI",
       impact: "High",
       age: "Current",
       owner: "AI",
-      nextStep: "Add env key",
+      nextStep: "Add key in AI Integration",
       status: "Open",
       tone: "red",
     });
@@ -588,18 +572,19 @@ export async function GET() {
     }
 
     const supabase = createSupabaseServiceClient();
-    const [users, ticketResult, issueResult, messageResult] = await Promise.all([
+    const [users, ticketResult, issueResult, messageResult, platformConfig] = await Promise.all([
       listAllUsers(supabase),
       getOptionalRows(supabase, ["support_tickets", "tickets"]),
       getOptionalRows(supabase, ["creator_issues", "support_issues", "issues"]),
       getStoredMessages(supabase),
+      resolvePlatformAiConfig(supabase),
     ]);
     const creators = users.filter(isCreatorUser);
     const supportMessages = messageResult.rows.filter((message) => includesAnyKeyword(message.text || "", supportKeywords));
     const tickets = ticketResult.rows.length > 0
       ? ticketResult.rows.map(normalizeTicketRow)
       : supportMessages.slice(0, 25).map(createTicketFromMessage);
-    const metadataIssues = getCreatorIssues(creators);
+    const metadataIssues = getCreatorIssues(creators, Boolean(platformConfig.apiKey));
     const issues = issueResult.rows.length > 0
       ? issueResult.rows.map(normalizeIssueRow)
       : metadataIssues;

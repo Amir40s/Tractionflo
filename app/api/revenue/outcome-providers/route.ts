@@ -15,6 +15,19 @@ import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+function isProviderConfigured(provider: { enabled: boolean; actionUrl: string; webhookUrl: string; apiEndpoint: string; outcomeType: string }) {
+  return Boolean(
+    provider.enabled &&
+      (
+        provider.actionUrl ||
+        provider.webhookUrl ||
+        provider.apiEndpoint ||
+        provider.outcomeType === "purchase_product" ||
+        provider.outcomeType === "follow_creator"
+      )
+  );
+}
+
 async function getAuthenticatedUser() {
   const supabase = await createClient();
   const {
@@ -95,7 +108,7 @@ export async function POST(request: Request) {
       body: "Newsletter, booking, trial, renewal, upgrade, cart, or testimonial outcome routes were updated.",
       url: "/settings",
       metadata: {
-        connectedProviders: outcomeProviders.providers.filter((provider) => provider.enabled && provider.actionUrl).length,
+        connectedProviders: outcomeProviders.providers.filter(isProviderConfigured).length,
       },
     }).catch((notificationError) => {
       console.error("Realtime outcome provider notification error:", notificationError);

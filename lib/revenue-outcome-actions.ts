@@ -113,7 +113,16 @@ export function buildRevenueOutcomeAction(
   const action = outcomeActionMap[outcomeType];
   const provider = getConfiguredProvider(providers, outcomeType);
   const actionUrl = provider?.enabled ? provider.actionUrl : "";
-  const providerConfigured = Boolean(provider?.enabled && (provider.actionUrl || provider.webhookUrl || provider.apiEndpoint || outcomeType === "purchase_product"));
+  const providerConfigured = Boolean(
+    provider?.enabled &&
+      (
+        provider.actionUrl ||
+        provider.webhookUrl ||
+        provider.apiEndpoint ||
+        outcomeType === "purchase_product" ||
+        outcomeType === "follow_creator"
+      )
+  );
   const integrationStatus =
     action.integrationStatus === "connected" || providerConfigured
       ? "connected"

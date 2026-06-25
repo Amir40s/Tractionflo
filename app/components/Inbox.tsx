@@ -1042,7 +1042,7 @@ function getLeadScoreTone(score: number) {
 
 function getLeadSummary(lead: AiLeadInsight | undefined) {
   if (!lead) {
-    return "Add an OpenAI key to qualify this lead.";
+    return "Ask a superadmin to connect the platform OpenAI key to qualify this lead.";
   }
 
   return lead.summary || lead.recommendedAction;
@@ -2340,6 +2340,24 @@ function SummaryPanel({
     : aiWorkflow?.reply ||
       (aiLoading ? "Reading saved knowledge and conversation context..." : getSuggestedReply(conv));
   const leadInsight = aiWorkflow?.lead;
+  const conversationIntelligence = aiWorkflow?.ros?.conversationIntelligence;
+  const conversationIntelligenceItems = conversationIntelligence
+    ? [
+        { label: "Intent", value: conversationIntelligence.intent },
+        { label: "Sentiment", value: conversationIntelligence.sentiment },
+        { label: "Emotion", value: conversationIntelligence.emotion },
+        { label: "Objection", value: conversationIntelligence.objection },
+        { label: "Buying signal", value: conversationIntelligence.buyingSignal },
+        { label: "Urgency signal", value: conversationIntelligence.urgencySignal },
+        { label: "Stage", value: conversationIntelligence.stage },
+      ]
+    : [];
+  const conversationQuestions = (conversationIntelligence?.questions || [])
+    .filter((question) => question.trim().length > 0)
+    .slice(0, 3);
+  const conversationSignals = (conversationIntelligence?.signals || [])
+    .filter((signal) => signal.trim().length > 0)
+    .slice(0, 4);
   const catalogOffer = aiWorkflow?.catalogOffer;
   const aiRefreshKey = conv ? `${conv.id}-${conv.updated_time}-${conv.messages.length}` : "empty";
   const lastMessage = msgs[msgs.length - 1];
@@ -2905,10 +2923,47 @@ function SummaryPanel({
                           ))}
                         </div>
                       )}
+                      {conversationIntelligence ? (
+                        <div className="mt-3 rounded-[9px] border border-[#e2e7f2] bg-white p-2.5">
+                          <p className="text-[10px] font-extrabold uppercase text-[#596175]">Conversation intelligence</p>
+                          <div className="mt-2 grid gap-1.5">
+                            {conversationIntelligenceItems.map((item) => (
+                              <div key={item.label} className="grid grid-cols-[88px_minmax(0,1fr)] gap-2 text-[10px] leading-snug">
+                                <span className="font-extrabold text-[#596175]">{item.label}</span>
+                                <span className="break-words font-bold text-[#253049]">{item.value || "None"}</span>
+                              </div>
+                            ))}
+                          </div>
+                          {conversationQuestions.length > 0 && (
+                            <div className="mt-2">
+                              <p className="text-[10px] font-extrabold text-[#596175]">Questions</p>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {conversationQuestions.map((question) => (
+                                  <span key={question} className="rounded-[7px] bg-[#f6f7fb] px-2 py-1 text-[10px] font-bold text-[#253049]">
+                                    {question}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {conversationSignals.length > 0 && (
+                            <div className="mt-2">
+                              <p className="text-[10px] font-extrabold text-[#596175]">Signals</p>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {conversationSignals.map((signal) => (
+                                  <span key={signal} className="rounded-[7px] bg-[#eef4ff] px-2 py-1 text-[10px] font-bold text-[#3044ff]">
+                                    {signal}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <p className="mt-2 rounded-[8px] bg-white p-2 text-[11px] font-medium leading-relaxed text-[#596175]">
-                      {aiLoading ? "Reading this conversation..." : aiStatus || "Save an OpenAI key to activate AI qualification."}
+                      {aiLoading ? "Reading this conversation..." : aiStatus || "Ask a superadmin to connect the platform OpenAI key to activate AI qualification."}
                     </p>
                   )}
 

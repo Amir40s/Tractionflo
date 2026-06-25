@@ -327,7 +327,12 @@ export function saveCreatorSettingsAccess(access: CreatorSettingsAccessState) {
 
 export function getVisibleSettingsMenuItems(profile: { isAgent: boolean }, creatorSettingsAccess = readCreatorSettingsAccess()) {
   const controlledSections = new Set<SettingsSection>(creatorSettingsAccessIds);
-  const visibleByAccess = settingsMenuItems.filter((item) => !controlledSections.has(item.id) || creatorSettingsAccess[item.id as CreatorSettingsAccessId]);
+  const platformManagedSections = new Set<SettingsSection>(["ai-integration"]);
+  const visibleByAccess = settingsMenuItems.filter(
+    (item) =>
+      !platformManagedSections.has(item.id) &&
+      (!controlledSections.has(item.id) || creatorSettingsAccess[item.id as CreatorSettingsAccessId])
+  );
 
   if (!profile.isAgent) {
     return visibleByAccess;

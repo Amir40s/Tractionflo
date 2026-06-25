@@ -1,5 +1,8 @@
 import type { ConversationEscalation } from "@/lib/conversation-escalation";
-import type { RevenueOperatingSnapshot } from "@/lib/revenue-intelligence";
+import {
+  withRevenueTacticIntelligence,
+  type RevenueOperatingSnapshot,
+} from "@/lib/revenue-intelligence";
 
 export type RevenueStrategyFramework =
   | "SPIN"
@@ -211,7 +214,7 @@ export function applyRevenueStrategy(
   const strategy = chooseStrategy(snapshot, input);
   const confidence = Math.max(0, Math.min(100, snapshot.decision.confidence + strategy.confidenceDelta));
 
-  return {
+  return withRevenueTacticIntelligence({
     ...snapshot,
     revenueIntelligence: {
       ...snapshot.revenueIntelligence,
@@ -228,5 +231,5 @@ export function applyRevenueStrategy(
       confidence,
       rationale: strategy.rationale || snapshot.decision.rationale,
     },
-  };
+  });
 }

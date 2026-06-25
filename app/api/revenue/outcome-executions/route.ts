@@ -48,6 +48,13 @@ function buildManualExecutionSnapshot(outcomeType: string, metadata: Record<stri
       salesStage: "manual execution",
       recommendation: getString(metadata.bestNextAction),
     },
+    tacticIntelligence: {
+      tactics: ["present_offer"],
+      sequence: ["present_offer"],
+      primaryTactic: "present_offer",
+      usedBeforePricing: [],
+      pricingPresented: false,
+    },
     outcomeProbabilities: {
       [outcomeType]: Number(metadata.probability) || 0,
     },

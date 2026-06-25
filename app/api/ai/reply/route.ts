@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
-import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
+import { getAiBehaviorPrompt } from '@/lib/ai-integration';
 import {
   detectConversationEscalation,
   escalationRulesMetadataKey,
@@ -16,7 +16,14 @@ import {
 } from '@/lib/instagram-product-catalog';
 import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
 import { runAssistantThread } from '@/lib/openai-assistants';
+import { resolvePlatformAiConfig } from '@/lib/platform-ai-config';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
+import {
+  formatBuyerIntelligenceForPrompt,
+  formatRevenueMemoryForPrompt,
+  loadRosProspectBuyerProfile,
+  loadRosProspectRevenueMemory,
+} from '@/lib/revenue-intelligence';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 
@@ -118,7 +125,9 @@ export async function POST(request: Request) {
     }
 
     const metadata = user.user_metadata || {};
-    const integration = normalizeAiIntegrationMetadata(metadata);
+    const serviceSupabase = createSupabaseServiceClient();
+    const platformConfig = await resolvePlatformAiConfig(serviceSupabase);
+    const integration = platformConfig.integration;
     const canAnswer = integration.workflows.find((workflow) => workflow.id === 'answerQuestions')?.enabled;
 
     if (!canAnswer) {
@@ -176,11 +185,9 @@ export async function POST(request: Request) {
     const latestUserQuestion = getLatestUserQuestion(payload.messages);
     const bookingMemoryPrompt = buildBookingMemoryPrompt(payload.messages);
     const bookingFollowUpReply = buildBookingFollowUpReply(payload.messages);
-    const serviceSupabase = createSupabaseServiceClient();
-
     const assistantIdFromMetadata = metadata.openai_assistant_id as string | undefined;
     if (!assistantIdFromMetadata) {
-      return NextResponse.json({ error: 'Assistant ID not found in settings. Please save your API key in Settings.' }, { status: 400 });
+      return NextResponse.json({ error: 'Knowledge assistant is not ready. Ask a superadmin to connect the platform OpenAI key, then re-save a knowledge source.' }, { status: 400 });
     }
 
     const knowledge = { mode: 'none' as const, matches: [], totalSources: 0, sourceTitle: undefined };
@@ -210,11 +217,11 @@ export async function POST(request: Request) {
       });
     }
 
-    const apiKey = getStoredOpenAiKey(metadata);
+    const apiKey = platformConfig.apiKey;
 
     if (!apiKey) {
       logger.warn("OpenAI API key is missing. Bailing out of reply request.");
-      return NextResponse.json({ error: 'Save your OpenAI API key first.' }, { status: 400 });
+      return NextResponse.json({ error: 'Ask a superadmin to add the platform OpenAI key first.' }, { status: 400 });
     }
 
     const participantName =
@@ -232,6 +239,24 @@ export async function POST(request: Request) {
     const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogSearchText);
     const catalogOffers = findCatalogOffers(catalogSearchText, productCatalog);
     const catalogOffer = shouldUseSingleCatalogOffer(catalogSearchText, catalogOffers) ? catalogOffers[0] : null;
+    const previousBuyerProfile = await loadRosProspectBuyerProfile({
+      supabase: serviceSupabase,
+      userId: user.id,
+      participant: payload.participant,
+    }).catch((buyerMemoryError) => {
+      logger.warn('Could not load saved buyer memory for AI reply prompt:', { error: buyerMemoryError, participantId: payload.participant?.id || '' });
+      return null;
+    });
+    const buyerMemoryPrompt = formatBuyerIntelligenceForPrompt(previousBuyerProfile);
+    const previousRevenueMemory = await loadRosProspectRevenueMemory({
+      supabase: serviceSupabase,
+      userId: user.id,
+      participant: payload.participant,
+    }).catch((revenueMemoryError) => {
+      logger.warn('Could not load saved revenue memory for AI reply prompt:', { error: revenueMemoryError, participantId: payload.participant?.id || '' });
+      return null;
+    });
+    const revenueMemoryPrompt = formatRevenueMemoryForPrompt(previousRevenueMemory);
     const reply = await runAssistantThread({
       apiKey,
       assistantId: assistantIdFromMetadata,
@@ -247,6 +272,22 @@ Preferred CTA: ${integration.ctaMessage}
 
 Auto-detected Instagram product catalog:
 ${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
+
+Saved buyer memory for this Instagram participant:
+${buyerMemoryPrompt}
+
+Buyer memory rules:
+- Use saved buyer memory as known context for this same participant.
+- Do not ask again for known goal, problem, budget, authority, need, or timeline unless the latest message clearly changes them.
+- Personalize the reply to the saved buyer profile when it helps the sale.
+
+Saved revenue memory for this Instagram participant:
+${revenueMemoryPrompt}
+
+Revenue memory rules:
+- Use saved revenue memory as the cumulative customer relationship.
+- Remember previous objections, questions asked, offers presented, purchases, and follow-up history.
+- Do not restart discovery or repeat an already-presented offer unless the latest message makes that useful.
 
 Return only the Instagram DM reply text. Keep it natural, brief, and useful. Do not mention being an AI unless asked. If saved knowledge is provided, do not give a vague answer when an exact saved answer is available.
 Never ask again for booking details that the customer already gave earlier in the conversation.`,

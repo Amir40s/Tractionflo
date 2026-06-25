@@ -9,8 +9,6 @@ import {
   defaultAiLeadInsight,
   getEnabledWorkflowMap,
   getAiBehaviorPrompt,
-  getStoredOpenAiKey,
-  normalizeAiIntegrationMetadata,
   type AiLeadInsight,
   type AiWorkflowRunResult,
 } from '@/lib/ai-integration';
@@ -27,6 +25,12 @@ import { runAssistantThread } from '@/lib/openai-assistants';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import {
   buildFallbackRevenueOperatingSnapshot,
+  formatBuyerIntelligenceForPrompt,
+  formatRevenueMemoryForPrompt,
+  loadRosProspectBuyerProfile,
+  loadRosProspectRevenueMemory,
+  mergeBuyerIntelligenceProfiles,
+  mergeRevenueMemoryProfiles,
   normalizeRevenueOperatingSnapshot,
   persistRevenueOperatingSnapshot,
 } from '@/lib/revenue-intelligence';
@@ -38,6 +42,7 @@ import {
 import { loadRevenueOutcomeProviderSettings } from '@/lib/revenue-provider-execution';
 import { formatRevenueLearningForPrompt } from '@/lib/revenue-learning';
 import { applyRevenueStrategy } from '@/lib/revenue-strategy';
+import { resolvePlatformAiConfig } from '@/lib/platform-ai-config';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 
@@ -277,9 +282,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Assistant ID does not match the authenticated account.' }, { status: 403 });
     }
 
-    const metadata = user.user_metadata || {};
-    const integration = normalizeAiIntegrationMetadata(metadata);
     const serviceSupabase = createSupabaseServiceClient();
+    const metadata = user.user_metadata || {};
+    const platformConfig = await resolvePlatformAiConfig(serviceSupabase);
+    const integration = platformConfig.integration;
     const outcomeProviders = await loadRevenueOutcomeProviderSettings({
       supabase: serviceSupabase,
       userId: user.id,
@@ -301,6 +307,24 @@ export async function POST(request: Request) {
 
     const messages = payload.messages || [];
     const lastMessage = messages[messages.length - 1];
+    const previousBuyerProfile = await loadRosProspectBuyerProfile({
+      supabase: serviceSupabase,
+      userId: user.id,
+      participant: payload.participant,
+    }).catch((buyerMemoryError) => {
+      logger.warn('Could not load saved buyer memory for workflow prompt:', { error: buyerMemoryError, participantId });
+      return null;
+    });
+    const buyerMemoryPrompt = formatBuyerIntelligenceForPrompt(previousBuyerProfile);
+    const previousRevenueMemory = await loadRosProspectRevenueMemory({
+      supabase: serviceSupabase,
+      userId: user.id,
+      participant: payload.participant,
+    }).catch((revenueMemoryError) => {
+      logger.warn('Could not load saved revenue memory for workflow prompt:', { error: revenueMemoryError, participantId });
+      return null;
+    });
+    const revenueMemoryPrompt = formatRevenueMemoryForPrompt(previousRevenueMemory);
 
     if (lastMessage?.from === 'me') {
       logger.info("Skipping OpenAI Assistant run because the last message in the conversation is from the business.");
@@ -387,7 +411,7 @@ export async function POST(request: Request) {
         recommendedAction: escalation.recommendedAction,
         cta: 'Take over in inbox',
       };
-      const escalationRos = applyRevenueOutcomeAction(
+      let escalationRos = applyRevenueOutcomeAction(
         applyRevenueStrategy(
           buildFallbackRevenueOperatingSnapshot({
             lead: escalationLead,
@@ -401,6 +425,11 @@ export async function POST(request: Request) {
         ),
         outcomeProviders
       );
+      escalationRos = {
+        ...escalationRos,
+        buyerIntelligence: mergeBuyerIntelligenceProfiles(previousBuyerProfile, escalationRos.buyerIntelligence),
+        memory: mergeRevenueMemoryProfiles(previousRevenueMemory?.memory, escalationRos.memory),
+      };
 
       await persistRevenueOperatingSnapshot({
         supabase: serviceSupabase,
@@ -464,16 +493,16 @@ export async function POST(request: Request) {
 
     const assistantIdFromMetadata = metadata.openai_assistant_id as string | undefined;
     if (!assistantIdFromMetadata) {
-      return NextResponse.json({ error: 'Assistant ID not found in settings. Please save your API key in Settings.' }, { status: 400 });
+      return NextResponse.json({ error: 'Knowledge assistant is not ready. Ask a superadmin to connect the platform OpenAI key, then re-save a knowledge source.' }, { status: 400 });
     }
 
     const knowledge = { mode: 'none' as const, matches: [], totalSources: 0, sourceTitle: undefined };
 
-    const apiKey = getStoredOpenAiKey(metadata);
+    const apiKey = platformConfig.apiKey;
 
     if (!apiKey) {
       logger.warn("OpenAI API key is missing. Bailing out of workflow request.");
-      return NextResponse.json({ error: 'Save your OpenAI API key in Settings > AI Integration first.' }, { status: 400 });
+      return NextResponse.json({ error: 'Ask a superadmin to add the platform OpenAI key first.' }, { status: 400 });
     }
 
     const participantName =
@@ -528,9 +557,27 @@ ${formatRevenueOutcomeProvidersForPrompt(outcomeProviders) || 'No external outco
 Creator-specific revenue learning:
 ${revenueLearningPrompt || 'No creator-specific learning is available yet. Use the default ROS strategy and persist the decision for future learning.'}
 
+Saved buyer memory for this Instagram participant:
+${buyerMemoryPrompt}
+
+Buyer memory rules:
+- Treat saved buyer memory as known context for this same participant.
+- Preserve known goal, problem, budget, authority, need, and timeline unless the latest conversation clearly corrects them.
+- Return buyerIntelligence as the merged live buyer profile across all interactions, not only facts from the latest message.
+
+Saved revenue memory for this Instagram participant:
+${revenueMemoryPrompt}
+
+Revenue memory rules:
+- Treat saved revenue memory as the cumulative customer relationship.
+- Remember previous objections, questions asked, offers presented, purchases, and follow-up history.
+- Do not restart discovery or repeat an already-presented offer unless the latest message makes that useful.
+- Return memory as the merged relationship memory across all interactions.
+
 Return only valid JSON. No markdown. No commentary.
 Never ask again for booking details that the customer already gave earlier in the conversation.
 Always include a "ros" object. The ROS object is the Revenue Operating System decision layer and must choose the highest-probability next action that advances a business outcome.
+Track tacticIntelligence with stable snake_case tactic names, including the ordered tactic sequence and which tactics happened before pricing. Useful tactic names include ask_budget, ask_timeline, ask_authority, diagnose_need, show_case_study, use_social_proof, state_guarantee, handle_price_objection, present_pricing, present_offer, offer_checkout, offer_booking, smaller_next_step, human_handoff, and follow_up.
 JSON shape:
 {
   "starter": "first response to send when AI Starts Conversation is on and this is a new inbound lead; empty when not needed",
@@ -567,6 +614,13 @@ JSON shape:
       "objection": "current objection or empty string",
       "salesStage": "current revenue stage",
       "recommendation": "specific next action for the business"
+    },
+    "tacticIntelligence": {
+      "tactics": ["stable snake_case tactics used or recommended"],
+      "sequence": ["ordered stable snake_case tactic names"],
+      "primaryTactic": "single main tactic",
+      "usedBeforePricing": ["tactics used before present_pricing"],
+      "pricingPresented": true
     },
     "outcomeProbabilities": {
       "follow_creator": 0-100,
@@ -658,16 +712,23 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       };
     }
 
+    const normalizedRos = normalizeRevenueOperatingSnapshot(
+      workflowResult.ros,
+      buildFallbackRevenueOperatingSnapshot({
+        lead: workflowResult.lead,
+        cta: workflowResult.cta || workflowResult.lead.cta || integration.ctaMessage,
+        escalation: null,
+      })
+    );
+    const rosWithBuyerMemory = {
+      ...normalizedRos,
+      buyerIntelligence: mergeBuyerIntelligenceProfiles(previousBuyerProfile, normalizedRos.buyerIntelligence),
+      memory: mergeRevenueMemoryProfiles(previousRevenueMemory?.memory, normalizedRos.memory),
+    };
+
     workflowResult.ros = applyRevenueOutcomeAction(
       applyRevenueStrategy(
-        normalizeRevenueOperatingSnapshot(
-          workflowResult.ros,
-          buildFallbackRevenueOperatingSnapshot({
-            lead: workflowResult.lead,
-            cta: workflowResult.cta || workflowResult.lead.cta || integration.ctaMessage,
-            escalation: null,
-          })
-        ),
+        rosWithBuyerMemory,
         {
           latestText: latestUserQuestion,
           hasCatalogOffer: Boolean(catalogOffer),

@@ -45,21 +45,132 @@ function getDecisionFramework(decision: RosRow) {
   return asString(revenue.framework) || "Unknown";
 }
 
-function getDecisionOutcome(outcomes: RosRow[], decisionId: string) {
-  return outcomes.filter((outcome) => asString(outcome.decision_id) === decisionId);
+function asStringList(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => asString(item))
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function normalizeTacticName(value: unknown) {
+  return asString(value)
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function uniqueStrings(values: string[]) {
+  const seen = new Set<string>();
+
+  return values.filter((value) => {
+    const key = value.trim().toLowerCase();
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function getTacticsBeforePricing(sequence: string[]) {
+  const pricingIndex = sequence.indexOf("present_pricing");
+
+  if (pricingIndex <= 0) {
+    return [];
+  }
+
+  return sequence.slice(0, pricingIndex).filter((tactic) => tactic !== "present_pricing");
+}
+
+function getDecisionTacticIntelligence(decision: RosRow) {
+  const payload = asRecord(decision.payload);
+  const camelTactic = asRecord(payload.tacticIntelligence);
+  const snakeTactic = asRecord(payload.tactic_intelligence);
+  const tactic = Object.keys(camelTactic).length > 0 ? camelTactic : snakeTactic;
+  const sequence = uniqueStrings(asStringList(tactic.sequence).map(normalizeTacticName));
+  const tactics = uniqueStrings([
+    ...asStringList(tactic.tactics).map(normalizeTacticName),
+    ...sequence,
+  ]);
+  const usedBeforePricing = uniqueStrings([
+    ...asStringList(tactic.usedBeforePricing).map(normalizeTacticName),
+    ...asStringList(tactic.used_before_pricing).map(normalizeTacticName),
+    ...getTacticsBeforePricing(sequence),
+  ]);
+  const primaryTactic = normalizeTacticName(tactic.primaryTactic) || normalizeTacticName(tactic.primary_tactic) || tactics[0] || "";
+
+  return {
+    tactics,
+    sequence,
+    primaryTactic,
+    usedBeforePricing,
+    pricingPresented: Boolean(tactic.pricingPresented || tactic.pricing_presented || sequence.includes("present_pricing")),
+  };
+}
+
+function getRowsForDecision(rows: RosRow[], decisionId: string) {
+  return rows.filter((row) => asString(row.decision_id) === decisionId);
 }
 
 function isWonStatus(status: string) {
-  return status === "won" || status === "completed";
+  return status === "won" || status === "completed" || status === "paid" || status === "success" || status === "succeeded";
 }
 
 function isLostStatus(status: string) {
-  return status === "lost" || status === "cancelled" || status === "refunded";
+  return status === "lost" || status === "cancelled" || status === "refunded" || status === "failed" || status === "expired";
 }
 
 function getWinRate(wins: number, losses: number) {
   const total = wins + losses;
   return total > 0 ? Math.round((wins / total) * 100) : 0;
+}
+
+function getDecisionResult(outcomes: RosRow[], events: RosRow[], decisionId: string) {
+  const relatedRows = [...getRowsForDecision(outcomes, decisionId), ...getRowsForDecision(events, decisionId)];
+  const winningRows = relatedRows.filter((row) => isWonStatus(asString(row.status)));
+  const losingRows = relatedRows.filter((row) => isLostStatus(asString(row.status)));
+  const status = winningRows.length > 0 ? "won" : losingRows.length > 0 ? "lost" : "";
+  const valueRows = winningRows.length > 0 ? winningRows : relatedRows;
+
+  return {
+    status,
+    value: valueRows.reduce((total, row) => total + asNumber(row.value), 0),
+    outcomeType: asString(valueRows[0]?.outcome_type),
+  };
+}
+
+function formatTacticLabel(tactic: string) {
+  return tactic.replaceAll("_", " ");
+}
+
+type TacticStats = {
+  label: string;
+  decisions: number;
+  wins: number;
+  losses: number;
+  value: number;
+};
+
+function addTacticStats(
+  stats: Map<string, TacticStats>,
+  key: string,
+  label: string,
+  result: ReturnType<typeof getDecisionResult>
+) {
+  const current = stats.get(key) || { label, decisions: 0, wins: 0, losses: 0, value: 0 };
+  current.decisions += 1;
+  current.wins += result.status === "won" ? 1 : 0;
+  current.losses += result.status === "lost" ? 1 : 0;
+  current.value += result.value;
+  stats.set(key, current);
 }
 
 async function selectRows(query: PromiseLike<{ data: unknown; error: unknown }>) {
@@ -117,19 +228,25 @@ export async function refreshRevenueLearningModel({
   const frameworkStats = new Map<string, { decisions: number; wins: number; losses: number; confidenceTotal: number }>();
   const outcomeStats = new Map<string, { outcomes: number; wins: number; losses: number; value: number }>();
   const objectionStats = new Map<string, { count: number; wins: number }>();
+  const tacticStats = new Map<string, TacticStats>();
+  let baselineWins = 0;
+  let baselineLosses = 0;
 
   for (const decision of decisions) {
     const framework = getDecisionFramework(decision);
     const decisionId = asString(decision.id);
-    const relatedOutcomes = decisionId ? getDecisionOutcome(outcomes, decisionId) : [];
-    const wins = relatedOutcomes.filter((outcome) => isWonStatus(asString(outcome.status))).length;
-    const losses = relatedOutcomes.filter((outcome) => isLostStatus(asString(outcome.status))).length;
+    const result = decisionId ? getDecisionResult(outcomes, events, decisionId) : { status: "", value: 0, outcomeType: "" };
+    const wins = result.status === "won" ? 1 : 0;
+    const losses = result.status === "lost" ? 1 : 0;
     const current = frameworkStats.get(framework) || { decisions: 0, wins: 0, losses: 0, confidenceTotal: 0 };
     current.decisions += 1;
     current.wins += wins;
     current.losses += losses;
     current.confidenceTotal += asNumber(decision.confidence);
     frameworkStats.set(framework, current);
+
+    baselineWins += wins;
+    baselineLosses += losses;
 
     const payload = asRecord(decision.payload);
     const conversation = asRecord(payload.conversationIntelligence);
@@ -141,6 +258,35 @@ export async function refreshRevenueLearningModel({
       objectionCurrent.count += 1;
       objectionCurrent.wins += wins;
       objectionStats.set(objection, objectionCurrent);
+    }
+
+    const tacticIntelligence = getDecisionTacticIntelligence(decision);
+
+    for (const tactic of tacticIntelligence.tactics) {
+      addTacticStats(tacticStats, `tactic:${tactic}`, formatTacticLabel(tactic), result);
+    }
+
+    for (const tactic of tacticIntelligence.usedBeforePricing) {
+      addTacticStats(
+        tacticStats,
+        `tactic_before_pricing:${tactic}`,
+        `${formatTacticLabel(tactic)} before pricing`,
+        result
+      );
+    }
+
+    for (let index = 1; index < tacticIntelligence.sequence.length; index += 1) {
+      const previous = tacticIntelligence.sequence[index - 1];
+      const currentTactic = tacticIntelligence.sequence[index];
+
+      if (previous && currentTactic) {
+        addTacticStats(
+          tacticStats,
+          `tactic_sequence:${previous}->${currentTactic}`,
+          `${formatTacticLabel(previous)} then ${formatTacticLabel(currentTactic)}`,
+          result
+        );
+      }
     }
   }
 
@@ -209,6 +355,50 @@ export async function refreshRevenueLearningModel({
       confidence: Math.max(30, Math.min(90, stats.count * 12 + stats.wins * 8)),
       evidence: stats,
     });
+  }
+
+  const baselineTotal = baselineWins + baselineLosses;
+  const baselineWinRate = getWinRate(baselineWins, baselineLosses);
+
+  if (baselineTotal >= 2) {
+    for (const [strategyKey, stats] of tacticStats.entries()) {
+      const total = stats.wins + stats.losses;
+
+      if (total < 2) {
+        continue;
+      }
+
+      const winRate = getWinRate(stats.wins, stats.losses);
+      const lift = winRate - baselineWinRate;
+      const absoluteLift = Math.abs(lift);
+      const sequencePrefix = strategyKey.startsWith("tactic_sequence:")
+        ? "Sequence"
+        : strategyKey.startsWith("tactic_before_pricing:")
+          ? "Use"
+          : "Use";
+      const recommendation = lift > 0
+        ? `${sequencePrefix} ${stats.label} when relevant; it is converting ${lift} percentage points above this creator's baseline (${winRate}% vs ${baselineWinRate}%).`
+        : lift < 0
+          ? `Use ${stats.label} carefully; it is converting ${absoluteLift} percentage points below this creator's baseline (${winRate}% vs ${baselineWinRate}%).`
+          : `Use ${stats.label} when relevant; it is matching this creator's baseline conversion rate (${winRate}%).`;
+
+      adaptations.push({
+        strategyKey,
+        outcomeType: "",
+        framework: "Revenue Learning Engine",
+        recommendation,
+        confidence: Math.max(25, Math.min(95, 45 + Math.min(20, total * 5) + Math.min(25, absoluteLift))),
+        evidence: {
+          ...stats,
+          total,
+          winRate,
+          baselineWinRate,
+          lift,
+          baselineWins,
+          baselineLosses,
+        },
+      });
+    }
   }
 
   if (events.length >= 10) {

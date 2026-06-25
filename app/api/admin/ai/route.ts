@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import { getEnabledWorkflowMap, normalizeAiIntegrationMetadata } from "@/lib/ai-integration";
+import { getEnabledWorkflowMap } from "@/lib/ai-integration";
 import { getUserPermissionProfile } from "@/lib/agent-permissions";
+import { resolvePlatformAiConfig } from "@/lib/platform-ai-config";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 
@@ -180,21 +181,21 @@ export async function GET() {
     }
 
     const supabase = createSupabaseServiceClient();
-    const [users, storedMessageResult] = await Promise.all([listAllUsers(supabase), getStoredMessages(supabase)]);
+    const [users, storedMessageResult, platformConfig] = await Promise.all([
+      listAllUsers(supabase),
+      getStoredMessages(supabase),
+      resolvePlatformAiConfig(supabase),
+    ]);
     const creators = users.filter(isCreatorUser);
-    const integrations = creators.map((creator) => normalizeAiIntegrationMetadata(getMetadata(creator)));
-    const configuredCreators = integrations.filter((integration) => integration.apiKeySaved).length;
-    const autoSendCreators = integrations.filter((integration) => integration.autoSend).length;
-    const workflowCounts = integrations.reduce(
-      (counts, integration) => {
-        const enabledMap = getEnabledWorkflowMap(integration.workflows);
-        Object.entries(enabledMap).forEach(([key, enabled]) => {
-          if (enabled) {
-            counts[key as keyof typeof counts] += 1;
-          }
-        });
-        return counts;
-      },
+    const platformKeyConfigured = Boolean(platformConfig.apiKey);
+    const configuredCreators = platformKeyConfigured ? creators.length : 0;
+    const autoSendCreators = platformKeyConfigured && platformConfig.integration.autoSend ? creators.length : 0;
+    const enabledMap = getEnabledWorkflowMap(platformConfig.integration.workflows);
+    const workflowCounts = (Object.keys(enabledMap) as (keyof typeof enabledMap)[]).reduce(
+      (counts, key) => ({
+        ...counts,
+        [key]: enabledMap[key] && platformKeyConfigured ? creators.length : 0,
+      }),
       { startConversation: 0, answerQuestions: 0, qualifyLeads: 0, moveToCta: 0 }
     );
     const messages = storedMessageResult.messages;
@@ -225,6 +226,8 @@ export async function GET() {
         creators: creators.length,
         configuredCreators,
         autoSendCreators,
+        platformKeyConfigured,
+        platformAiSource: platformConfig.source,
         totalMessages: storedMessageResult.totalCount,
         messagesToday,
         aiReadyMessages,
@@ -312,7 +315,7 @@ export async function GET() {
             workflowCounts.qualifyLeads +
             workflowCounts.moveToCta,
           costPerReply: 0,
-          trend: `${configuredCreators} configured`,
+          trend: platformKeyConfigured ? `${configuredCreators} covered` : "Missing platform key",
           status: workflowTestStatus.status,
           tone: workflowTestStatus.tone,
         },
