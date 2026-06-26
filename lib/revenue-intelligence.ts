@@ -82,6 +82,17 @@ export type RevenueOperatingSnapshot = {
     offersPresented: string[];
     followUpNeeded: boolean;
   };
+  layerStatuses?: {
+    layer1: "pending" | "in_progress" | "completed";
+    layer2: "pending" | "in_progress" | "completed";
+    layer3: "pending" | "in_progress" | "completed";
+    layer4: "pending" | "in_progress" | "completed";
+    layer5: "pending" | "in_progress" | "completed";
+    layer6: "pending" | "in_progress" | "completed";
+    layer7: "pending" | "in_progress" | "completed";
+    layer8: "pending" | "in_progress" | "completed";
+    layer9: "pending" | "in_progress" | "completed";
+  };
 };
 
 export type RevenueBuyerIntelligence = RevenueOperatingSnapshot["buyerIntelligence"];
@@ -109,6 +120,9 @@ export type PersistRevenueOperatingSnapshotParams = {
   escalation?: ConversationEscalation | null;
   outcomeProviders?: RevenueOutcomeProviderSettings;
   source?: string;
+  reply?: string;
+  starter?: string;
+  lead?: any;
 };
 
 export type RosCommerceOrderLike = {
@@ -795,7 +809,18 @@ export function buildFallbackRevenueOperatingSnapshot({
       objections: objection ? [objection] : [],
       questionsAsked: [],
       offersPresented: cta ? [cta] : [],
-      followUpNeeded: lead.score < 75,
+      followUpNeeded: true,
+    },
+    layerStatuses: {
+      layer1: "pending",
+      layer2: "pending",
+      layer3: "pending",
+      layer4: "pending",
+      layer5: "pending",
+      layer6: "pending",
+      layer7: "pending",
+      layer8: "pending",
+      layer9: escalation ? "completed" : "pending",
     },
   };
 
@@ -810,7 +835,6 @@ export function normalizeRevenueOperatingSnapshot(value: unknown, fallback: Reve
   const tactic = getNestedRecord(root, ["tacticIntelligence", "tactic_intelligence"]);
   const decision = getNestedRecord(root, ["decision"]);
   const memory = getNestedRecord(root, ["memory", "revenueMemory", "revenue_memory"]);
-  const outcomeProbabilities = pickValue(root, ["outcomeProbabilities", "outcome_probabilities"]);
 
   const normalized: RevenueOperatingSnapshot = {
     conversationIntelligence: {
@@ -836,13 +860,17 @@ export function normalizeRevenueOperatingSnapshot(value: unknown, fallback: Reve
       recommendation: normalizeText(pickValue(revenue, ["recommendation"]), fallback.revenueIntelligence.recommendation, 260),
     },
     tacticIntelligence: normalizeRevenueTacticIntelligence(tactic, fallback.tacticIntelligence),
-    outcomeProbabilities: normalizeOutcomeProbabilities(outcomeProbabilities, fallback.outcomeProbabilities),
+    outcomeProbabilities: normalizeOutcomeProbabilities(
+      pickValue(root, ["outcomeProbabilities", "outcome_probabilities"]),
+      fallback.outcomeProbabilities
+    ),
     decision: {
-      bestNextAction: normalizeText(pickValue(decision, ["bestNextAction", "best_next_action"]), fallback.decision.bestNextAction, 180),
+      bestNextAction: normalizeTacticName(pickValue(decision, ["bestNextAction", "best_next_action"])) || fallback.decision.bestNextAction,
       confidence: normalizeScore(pickValue(decision, ["confidence"]), fallback.decision.confidence),
       rationale: normalizeText(pickValue(decision, ["rationale"]), fallback.decision.rationale, 500),
     },
     memory: normalizeRevenueMemory(memory, fallback.memory),
+    layerStatuses: fallback.layerStatuses,
   };
 
   return withRevenueTacticIntelligence(normalized);
@@ -1223,21 +1251,30 @@ export async function persistRevenueOperatingSnapshot({
   escalation,
   outcomeProviders,
   source = "ai_workflow",
+  reply,
+  starter,
+  lead,
 }: PersistRevenueOperatingSnapshotParams) {
   const snapshotWithTactics = withRevenueTacticIntelligence(snapshot);
   const prospectRecord = await upsertRosProspect({ supabase, userId, participant, snapshot: snapshotWithTactics });
   const prospectId = prospectRecord?.prospectId || null;
   const previousRevenueMemory = await loadRosProspectRevenueMemory({ supabase, userId, participant }).catch(() => null);
   const incomingMemory = buildSnapshotRevenueMemory(snapshotWithTactics);
-  const persistedSnapshot: RevenueOperatingSnapshot = prospectRecord
+  const persistedSnapshot = prospectRecord
     ? {
       ...snapshotWithTactics,
       buyerIntelligence: prospectRecord.buyerIntelligence,
       memory: mergeRevenueMemoryProfiles(previousRevenueMemory?.memory, incomingMemory),
+      reply,
+      starter,
+      lead,
     }
     : {
       ...snapshotWithTactics,
       memory: mergeRevenueMemoryProfiles(previousRevenueMemory?.memory, incomingMemory),
+      reply,
+      starter,
+      lead,
     };
   const senderId = participant?.id?.trim() || "";
   const latestMessage = getLatestUserText(messages);

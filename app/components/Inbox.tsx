@@ -212,6 +212,7 @@ type AiWorkflowResponse = Partial<AiWorkflowRunResult> & {
   autoSend?: boolean;
   handoff?: boolean;
   catalogOffer?: CatalogOffer | null;
+  catalogOffers?: any[];
   escalation?: {
     intent?: string;
     label?: string;
@@ -2415,7 +2416,7 @@ function SummaryPanel({
     async (options?: { silent?: boolean; forceRefresh?: boolean; signal?: AbortSignal }) => {
       const requestTakeoverMode = takeoverModeRef.current;
 
-      if (!conv || requestTakeoverMode === "human") {
+      if (!conv) {
         setAiWorkflow(null);
         setAiStatus("");
         setAiLoading(false);
@@ -2452,10 +2453,6 @@ function SummaryPanel({
           throw new Error(data.error || "Could not run AI workflow");
         }
 
-        if (takeoverModeRef.current === "human") {
-          return;
-        }
-
         setAiWorkflow(data);
         if (data.escalation) {
           upsertLiveEscalationSnapshot(conv);
@@ -2475,9 +2472,7 @@ function SummaryPanel({
         setAiWorkflow(null);
         setAiStatus(error instanceof Error ? error.message : "Could not run AI workflow");
       } finally {
-        if (takeoverModeRef.current !== "human") {
-          setAiLoading(false);
-        }
+        setAiLoading(false);
       }
     },
     [accountName, assistantId, conv]
@@ -2492,7 +2487,7 @@ function SummaryPanel({
   }, []);
 
   useEffect(() => {
-    if (!conv || isHumanTakeover) {
+    if (!conv) {
       const timeout = window.setTimeout(() => {
         setAiWorkflow(null);
         setAiStatus("");
@@ -2519,7 +2514,7 @@ function SummaryPanel({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [aiRefreshKey, conv, isHumanTakeover, runAiWorkflow]);
+  }, [aiRefreshKey, conv, runAiWorkflow]);
 
   useEffect(() => {
     if (!conv || !latestInboundMessage || !latestInboundIsOrderConfirmation) {
@@ -2973,6 +2968,249 @@ function SummaryPanel({
 
                 </div>
               ) : null}
+
+              {(aiWorkflow?.ros || aiLoading) && (
+                <div className="mt-3 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-2.5">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <h3 className="flex min-w-0 items-center gap-1.5 text-[12px] font-extrabold text-black">
+                      <Zap size={14} className="text-[#ff850d]" strokeWidth={2.35} />
+                      ROS 9-Layer Pipeline
+                    </h3>
+                    <span className="rounded-[8px] bg-[#fff3e6] px-2 py-0.5 text-[9px] font-extrabold text-[#ff850d]">
+                      {aiLoading ? "Processing..." : "Live Snapshot"}
+                    </span>
+                  </div>
+
+                  {aiLoading ? (
+                    <div className="flex flex-col items-center justify-center py-6 gap-2 bg-white rounded-[8px] border border-[#eef1f6] mt-2">
+                      <Loader2 size={18} className="animate-spin text-[#ff850d]" />
+                      <p className="text-[10px] font-semibold text-[#596175]">Evaluating pipeline layers...</p>
+                    </div>
+                  ) : aiWorkflow?.ros ? (
+                    <div className="space-y-2 mt-2">
+                      {(() => {
+                        const layerStatuses = (aiWorkflow.ros as any).layerStatuses || {};
+                        const renderLayerBadge = (status?: "pending" | "in_progress" | "completed", fallbackLabel = "Completed") => {
+                          if (status === "completed") {
+                            return (
+                              <span className="text-[10px] text-[#14a947] font-extrabold flex items-center gap-1">
+                                <Check size={12} strokeWidth={3} /> {fallbackLabel}
+                              </span>
+                            );
+                          }
+                          if (status === "in_progress") {
+                            return (
+                              <span className="text-[10px] text-[#ff850d] font-extrabold flex items-center gap-1">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#ff850d] opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-[#ff850d]"></span>
+                                </span>
+                                In Progress
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="text-[10px] text-[#a1a7b6] font-extrabold flex items-center gap-1">
+                              Pending
+                            </span>
+                          );
+                        };
+
+                        return (
+                          <>
+                            {/* Layer 9 */}
+                            {layerStatuses.layer9 !== "pending" && (
+                              <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
+                                <div className="flex items-center justify-between gap-1.5 font-bold">
+                                  <span className="text-[#253049]">Layer 9: Escalation</span>
+                                  {aiWorkflow.escalation || aiWorkflow.handoff ? (
+                                    <span className="flex items-center gap-1 text-[10px] text-[#df405b] font-extrabold">
+                                      <TriangleAlert size={12} /> Triggered
+                                    </span>
+                                  ) : renderLayerBadge(layerStatuses.layer9, "Cleared")}
+                                </div>
+                                <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
+                                  {aiWorkflow.escalation
+                                    ? `Handoff requested: ${aiWorkflow.escalation.summary || aiWorkflow.escalation.label}`
+                                    : "No urgent safety or human handoff rules triggered."}
+                                </p>
+                              </div>
+                            )}
+
+                      {/* Layer 1 */}
+                      {layerStatuses.layer1 !== "pending" && (
+                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
+                          <div className="flex items-center justify-between gap-1.5 font-bold">
+                            <span className="text-[#253049]">Layer 1: Conversation Intel</span>
+                            {renderLayerBadge(layerStatuses.layer1, "Analyzed")}
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            <span className="rounded-[6px] bg-[#f1f3f9] px-1.5 py-0.5 text-[9px] font-bold text-[#46506a]">
+                              Sentiment: {aiWorkflow.ros.conversationIntelligence?.sentiment || "neutral"}
+                            </span>
+                            <span className="rounded-[6px] bg-[#f1f3f9] px-1.5 py-0.5 text-[9px] font-bold text-[#46506a]">
+                              Emotion: {aiWorkflow.ros.conversationIntelligence?.emotion || "unknown"}
+                            </span>
+                            {aiWorkflow.ros.conversationIntelligence?.objection && aiWorkflow.ros.conversationIntelligence.objection !== "none" && (
+                              <span className="rounded-[6px] bg-[#ffebee] px-1.5 py-0.5 text-[9px] font-extrabold text-[#df405b]">
+                                Objection: {aiWorkflow.ros.conversationIntelligence.objection}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Layer 2 */}
+                      {layerStatuses.layer2 !== "pending" && (
+                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
+                          <div className="flex items-center justify-between gap-1.5 font-bold">
+                            <span className="text-[#253049]">Layer 2: Business Intel</span>
+                            {renderLayerBadge(layerStatuses.layer2, "Evaluated")}
+                          </div>
+                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
+                            {aiWorkflow.catalogOffer
+                              ? `Product Match: ${aiWorkflow.catalogOffer.title || "Selected Item"}`
+                              : aiWorkflow.catalogOffers && aiWorkflow.catalogOffers.length > 0
+                              ? `Found ${aiWorkflow.catalogOffers.length} catalog options matching context.`
+                              : "Searched knowledge bases & menu databases. No active catalog items overlayed."}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Layer 3 */}
+                      {layerStatuses.layer3 !== "pending" && (
+                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
+                          {(() => {
+                            const bi = aiWorkflow.ros.buyerIntelligence || {};
+                            const fields = [
+                              { label: "B", value: bi.budget, title: "Budget" },
+                              { label: "A", value: bi.authority, title: "Authority" },
+                              { label: "N", value: bi.need, title: "Need" },
+                              { label: "T", value: bi.timeline, title: "Timeline" },
+                            ];
+                            const filledCount = fields.filter(f => f.value && f.value !== "unknown" && f.value !== "").length;
+                            return (
+                              <>
+                                <div className="flex items-center justify-between gap-1.5 font-bold">
+                                  <span className="text-[#253049]">Layer 3: Buyer Intel (BANT)</span>
+                                  {renderLayerBadge(layerStatuses.layer3, "Qualified")}
+                                </div>
+                                <div className="mt-2 flex items-center gap-1.5">
+                                  {fields.map(f => (
+                                    <span
+                                      key={f.label}
+                                      title={`${f.title}: ${f.value || "Unknown/Missing"}`}
+                                      className={`flex h-5 w-5 items-center justify-center rounded-[6px] text-[9px] font-extrabold border ${
+                                        f.value && f.value !== "unknown" && f.value !== ""
+                                          ? "bg-[#e8f5e9] border-[#c8e6c9] text-[#2e7d32]"
+                                          : "bg-[#fafafa] border-[#e0e0e0] text-[#757575]"
+                                      }`}
+                                    >
+                                      {f.label}
+                                    </span>
+                                  ))}
+                                  {bi.goal && (
+                                    <span className="rounded-[6px] bg-[#eef4ff] border border-[#d2e3fc] px-1.5 py-0.5 text-[9px] font-bold text-[#1a73e8] truncate max-w-[120px]" title={`Goal: ${bi.goal}`}>
+                                      Goal: {bi.goal}
+                                    </span>
+                                  )}
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+
+                      {/* Layer 6 */}
+                      {layerStatuses.layer6 !== "pending" && (
+                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
+                          <div className="flex items-center justify-between gap-1.5 font-bold">
+                            <span className="text-[#253049]">Layer 6: Revenue Memory</span>
+                            {renderLayerBadge(layerStatuses.layer6, "Remembered")}
+                          </div>
+                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
+                            {(() => {
+                              const m = aiWorkflow.ros.memory || {};
+                              const parts = [];
+                              if (m.objections?.length > 0) parts.push(`${m.objections.length} objections`);
+                              if (m.offersPresented?.length > 0) parts.push(`${m.offersPresented.length} offers shown`);
+                              if (m.questionsAsked?.length > 0) parts.push(`${m.questionsAsked.length} questions asked`);
+                              return parts.length > 0 ? `Loaded profile relationship state: ${parts.join(", ")}.` : "First touchpoint profile (clean memory snapshot loaded).";
+                            })()}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Layer 7 */}
+                      {layerStatuses.layer7 !== "pending" && (
+                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
+                          <div className="flex items-center justify-between gap-1.5 font-bold">
+                            <span className="text-[#253049]">Layer 7: Learning Engine</span>
+                            {renderLayerBadge(layerStatuses.layer7, "Ingested")}
+                          </div>
+                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
+                            Tactic: <code className="rounded bg-[#f5f5f5] px-1 text-[9px] font-mono text-[#e91e63]">{aiWorkflow.ros.tacticIntelligence?.primaryTactic || "consultative_reply"}</code>
+                            {aiWorkflow.ros.revenueIntelligence?.framework ? ` via ${aiWorkflow.ros.revenueIntelligence.framework}` : ""}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Layer 8 */}
+                      {layerStatuses.layer8 !== "pending" && (
+                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
+                          <div className="flex items-center justify-between gap-1.5 font-bold">
+                            <span className="text-[#253049]">Layer 8: Outcome Intel</span>
+                            {renderLayerBadge(layerStatuses.layer8, "Configured")}
+                          </div>
+                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
+                            Sales stage: <span className="font-semibold text-[#253049]">{aiWorkflow.ros.revenueIntelligence?.salesStage || "initial_inbound"}</span>
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Layer 5 */}
+                      {layerStatuses.layer5 !== "pending" && (
+                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
+                          <div className="flex items-center justify-between gap-1.5 font-bold">
+                            <span className="text-[#253049]">Layer 5: Decision Intel</span>
+                            {renderLayerBadge(layerStatuses.layer5, "Resolved")}
+                          </div>
+                          <div className="mt-1 text-[10px] text-[#46506a] leading-relaxed">
+                            <div className="font-semibold text-[#253049]">Next Action:</div>
+                            <div className="mt-0.5 rounded-[6px] bg-[#f5f7ff] p-1.5 text-[10px] font-bold text-[#3044ff] border border-[#e5e9ff]">
+                              {aiWorkflow.ros.decision?.bestNextAction || "Respond to inquiry"}
+                            </div>
+                            <div className="mt-1 text-[9px] text-[#596175] flex items-center justify-between">
+                              <span>Confidence:</span>
+                              <span className="font-bold">{aiWorkflow.ros.decision?.confidence || 85}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Layer 4 */}
+                      {layerStatuses.layer4 !== "pending" && (
+                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
+                          <div className="flex items-center justify-between gap-1.5 font-bold">
+                            <span className="text-[#253049]">Layer 4: Revenue Intel (Post)</span>
+                            {renderLayerBadge(layerStatuses.layer4, "Applied")}
+                          </div>
+                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
+                            Lead is classified as <span className="font-extrabold text-[#253049]">{aiWorkflow.lead?.stage || "New"}</span>.
+                            {aiWorkflow.ros.revenueIntelligence?.recommendation && (
+                              <span className="block mt-1 italic">"{aiWorkflow.ros.revenueIntelligence.recommendation}"</span>
+                            )}
+                          </p>
+                        </div>
+                      )}
+
+                            </>
+                          );
+                        })()}
+                      </div>
+                  ) : null}
+                </div>
+              )}
 
               <div className="mt-3 rounded-[10px] border border-[#e2e7f2] bg-white p-2.5">
                 <div className="flex items-center justify-between gap-2">

@@ -79,6 +79,7 @@ import { loadRevenueOutcomeProviderSettings } from '@/lib/revenue-provider-execu
 import { formatRevenueLearningForPrompt } from '@/lib/revenue-learning';
 import { applyRevenueStrategy } from '@/lib/revenue-strategy';
 import { resolvePlatformAiConfig } from '@/lib/platform-ai-config';
+import { runRosPipeline } from '@/lib/ros-pipeline';
 
 import { getGlobalChannel, getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
@@ -831,170 +832,51 @@ async function generateWebhookAiReply({
   participant: InstagramParticipantProfile;
   recentCatalogDecline?: boolean;
 }) {
-  logger.info("generateWebhookAiReply: Starting generation", { latestText, participantId: participant.id });
-  const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-  const serviceSupabase = createSupabaseServiceClient();
-  const platformConfig = await resolvePlatformAiConfig(serviceSupabase);
-  const integration = platformConfig.integration;
-  const outcomeProviders = await loadRevenueOutcomeProviderSettings({
-    supabase: serviceSupabase,
-    userId: user.id,
-    metadataValue: metadata[revenueOutcomeProvidersMetadataKey],
-  });
-  const revenueLearningPrompt = await formatRevenueLearningForPrompt({
-    supabase: serviceSupabase,
-    userId: user.id,
-  }).catch(() => '');
-  const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
+  logger.info("generateWebhookAiReply: Starting generation using unified 9-layer ROS Pipeline", { latestText, participantId: participant.id });
+  
+  const { data: dbMessages } = await supabase
+    .from('messages')
+    .select('direction,text,timestamp')
+    .eq('user_id', user.id)
+    .eq('conversation_id', participant.id || '')
+    .order('timestamp', { ascending: false })
+    .limit(16);
 
-  logger.info("generateWebhookAiReply: Workflow settings evaluated", { autoSend: integration.autoSend, answerQuestions: enabledWorkflows.answerQuestions });
+  const parsedMessages = (dbMessages || [])
+    .reverse()
+    .map((msg) => ({
+      from: msg.direction === 'outbound' ? 'me' as const : 'user' as const,
+      text: msg.text || '',
+    }));
 
-  if (!integration.autoSend || !enabledWorkflows.answerQuestions) {
-    logger.info("generateWebhookAiReply: Bailing out because autoSend or answerQuestions workflow is disabled.");
-    return { reply: '', catalogOffer: null, catalogOffers: [], catalogCheckoutReady: false } satisfies WebhookAiReplyResult;
+  if (!parsedMessages.some(m => m.text === latestText)) {
+    parsedMessages.push({
+      from: 'user',
+      text: latestText,
+    });
   }
 
-  const apiKey = platformConfig.apiKey;
-
-  if (!apiKey) {
-    logger.info("generateWebhookAiReply: Bailing out because no OpenAI API key was found.");
-    return { reply: '', catalogOffer: null, catalogOffers: [], catalogCheckoutReady: false } satisfies WebhookAiReplyResult;
-  }
-
-  const assistantId = metadata.openai_assistant_id as string | undefined;
-
-  if (!assistantId) {
-    logger.info("generateWebhookAiReply: Bailing out because no OpenAI Assistant ID was found in metadata.");
-    return { reply: '', catalogOffer: null, catalogOffers: [], catalogCheckoutReady: false } satisfies WebhookAiReplyResult;
-  }
-  const participantName = participant.username || participant.name || 'this Instagram lead';
-  const conversationId = participant.id || participant.username || participant.name || '';
-  const recentConversationLines = (
-    conversationId
-      ? await getRecentWebhookConversationLines({
-          supabase,
-          userId: user.id,
-          conversationId,
-        })
-      : ''
-  ) || `Customer: ${latestText}`;
-  const productCatalog = await getInstagramProductCatalogForUser(supabase, user.id).catch((catalogError) => {
-    logger.warn('Instagram catalog unavailable during webhook AI generation:', { error: catalogError });
-    return [];
-  });
-  const catalogSearchText = buildCatalogSearchText(latestText, recentConversationLines);
-  const freshCatalogCategoryRequest = isFreshCatalogCategoryRequest(latestText, recentConversationLines);
-  const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogSearchText);
-  const catalogDiscoveryRequired = isCatalogDiscoveryOnlyRequest(catalogSearchText);
-  const catalogDiscoveryState = getCatalogDiscoveryState(catalogSearchText);
-  const catalogOffers = findCatalogOffers(catalogSearchText, productCatalog, catalogCarouselMaxItems);
-  const catalogOffer = shouldUseSingleCatalogOffer(catalogSearchText, catalogOffers) ? catalogOffers[0] : null;
-  const previousBuyerProfile = await loadRosProspectBuyerProfile({
-    supabase: serviceSupabase,
-    userId: user.id,
+  const result = await runRosPipeline({
+    supabase,
+    user,
     participant: {
-      id: participant.id,
+      id: participant.id || '',
       username: participant.username,
       name: participant.name,
     },
-  }).catch((buyerMemoryError) => {
-    logger.warn('Could not load saved buyer memory for webhook AI prompt:', { error: buyerMemoryError, participantId: participant.id });
-    return null;
+    conversationId: participant.id || '',
+    latestText,
+    messages: parsedMessages,
+    recentCatalogDecline,
   });
-  const buyerMemoryPrompt = formatBuyerIntelligenceForPrompt(previousBuyerProfile);
-  const previousRevenueMemory = await loadRosProspectRevenueMemory({
-    supabase: serviceSupabase,
-    userId: user.id,
-    participant: {
-      id: participant.id,
-      username: participant.username,
-      name: participant.name,
-    },
-  }).catch((revenueMemoryError) => {
-    logger.warn('Could not load saved revenue memory for webhook AI prompt:', { error: revenueMemoryError, participantId: participant.id });
-    return null;
-  });
-  const revenueMemoryPrompt = formatRevenueMemoryForPrompt(previousRevenueMemory);
-
-  logger.info("generateWebhookAiReply: Proceeding to request OpenAI Assistant Thread...", { participantName });
-  const reply = await runAssistantThread({
-    apiKey,
-    assistantId,
-    maxTokens: 800,
-    additionalInstructions: `${integration.systemPrompt}
-
-IMPORTANT: The attached files and vector store contain the primary truth for this business (such as menus, pricing, services, and policies). You MUST search these files using the file_search tool for any specific business inquiries (e.g. "menu", "pricing", "cost", "hours", "booking", or specific products/services). Do NOT rely on default prompts or assume the business context is TractionFlo if the knowledge base documents specify a different business (e.g. Taste Haven Restaurant).
-
-${getAiBehaviorPrompt(integration.behavior)}
-
-Lead qualification rules: ${integration.leadQualificationRules}
-${getConditionalCtaPrompt(integration.ctaMessage, latestText)}
-
-Auto-detected Instagram product catalog:
-${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
-
-Product discovery status: ${catalogDiscoveryRequired ? 'needs_questions' : 'ready_or_not_needed'}
-- The Instagram product catalog above is the source of truth for currently loaded posts/products. If it lists a category or product, do not contradict it using older conversation context or general business assumptions.
-- New product category inquiry: ${freshCatalogCategoryRequest ? 'yes' : 'no'}
-- If new product category inquiry is yes, answer only the latest category question. Do not continue, confirm, re-show, or send checkout/payment steps for any previous order.
-- If new product category inquiry is yes and no relevant catalog product was detected, say that no matching option is currently available in the catalog/knowledge instead of offering the previous product.
-- If relevant catalog products are listed for a new product category inquiry, say they are available and answer from those products. Do not say the category is unavailable.
-- For availability or browse questions, do not ask for checkout or order confirmation unless the customer explicitly chooses a product and confirms purchase intent.
-- If product discovery status is needs_questions, do not list specific products, send catalog cards, mention checkout, or ask them to confirm an order yet.
-- Only ask for missing core details: budget and product goal/desired item/use-case.
-- Known core details: budget=${catalogDiscoveryState.hasBudget ? 'yes' : 'no'}, product_goal=${catalogDiscoveryState.hasGoal ? 'yes' : 'no'}.
-- Once budget and product goal are known, stop asking more discovery questions and show the best matching product option.
-- If the customer asks for details of one specific product/type, answer only that product/type. Do not list the full catalog or multiple unrelated products.
-
-Configured revenue outcome providers:
-${formatRevenueOutcomeProvidersForPrompt(outcomeProviders) || 'No external outcome provider links are configured yet. If the right outcome needs a provider link, ask for contact/consent or use a manual next step.'}
-
-Creator-specific revenue learning:
-${revenueLearningPrompt || 'No creator-specific learning is available yet. Use the default ROS strategy and persist the decision for future learning.'}
-
-Saved buyer memory for this Instagram participant:
-${buyerMemoryPrompt}
-
-Buyer memory rules:
-- Use saved buyer memory as known context for this same participant.
-- Do not ask again for known goal, problem, budget, authority, need, or timeline unless the latest message clearly changes them.
-- Personalize the reply to the saved buyer profile when it helps the sale.
-
-Saved revenue memory for this Instagram participant:
-${revenueMemoryPrompt}
-
-Revenue memory rules:
-- Use saved revenue memory as the cumulative customer relationship.
-- Remember previous objections, questions asked, offers presented, purchases, and follow-up history.
-- Do not restart discovery or repeat an already-presented offer unless the latest message makes that useful.
-
-Product refusal context: ${recentCatalogDecline ? 'yes' : 'no'}
-- If product refusal context is yes, do not pitch products, send product options, mention checkout, or ask them to confirm an order unless the latest customer message explicitly asks to see or buy a product.
-- If the latest customer message gives budget after a product refusal, acknowledge the budget and say you will keep it in mind. Do not turn it into a product offer.
-
-Return only the Instagram DM reply text. Keep it natural, brief, and useful. Do not mention being an AI unless asked.`,
-    messages: [
-      {
-        role: 'user',
-        content: `Instagram participant: ${participantName}
-
-	Recent conversation:
-	${recentConversationLines}
-
-	Write the next best reply.`,
-      },
-    ],
-  });
-  const guardedReply = removeUnrequestedBookingCta(reply, latestText);
-  const catalogCheckoutReady = catalogDiscoveryState.ready;
-  const checkoutCatalogOffer = catalogCheckoutReady ? catalogOffer : null;
 
   return {
-    reply: buildCatalogOfferReply(guardedReply, checkoutCatalogOffer),
-    catalogOffer: checkoutCatalogOffer,
-    catalogOffers,
-    catalogCheckoutReady,
-  } satisfies WebhookAiReplyResult;
+    reply: result.reply,
+    catalogOffer: result.catalogOffer,
+    catalogOffers: result.catalogOffers,
+    catalogCheckoutReady: result.catalogCheckoutReady,
+    ros: result.ros,
+  };
 }
 
 async function getRecentSenderCatalogText(supabase: SupabaseServiceClient, senderId: string) {
@@ -1576,6 +1458,7 @@ async function processInstagramAutomations(
       let catalogOffer: InstagramCatalogOffer | null = null;
       let catalogOffers: InstagramCatalogOffer[] = [];
       let catalogCheckoutReady = false;
+      let aiResult: any = null;
       if (isFirstInboundDm && welcome.enabled) {
         logger.info("processInstagramAutomations: Generating Welcome Message.");
         reply = renderInstagramWelcomeMessage({
@@ -1585,7 +1468,7 @@ async function processInstagramAutomations(
         });
       } else {
         logger.info("processInstagramAutomations: Triggering generateWebhookAiReply.");
-        const aiResult = await generateWebhookAiReply({
+        aiResult = await generateWebhookAiReply({
           supabase,
           user,
           latestText: event.text,
@@ -1797,70 +1680,76 @@ async function processInstagramAutomations(
         }
       }
 
-      const previousBuyerProfile = await loadRosProspectBuyerProfile({
-        supabase,
-        userId: user.id,
-        participant: {
-          id: event.senderId,
-          username: participant.username,
-          name: participant.name,
-        },
-      }).catch((buyerMemoryError) => {
-        logger.warn('processInstagramAutomations: Could not load saved buyer memory for ROS snapshot.', {
-          error: buyerMemoryError,
-          senderId: event.senderId,
-        });
-        return null;
-      });
-      const previousRevenueMemory = await loadRosProspectRevenueMemory({
-        supabase,
-        userId: user.id,
-        participant: {
-          id: event.senderId,
-          username: participant.username,
-          name: participant.name,
-        },
-      }).catch((revenueMemoryError) => {
-        logger.warn('processInstagramAutomations: Could not load saved revenue memory for ROS snapshot.', {
-          error: revenueMemoryError,
-          senderId: event.senderId,
-        });
-        return null;
-      });
-      const rosSnapshot = buildWebhookRevenueOperatingSnapshot({
-        latestText: event.text,
-        catalogOffer: catalogOffer || catalogCarouselCards[0]?.offer || null,
-        pendingOrderId: orderId || catalogCarouselCards.find((card) => card.orderId)?.orderId || '',
-        escalation,
-        outcomeProviders,
-        previousBuyerProfile,
-        previousRevenueMemory,
-      });
-      await persistRevenueOperatingSnapshot({
-        supabase,
-        userId: user.id,
-        participant: {
-          id: event.senderId,
-          username: participant.username,
-          name: participant.name,
-        },
-        conversationId: event.senderId,
-        messages: [
-          { from: 'user', text: event.text },
-          { from: 'me', text: reply.trim() },
-        ],
-        snapshot: rosSnapshot,
-        escalation: pauseForEscalation ? escalation : null,
-        outcomeProviders,
-        source: isFirstInboundDm && welcome.enabled ? 'instagram_webhook_welcome' : 'instagram_webhook_ai',
-      }).catch((rosError) => {
-        logger.warn('processInstagramAutomations: Could not persist ROS decision for webhook reply.', {
-          error: rosError,
+      let rosSnapshot = aiResult?.ros || null;
+
+      if (isFirstInboundDm && welcome.enabled) {
+        const previousBuyerProfile = await loadRosProspectBuyerProfile({
+          supabase,
           userId: user.id,
-          senderId: event.senderId,
-          orderId,
+          participant: {
+            id: event.senderId,
+            username: participant.username,
+            name: participant.name,
+          },
+        }).catch((buyerMemoryError) => {
+          logger.warn('processInstagramAutomations: Could not load saved buyer memory for ROS snapshot.', {
+            error: buyerMemoryError,
+            senderId: event.senderId,
+          });
+          return null;
         });
-      });
+        const previousRevenueMemory = await loadRosProspectRevenueMemory({
+          supabase,
+          userId: user.id,
+          participant: {
+            id: event.senderId,
+            username: participant.username,
+            name: participant.name,
+          },
+        }).catch((revenueMemoryError) => {
+          logger.warn('processInstagramAutomations: Could not load saved revenue memory for ROS snapshot.', {
+            error: revenueMemoryError,
+            senderId: event.senderId,
+          });
+          return null;
+        });
+        rosSnapshot = buildWebhookRevenueOperatingSnapshot({
+          latestText: event.text,
+          catalogOffer: catalogOffer || catalogCarouselCards[0]?.offer || null,
+          pendingOrderId: orderId || catalogCarouselCards.find((card) => card.orderId)?.orderId || '',
+          escalation,
+          outcomeProviders,
+          previousBuyerProfile,
+          previousRevenueMemory,
+        });
+        await persistRevenueOperatingSnapshot({
+          supabase,
+          userId: user.id,
+          participant: {
+            id: event.senderId,
+            username: participant.username,
+            name: participant.name,
+          },
+          conversationId: event.senderId,
+          messages: [
+            { from: 'user', text: event.text },
+            { from: 'me', text: reply.trim() },
+          ],
+          snapshot: rosSnapshot,
+          escalation: pauseForEscalation ? escalation : null,
+          outcomeProviders,
+          source: 'instagram_webhook_welcome',
+        }).catch((rosError) => {
+          logger.warn('processInstagramAutomations: Could not persist ROS decision for webhook reply.', {
+            error: rosError,
+            userId: user.id,
+            senderId: event.senderId,
+            orderId,
+          });
+        });
+      } else {
+        logger.info('processInstagramAutomations: Welcome message not sent, ROS snapshot persistence bypassed (handled by ROS pipeline).');
+      }
 
       logger.info("processInstagramAutomations: Triggering realtime pusher notification for sent reply...");
       await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
