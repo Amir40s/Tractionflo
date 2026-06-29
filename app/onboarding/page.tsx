@@ -1845,60 +1845,211 @@ function ReadyCard({ onFinish }: { onFinish: () => void }) {
   );
 }
 
-function WhatHappensNext() {
-  const items = [
-    ["New comment or DM arrives", Users],
-    ["AI starts conversation", Bot],
-    ["AI qualifies the lead", Target],
-    ["AI handles objections", Bell],
-    ["AI books call or makes sale", Calendar],
-    ["You close and grow revenue", DollarSign],
-  ] satisfies [string, LucideIcon][];
+function WhatHappensNext({ data }: { data: OnboardingData }) {
+  const enabledRuleCount = data.escalationRules.filter((rule) => rule.enabled).length;
+  const configuredActionCount = data.conversionActions.filter((action) => action.configured).length;
+  const workflowCards = [
+    {
+      title: "New customer message",
+      detail: `${formatCompactNumber(data.conversationCount)} conversation${data.conversationCount === 1 ? "" : "s"} scanned`,
+      icon: Users,
+      accent: "bg-[#eef4ff] text-[#175cd3]",
+    },
+    {
+      title: "Agent replies with context",
+      detail: `${formatCompactNumber(data.messageCount)} live message${data.messageCount === 1 ? "" : "s"} available`,
+      icon: Bot,
+      accent: "bg-[#f4f3ff] text-[#5925dc]",
+    },
+    {
+      title: "Lead gets qualified",
+      detail: `${formatCompactNumber(data.hotLeads)} hot lead${data.hotLeads === 1 ? "" : "s"} detected`,
+      icon: Target,
+      accent: "bg-[#fff3e6] text-[#ff7a00]",
+    },
+    {
+      title: "Important issues escalate",
+      detail: `${formatCompactNumber(enabledRuleCount)} active alert rule${enabledRuleCount === 1 ? "" : "s"}`,
+      icon: Bell,
+      accent: "bg-[#fff1f3] text-[#e83e8c]",
+    },
+    {
+      title: "Best action is offered",
+      detail: `${formatCompactNumber(configuredActionCount)} conversion action${configuredActionCount === 1 ? "" : "s"} configured`,
+      icon: Calendar,
+      accent: "bg-[#ecfdf3] text-[#2ea44f]",
+    },
+    {
+      title: "Revenue is tracked",
+      detail: `${formatCurrency(data.potentialRevenue, data.revenueCurrency)} live opportunity value`,
+      icon: DollarSign,
+      accent: "bg-[#f0fdf4] text-[#16a34a]",
+    },
+  ] satisfies { title: string; detail: string; icon: LucideIcon; accent: string }[];
 
   return (
-    <section className="rounded-[8px] border border-[#e8ebf2] bg-white p-5">
-      <div className="grid gap-5 lg:grid-cols-[180px_1fr] lg:items-center">
-        <div>
-          <h2 className="text-[18px] font-extrabold text-black">What Happens Next?</h2>
-          <p className="mt-2 text-[12px] font-semibold text-[#667085]">Here&apos;s what your AI will do</p>
-        </div>
-        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-          {items.map(([label, Icon], index) => (
-            <div key={label} className="flex items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[#f2f4f7] text-black">
-                <Icon size={19} strokeWidth={2.4} />
+    <section className="overflow-hidden rounded-[10px] border border-[#e8ebf2] bg-white shadow-[0_22px_70px_rgba(15,23,42,0.06)]">
+      <div className="grid gap-0 lg:grid-cols-[0.9fr_1.35fr]">
+        <div className="bg-[#050505] p-5 text-white sm:p-6">
+          <div className="flex h-full min-h-[320px] flex-col justify-between">
+            <div>
+              <span className="inline-flex h-8 items-center rounded-full border border-white/15 px-3 text-[11px] font-extrabold uppercase tracking-[0.08em] text-white/70">
+                Live pipeline
               </span>
-              <p className="text-[12px] font-extrabold leading-tight text-black">{label}</p>
-              {index < items.length - 1 ? <ArrowRight className="hidden shrink-0 text-[#98a2b3] xl:block" size={16} /> : null}
+              <h2 className="mt-5 max-w-[360px] text-[24px] font-extrabold leading-tight sm:text-[28px]">
+                Your Instagram sales loop is ready.
+              </h2>
+              <p className="mt-3 max-w-[380px] text-[13px] font-semibold leading-relaxed text-white/70">
+                The agent will work from connected Instagram activity, saved business details, and the rules you just approved.
+              </p>
             </div>
-          ))}
+
+            <div className="mt-8 grid grid-cols-3 gap-2">
+              {[
+                ["Hot leads", formatCompactNumber(data.hotLeads)],
+                ["Prospects", formatCompactNumber(data.interestedProspects)],
+                ["Knowledge", `${data.knowledgeScore}%`],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-[8px] border border-white/10 bg-white/[0.06] p-3">
+                  <p className="text-[20px] font-extrabold leading-none">{value}</p>
+                  <p className="mt-2 text-[10px] font-bold uppercase text-white/50">{label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 sm:p-6">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {workflowCards.map(({ title, detail, icon: Icon, accent }, index) => (
+              <article key={title} className="rounded-[8px] border border-[#eef1f5] bg-[#fbfbfc] p-4">
+                <div className="flex items-start gap-3">
+                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] ${accent}`}>
+                    <Icon size={19} strokeWidth={2.4} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-extrabold uppercase text-[#98a2b3]">Step {index + 1}</p>
+                    <h3 className="mt-1 text-[13px] font-extrabold leading-tight text-black">{title}</h3>
+                    <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#667085]">{detail}</p>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="mt-4 rounded-[8px] border border-[#fedf89] bg-[#fffbeb] p-4">
+            <div className="flex items-start gap-3">
+              <Sparkles className="mt-0.5 shrink-0 text-[#ff7a00]" size={18} strokeWidth={2.4} />
+              <div>
+                <p className="text-[13px] font-extrabold text-[#344054]">Next best move</p>
+                <p className="mt-1 text-[12px] font-semibold leading-relaxed text-[#667085]">
+                  Keep the agent live, watch the inbox for escalations, and update actions here whenever your offers or links change.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <NextButton />
         </div>
       </div>
     </section>
   );
 }
 
-function SafetyRow() {
-  const items = [
-    ["100% Safe & Secure", "We only read data. We never post or message without permission.", ShieldCheck],
-    ["Your Data is Private", "Your data is encrypted and never shared.", Lock],
-    ["Cancel Anytime", "No commitments. Cancel at any time.", Zap],
-    ["30-Day Guarantee", "Love it or get a full refund.", Clock],
-  ] satisfies [string, string, LucideIcon][];
+function SafetyRow({ data }: { data: OnboardingData }) {
+  const enabledPermissions = data.permissions.filter((permission) => permission.enabled).length;
+  const totalPermissions = data.permissions.length || 1;
+  const missingCount = data.missingItems.filter((item) => !item.complete).length;
+  const enabledRuleCount = data.escalationRules.filter((rule) => rule.enabled).length;
+  const readinessScore = Math.round(((enabledPermissions / totalPermissions) * 0.55 + (missingCount === 0 ? 0.45 : 0.25)) * 100);
+  const accountLabel = data.username || data.businessName || "Connected Instagram";
+  const safetyItems = [
+    {
+      title: "Read-only Instagram scan",
+      detail: data.connected ? `Connected to ${accountLabel}` : "Waiting for Instagram connection",
+      icon: ShieldCheck,
+    },
+    {
+      title: "Private business knowledge",
+      detail: `${formatCompactNumber(data.knowledgeCount)} source${data.knowledgeCount === 1 ? "" : "s"} available to the agent`,
+      icon: Lock,
+    },
+    {
+      title: "Permission based replies",
+      detail: `${enabledPermissions} of ${totalPermissions} engagement permission${totalPermissions === 1 ? "" : "s"} enabled`,
+      icon: Zap,
+    },
+    {
+      title: "Human handoff rules",
+      detail: `${enabledRuleCount} escalation rule${enabledRuleCount === 1 ? "" : "s"} will notify you`,
+      icon: Bell,
+    },
+  ] satisfies { title: string; detail: string; icon: LucideIcon }[];
 
   return (
-    <section className="grid gap-4 rounded-[8px] border border-[#e8ebf2] bg-white p-5 md:grid-cols-2 xl:grid-cols-4">
-      {items.map(([title, detail, Icon]) => (
-        <div key={title} className="flex gap-4 border-[#eef1f5] xl:border-r xl:pr-4 xl:last:border-r-0">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#eef1f5] text-black">
-            <Icon size={26} strokeWidth={2.2} />
+    <section className="overflow-hidden rounded-[10px] border border-[#e8ebf2] bg-white shadow-[0_22px_70px_rgba(15,23,42,0.06)]">
+      <div className="grid lg:grid-cols-[0.8fr_1.35fr]">
+        <div className="border-b border-[#eef1f5] bg-[#fbfbfc] p-5 sm:p-6 lg:border-b-0 lg:border-r">
+          <span className="inline-flex h-8 items-center rounded-full bg-black px-3 text-[11px] font-extrabold uppercase tracking-[0.08em] text-white">
+            Security model
           </span>
-          <div>
-            <p className="text-[14px] font-extrabold text-black">{title}</p>
-            <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#667085]">{detail}</p>
+          <h2 className="mt-5 text-[24px] font-extrabold leading-tight text-black sm:text-[28px]">You stay in control.</h2>
+          <p className="mt-3 text-[13px] font-semibold leading-relaxed text-[#667085]">
+            The agent uses the rules, links, and business knowledge saved in onboarding. Anything missing can be edited before launch.
+          </p>
+
+          <div className="mt-6 rounded-[8px] border border-[#e8ebf2] bg-white p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-[12px] font-extrabold text-[#667085]">Setup readiness</p>
+                <p className="mt-1 text-[26px] font-extrabold leading-none text-black">{readinessScore}%</p>
+              </div>
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#ecfdf3] text-[#2ea44f]">
+                <CheckCircle2 size={26} strokeWidth={2.4} />
+              </span>
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#eef1f5]">
+              <span className="block h-full rounded-full bg-[#2ea44f]" style={{ width: `${Math.min(100, readinessScore)}%` }} />
+            </div>
+            <p className="mt-3 text-[11px] font-semibold text-[#667085]">
+              {missingCount === 0 ? "No required setup gaps detected." : `${missingCount} setup detail${missingCount === 1 ? "" : "s"} still marked missing.`}
+            </p>
           </div>
         </div>
-      ))}
+
+        <div className="p-5 sm:p-6">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {safetyItems.map(({ title, detail, icon: Icon }) => (
+              <article key={title} className="rounded-[8px] border border-[#eef1f5] p-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#e8ebf2] text-black">
+                    <Icon size={19} strokeWidth={2.3} />
+                  </span>
+                  <div>
+                    <h3 className="text-[13px] font-extrabold leading-tight text-black">{title}</h3>
+                    <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#667085]">{detail}</p>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            {[
+              ["No auto-posting", "The agent only uses enabled reply permissions."],
+              ["Editable setup", "Business data and links can be changed here."],
+              ["Cancel anytime", "No commitment during onboarding."],
+            ].map(([title, detail]) => (
+              <div key={title} className="rounded-[8px] bg-[#fbfbfc] p-3">
+                <p className="text-[12px] font-extrabold text-black">{title}</p>
+                <p className="mt-1 text-[10px] font-semibold leading-relaxed text-[#667085]">{detail}</p>
+              </div>
+            ))}
+          </div>
+
+          <NextButton />
+        </div>
+      </div>
     </section>
   );
 }
@@ -2411,15 +2562,15 @@ export default function OnboardingPage() {
       id: "next",
       phase: "Final Review",
       label: "What Happens Next",
-      width: "max-w-[1050px]",
-      content: <WhatHappensNext />,
+      width: "max-w-[1120px]",
+      content: <WhatHappensNext data={visibleData} />,
     },
     {
       id: "security",
       phase: "Final Review",
       label: "Security",
-      width: "max-w-[1050px]",
-      content: <SafetyRow />,
+      width: "max-w-[1120px]",
+      content: <SafetyRow data={visibleData} />,
     },
     {
       id: "ready",

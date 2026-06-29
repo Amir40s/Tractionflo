@@ -1,5 +1,16 @@
 import { NextResponse } from "next/server";
 import { compactUserAuthMetadata } from "@/lib/auth-metadata";
+import {
+  escalationRulesMetadataKey,
+  normalizeEscalationRuleSettings,
+} from "@/lib/conversation-escalation";
+import {
+  normalizeRevenueOutcomeProviderSettings,
+  revenueOutcomeProvidersMetadataKey,
+  type RevenueOutcomeProviderSettings,
+} from "@/lib/revenue-outcome-providers";
+import { saveRevenueProviderConnections } from "@/lib/revenue-provider-execution";
+import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -132,6 +143,47 @@ function cleanOnboardingSetup(value: unknown) {
   return setup;
 }
 
+function buildRevenueProviderSettingsFromConversionActions(value: unknown): RevenueOutcomeProviderSettings | null {
+  const actions = cleanConversionActions(value);
+
+  if (!actions?.length) {
+    return null;
+  }
+
+  const outcomeByLabel: Record<string, string> = {
+    "Book a Call": "book_call",
+    "Purchase / Checkout": "purchase_product",
+    "Apply / Enroll": "start_trial",
+    "Free Resource / Lead Magnet": "join_newsletter",
+  };
+  const providerInputs: Array<{ outcomeType: string; enabled: boolean; actionUrl: string; executionMode: "link" }> = [];
+
+  actions.forEach((action) => {
+    const outcomeType = outcomeByLabel[action.label];
+
+    if (outcomeType) {
+      providerInputs.push({
+        outcomeType,
+        enabled: action.configured,
+        actionUrl: action.href,
+        executionMode: "link",
+      });
+    }
+  });
+
+  const includedOutcomeTypes = new Set(providerInputs.map((provider) => provider.outcomeType));
+
+  if (!providerInputs.length) {
+    return null;
+  }
+
+  const normalized = normalizeRevenueOutcomeProviderSettings({ providers: providerInputs });
+
+  return {
+    providers: normalized.providers.filter((provider) => includedOutcomeTypes.has(provider.outcomeType)),
+  };
+}
+
 async function getAuthenticatedUser() {
   const supabase = await createClient();
   const {
@@ -203,10 +255,11 @@ export async function PATCH(request: Request) {
     }
 
     const metadata = compactUserAuthMetadata(user.user_metadata);
+    const setupPatch = cleanOnboardingSetup(payload.setup);
     const existingSetup = isRecord(metadata.onboarding_setup) ? metadata.onboarding_setup : {};
     const nextSetup: Record<string, unknown> = {
       ...existingSetup,
-      ...cleanOnboardingSetup(payload.setup),
+      ...setupPatch,
       updatedAt: new Date().toISOString(),
     };
     const nextMetadata: Record<string, unknown> = {
@@ -224,12 +277,30 @@ export async function PATCH(request: Request) {
       nextMetadata.onboarding_business_goal = nextSetup.businessGoal;
     }
 
+    if (Array.isArray(nextSetup.escalationRules)) {
+      nextMetadata[escalationRulesMetadataKey] = normalizeEscalationRuleSettings(nextSetup.escalationRules);
+    }
+
+    const revenueProviderSettings = buildRevenueProviderSettingsFromConversionActions(nextSetup.conversionActions);
+
+    if (revenueProviderSettings) {
+      nextMetadata[revenueOutcomeProvidersMetadataKey] = revenueProviderSettings;
+    }
+
     const { error } = await supabase.auth.updateUser({
       data: nextMetadata,
     });
 
     if (error) {
       throw error;
+    }
+
+    if (revenueProviderSettings) {
+      await saveRevenueProviderConnections({
+        supabase: createSupabaseServiceClient(),
+        userId: user.id,
+        providers: revenueProviderSettings.providers,
+      });
     }
 
     return NextResponse.json({ ok: true, setup: nextSetup });
