@@ -1514,6 +1514,7 @@ async function processInstagramAutomations(
               category: 'human_handoff',
               urgency: handoffEscalation?.urgency || 'High',
               urgent: true,
+              autoHumanTakeover: true,
             },
           }).catch((notificationError) => {
             logger.error('Realtime Instagram handoff notification error:', { error: notificationError });
