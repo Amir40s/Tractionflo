@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import BrandLogo from "@/app/components/BrandLogo";
 import {
   AlertCircle,
   ArrowRight,
@@ -21,8 +22,6 @@ import {
   Link2,
   Lock,
   MessageCircle,
-  Plus,
-  RefreshCw,
   Send,
   ShieldCheck,
   ShoppingCart,
@@ -186,6 +185,39 @@ type OnboardingData = {
   allowedPages: string[];
 };
 
+type OnboardingDraft = {
+  businessName?: string;
+  niche?: string;
+  description?: string;
+  offers?: CatalogItem[];
+  businessGoal?: string;
+  conversionActions?: ConversionAction[];
+  escalationRules?: EscalationRule[];
+  permissions?: PermissionItem[];
+  missingItems?: MissingItem[];
+  behavior?: OnboardingData["behavior"];
+};
+
+type ActiveModal =
+  | { type: "business" }
+  | { type: "conversion"; actionLabel: string }
+  | { type: "missing"; itemLabel: string }
+  | { type: "customRule" }
+  | null;
+
+type PersistedOnboardingSetup = {
+  businessName?: string;
+  niche?: string;
+  description?: string;
+  offers?: CatalogItem[];
+  businessGoal?: string;
+  conversionActions?: Array<Pick<ConversionAction, "label" | "detail" | "configured" | "href">>;
+  escalationRules?: EscalationRule[];
+  permissions?: Array<Pick<PermissionItem, "label" | "detail" | "enabled">>;
+  missingItems?: MissingItem[];
+  behavior?: OnboardingData["behavior"];
+};
+
 const emptyData: OnboardingData = {
   isLoading: true,
   error: "",
@@ -281,6 +313,13 @@ const behaviorColumns = [
     ],
   },
 ];
+
+const onboardingNextEvent = "tractionflo:onboarding-next";
+const onboardingScreenCount = 16;
+
+function advanceOnboardingStep() {
+  window.dispatchEvent(new Event(onboardingNextEvent));
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -942,14 +981,101 @@ async function fetchJson(url: string) {
   return response.json().catch(() => ({})) as Promise<unknown>;
 }
 
+function normalizePersistedSetup(value: unknown): PersistedOnboardingSetup {
+  return isRecord(value) ? (value as PersistedOnboardingSetup) : {};
+}
+
+function getPersistedOnboardingSetup(payload: unknown) {
+  const root = isRecord(payload) ? payload : {};
+  return normalizePersistedSetup(root.setup);
+}
+
+function buildDraftFromPersistedSetup(setup: PersistedOnboardingSetup, baseData: OnboardingData): OnboardingDraft {
+  const draft: OnboardingDraft = {};
+
+  if (typeof setup.businessName === "string") draft.businessName = setup.businessName;
+  if (typeof setup.niche === "string") draft.niche = setup.niche;
+  if (typeof setup.description === "string") draft.description = setup.description;
+  if (Array.isArray(setup.offers)) draft.offers = setup.offers;
+  if (typeof setup.businessGoal === "string") draft.businessGoal = setup.businessGoal;
+  if (Array.isArray(setup.escalationRules)) draft.escalationRules = setup.escalationRules;
+  if (Array.isArray(setup.missingItems)) draft.missingItems = setup.missingItems;
+  if (setup.behavior) draft.behavior = setup.behavior;
+
+  if (Array.isArray(setup.conversionActions)) {
+    draft.conversionActions = baseData.conversionActions.map((action) => {
+      const saved = setup.conversionActions?.find((item) => item.label === action.label);
+      return saved ? { ...action, ...saved } : action;
+    });
+  }
+
+  if (Array.isArray(setup.permissions)) {
+    draft.permissions = baseData.permissions.map((permission) => {
+      const saved = setup.permissions?.find((item) => item.label === permission.label);
+      return saved ? { ...permission, ...saved } : permission;
+    });
+  }
+
+  return draft;
+}
+
+function serializeOnboardingDraft(partial: OnboardingDraft): PersistedOnboardingSetup {
+  const payload: PersistedOnboardingSetup = {};
+
+  if (partial.businessName !== undefined) payload.businessName = partial.businessName;
+  if (partial.niche !== undefined) payload.niche = partial.niche;
+  if (partial.description !== undefined) payload.description = partial.description;
+  if (partial.offers !== undefined) payload.offers = partial.offers;
+  if (partial.businessGoal !== undefined) payload.businessGoal = partial.businessGoal;
+  if (partial.escalationRules !== undefined) payload.escalationRules = partial.escalationRules;
+  if (partial.missingItems !== undefined) payload.missingItems = partial.missingItems;
+  if (partial.behavior !== undefined) payload.behavior = partial.behavior;
+  if (partial.conversionActions !== undefined) {
+    payload.conversionActions = partial.conversionActions.map((action) => ({
+      label: action.label,
+      detail: action.detail,
+      configured: action.configured,
+      href: action.href,
+    }));
+  }
+  if (partial.permissions !== undefined) {
+    payload.permissions = partial.permissions.map((permission) => ({
+      label: permission.label,
+      detail: permission.detail,
+      enabled: permission.enabled,
+    }));
+  }
+
+  return payload;
+}
+
+async function saveOnboardingSetup(partial: OnboardingDraft) {
+  const response = await fetch("/api/auth/onboarding", {
+    method: "PATCH",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ setup: serializeOnboardingDraft(partial) }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Could not save onboarding setup");
+  }
+
+  return payload;
+}
+
 function StepTitle({ number, title, subtitle }: { number: number; title: string; subtitle: string }) {
   return (
-    <div className="mb-5 flex items-start gap-3">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black text-[13px] font-extrabold text-white">
+    <div className="mb-3 flex items-start gap-3">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-black text-[12px] font-extrabold text-white">
         {number}
       </span>
       <div className="min-w-0">
-        <h2 className="text-[18px] font-extrabold leading-tight text-black">{title}</h2>
+        <h2 className="text-[17px] font-extrabold leading-tight text-black">{title}</h2>
         <p className="mt-1 text-[12px] font-semibold leading-relaxed text-[#667085]">{subtitle}</p>
       </div>
     </div>
@@ -958,7 +1084,7 @@ function StepTitle({ number, title, subtitle }: { number: number; title: string;
 
 function Card({ children, className = "", id }: { children: ReactNode; className?: string; id?: string }) {
   return (
-    <section id={id} className={`rounded-[8px] border border-[#e8ebf2] bg-white p-5 shadow-[0_18px_55px_rgba(15,23,42,0.04)] ${className}`}>
+    <section id={id} className={`rounded-[8px] border border-[#e8ebf2] bg-white p-4 shadow-[0_18px_55px_rgba(15,23,42,0.04)] ${className}`}>
       {children}
     </section>
   );
@@ -1236,13 +1362,7 @@ function OpportunitiesCard({ data }: { data: OnboardingData }) {
           </p>
         </div>
       )}
-      <a
-        href="/opportunities"
-        className="mt-5 flex items-center justify-between border-t border-[#eef1f5] pt-4 text-[14px] font-extrabold text-black"
-      >
-        View all {data.opportunities.length.toLocaleString()} detected opportunities
-        <ArrowRight size={17} strokeWidth={2.5} />
-      </a>
+      <NextButton />
     </Card>
   );
 }
@@ -1256,28 +1376,28 @@ function UnlockCard({ data, onFinish }: { data: OnboardingData; onFinish: () => 
   ];
 
   return (
-    <section className="rounded-[8px] bg-[#050505] p-6 text-white shadow-[0_24px_60px_rgba(0,0,0,0.24)]">
-      <h2 className="text-[28px] font-extrabold leading-tight">
+    <section className="rounded-[8px] bg-[#050505] p-4 text-white shadow-[0_24px_60px_rgba(0,0,0,0.24)]">
+      <h2 className="text-[24px] font-extrabold leading-tight">
         Unlock Your
         <span className="block bg-gradient-to-r from-[#ff7a00] to-[#e83e8c] bg-clip-text text-transparent">AI Sales Agent</span>
       </h2>
-      <p className="mt-5 text-[14px] font-semibold leading-relaxed text-[#e5e7eb]">
+      <p className="mt-3 text-[13px] font-semibold leading-relaxed text-[#e5e7eb]">
         Activate to automatically engage, qualify and convert these live opportunities 24/7.
       </p>
 
-      <div className="my-8 flex justify-center">
-        <div className="relative flex h-36 w-36 items-center justify-center">
+      <div className="my-4 flex justify-center">
+        <div className="relative flex h-24 w-24 items-center justify-center">
           <span className="absolute inset-6 rounded-full bg-[#ff7a00]/20 blur-xl" />
-          <span className="relative flex h-28 w-28 items-center justify-center rounded-full border border-white/15 bg-white text-black shadow-[0_20px_60px_rgba(255,122,0,0.2)]">
-            <Bot size={58} strokeWidth={2.2} />
+          <span className="relative flex h-20 w-20 items-center justify-center rounded-full border border-white/15 bg-white text-black shadow-[0_20px_60px_rgba(255,122,0,0.2)]">
+            <Bot size={42} strokeWidth={2.2} />
           </span>
-          <Sparkles size={18} className="absolute right-0 top-8 text-[#ffd166]" />
-          <Sparkles size={14} className="absolute bottom-5 left-1 text-[#f472b6]" />
+          <Sparkles size={16} className="absolute right-0 top-5 text-[#ffd166]" />
+          <Sparkles size={12} className="absolute bottom-4 left-1 text-[#f472b6]" />
         </div>
       </div>
 
       <p className="text-[13px] font-extrabold text-white">You&apos;ll unlock:</p>
-      <div className="mt-3 space-y-3">
+      <div className="mt-2 space-y-2">
         {items.map((item) => (
           <p key={item} className="flex items-center gap-2 text-[13px] font-semibold text-[#f2f4f7]">
             <CheckCircle2 size={16} className="text-white" strokeWidth={2.5} />
@@ -1289,17 +1409,23 @@ function UnlockCard({ data, onFinish }: { data: OnboardingData; onFinish: () => 
       <button
         type="button"
         onClick={onFinish}
-        className="mt-8 flex h-12 w-full items-center justify-center gap-2 rounded-[8px] bg-gradient-to-r from-[#ff7a00] to-[#e83e8c] px-4 text-[14px] font-extrabold text-white shadow-[0_18px_38px_rgba(232,62,140,0.28)] transition hover:brightness-105"
+        className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-[8px] bg-gradient-to-r from-[#ff7a00] to-[#e83e8c] px-4 text-[13px] font-extrabold text-white shadow-[0_18px_38px_rgba(232,62,140,0.28)] transition hover:brightness-105"
       >
         Activate AI Sales Agent
         <ArrowRight size={17} strokeWidth={2.5} />
       </button>
-      <p className="mt-4 text-center text-[12px] font-semibold text-[#d0d5dd]">30-day money back guarantee</p>
+      <p className="mt-3 text-center text-[12px] font-semibold text-[#d0d5dd]">30-day money back guarantee</p>
     </section>
   );
 }
 
-function VerifyBusinessCard({ data }: { data: OnboardingData }) {
+function VerifyBusinessCard({
+  data,
+  onEdit,
+}: {
+  data: OnboardingData;
+  onEdit: () => void;
+}) {
   return (
     <Card>
       <StepTitle number={5} title="Verify Your Business" subtitle="Review what we found" />
@@ -1327,12 +1453,20 @@ function VerifyBusinessCard({ data }: { data: OnboardingData }) {
         </div>
       </div>
       <div className="mt-6 grid grid-cols-2 gap-3">
-        <a href="/settings" className="flex h-11 items-center justify-center rounded-[8px] bg-black px-4 text-[13px] font-extrabold text-white">
+        <button
+          type="button"
+          onClick={advanceOnboardingStep}
+          className="flex h-11 items-center justify-center rounded-[8px] bg-black px-4 text-[13px] font-extrabold text-white"
+        >
           Looks Good
-        </a>
-        <a href="/settings" className="flex h-11 items-center justify-center rounded-[8px] border border-[#d0d5dd] px-4 text-[13px] font-extrabold text-black">
+        </button>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="flex h-11 items-center justify-center rounded-[8px] border border-[#d0d5dd] px-4 text-[13px] font-extrabold text-black"
+        >
           Edit
-        </a>
+        </button>
       </div>
     </Card>
   );
@@ -1347,7 +1481,13 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function GoalCard({ data }: { data: OnboardingData }) {
+function GoalCard({
+  data,
+  onSelectGoal,
+}: {
+  data: OnboardingData;
+  onSelectGoal: (goal: string) => void;
+}) {
   return (
     <Card>
       <StepTitle number={6} title="Business Goal" subtitle="What should your AI optimize for?" />
@@ -1356,7 +1496,12 @@ function GoalCard({ data }: { data: OnboardingData }) {
           const selected = label === data.businessGoal;
 
           return (
-            <div key={label} className="flex items-start gap-3 py-4 first:pt-0">
+            <button
+              key={label}
+              type="button"
+              onClick={() => onSelectGoal(label)}
+              className="flex w-full items-start gap-3 py-4 text-left first:pt-0"
+            >
               <span className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border ${selected ? "border-black" : "border-[#98a2b3]"}`}>
                 {selected ? <span className="h-2.5 w-2.5 rounded-full bg-black" /> : null}
               </span>
@@ -1364,16 +1509,22 @@ function GoalCard({ data }: { data: OnboardingData }) {
                 <p className="text-[13px] font-extrabold text-black">{label}</p>
                 <p className="mt-1 text-[11px] font-semibold text-[#667085]">{detail}</p>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
-      <NextButton target="conversion-actions" />
+      <NextButton />
     </Card>
   );
 }
 
-function ConversionActionsCard({ data }: { data: OnboardingData }) {
+function ConversionActionsCard({
+  data,
+  onEditAction,
+}: {
+  data: OnboardingData;
+  onEditAction: (actionLabel: string) => void;
+}) {
   return (
     <Card id="conversion-actions">
       <StepTitle number={7} title="Conversion Actions" subtitle="Add links to convert leads" />
@@ -1388,21 +1539,33 @@ function ConversionActionsCard({ data }: { data: OnboardingData }) {
                 <p className="text-[13px] font-extrabold text-black">{action.label}</p>
                 <p className="mt-1 truncate text-[11px] font-semibold text-[#667085]">{action.detail}</p>
               </div>
-              {action.configured ? <Check size={19} className="text-[#2ea44f]" strokeWidth={3} /> : <a href="/settings" className="text-[12px] font-extrabold text-[#344054]">Add</a>}
+              {action.configured ? (
+                <button type="button" onClick={() => onEditAction(action.label)} aria-label={`Edit ${action.label}`}>
+                  <Check size={19} className="text-[#2ea44f]" strokeWidth={3} />
+                </button>
+              ) : (
+                <button type="button" onClick={() => onEditAction(action.label)} className="text-[12px] font-extrabold text-[#344054]">
+                  Add
+                </button>
+              )}
             </div>
           );
         })}
       </div>
-      <a href="/settings" className="mt-4 flex items-center gap-2 text-[13px] font-extrabold text-black">
-        <Plus size={16} strokeWidth={2.5} />
-        Add Another Action
-      </a>
-      <NextButton target="escalation-rules" />
+      <NextButton />
     </Card>
   );
 }
 
-function EscalationRulesCard({ data }: { data: OnboardingData }) {
+function EscalationRulesCard({
+  data,
+  onToggleRule,
+  onCustomRule,
+}: {
+  data: OnboardingData;
+  onToggleRule: (ruleId: string) => void;
+  onCustomRule: () => void;
+}) {
   const visibleRules = data.escalationRules.length
     ? data.escalationRules
     : [{ id: "no-rules", label: "No saved escalation rules", enabled: false, action: "Add rules in settings" }];
@@ -1413,7 +1576,7 @@ function EscalationRulesCard({ data }: { data: OnboardingData }) {
       <p className="mb-3 text-[12px] font-semibold text-[#667085]">Notify me for:</p>
       <div className="space-y-4">
         {visibleRules.slice(0, 4).map((rule, index) => (
-          <div key={`${rule.id}-${index}`} className="flex items-center gap-3">
+          <button key={`${rule.id}-${index}`} type="button" onClick={() => onToggleRule(rule.id)} className="flex w-full items-center gap-3 text-left">
             <span className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-[#fff1ed] text-[#f04438]">
               {index === 0 ? <Flame size={18} /> : <MessageCircle size={18} />}
             </span>
@@ -1422,23 +1585,29 @@ function EscalationRulesCard({ data }: { data: OnboardingData }) {
               <p className="mt-1 truncate text-[11px] font-semibold text-[#667085]">{rule.action || rule.priority || "Escalate for review"}</p>
             </div>
             <TogglePill enabled={rule.enabled} />
-          </div>
+          </button>
         ))}
-        <a href="/settings" className="flex items-center gap-3 pt-1">
+        <button type="button" onClick={onCustomRule} className="flex w-full items-center gap-3 pt-1 text-left">
           <Circle size={18} className="text-[#667085]" />
           <div className="min-w-0 flex-1">
             <p className="text-[13px] font-extrabold text-black">Other custom</p>
             <p className="mt-1 text-[11px] font-semibold text-[#667085]">Add custom keywords</p>
           </div>
           <ChevronRight size={18} className="text-black" strokeWidth={2.4} />
-        </a>
+        </button>
       </div>
-      <NextButton target="ai-permissions" />
+      <NextButton />
     </Card>
   );
 }
 
-function PermissionsCard({ data }: { data: OnboardingData }) {
+function PermissionsCard({
+  data,
+  onTogglePermission,
+}: {
+  data: OnboardingData;
+  onTogglePermission: (label: string) => void;
+}) {
   return (
     <Card id="ai-permissions">
       <StepTitle number={9} title="AI Permissions" subtitle="Where can your AI engage?" />
@@ -1447,26 +1616,32 @@ function PermissionsCard({ data }: { data: OnboardingData }) {
           const Icon = permission.icon;
 
           return (
-            <div key={permission.label} className="flex items-center gap-3">
+            <button key={permission.label} type="button" onClick={() => onTogglePermission(permission.label)} className="flex w-full items-center gap-3 text-left">
               <Icon size={18} className="shrink-0 text-[#475467]" strokeWidth={2.3} />
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-extrabold text-black">{permission.label}</p>
                 <p className="mt-1 text-[11px] font-semibold text-[#667085]">{permission.detail}</p>
               </div>
               <TogglePill enabled={permission.enabled} />
-            </div>
+            </button>
           );
         })}
       </div>
       <div className="mt-6 rounded-[8px] bg-[#fff8eb] p-4 text-[12px] font-semibold leading-relaxed text-[#344054]">
         Your AI will only engage based on your business rules and knowledge.
       </div>
-      <NextButton target="missing-info" />
+      <NextButton />
     </Card>
   );
 }
 
-function MissingInfoCard({ data }: { data: OnboardingData }) {
+function MissingInfoCard({
+  data,
+  onEditMissing,
+}: {
+  data: OnboardingData;
+  onEditMissing: (itemLabel: string) => void;
+}) {
   const missingCount = data.missingItems.filter((item) => !item.complete).length;
 
   return (
@@ -1483,23 +1658,40 @@ function MissingInfoCard({ data }: { data: OnboardingData }) {
               <p className="text-[13px] font-extrabold text-black">{item.label}</p>
               <p className="mt-1 text-[11px] font-semibold text-[#667085]">{item.detail}</p>
             </div>
-            {item.complete ? <Check size={18} className="text-[#2ea44f]" strokeWidth={3} /> : <a href="/knowledge-base" className="text-[12px] font-extrabold text-[#175cd3]">Add</a>}
+            {item.complete ? (
+              <button type="button" onClick={() => onEditMissing(item.label)} aria-label={`Edit ${item.label}`}>
+                <Check size={18} className="text-[#2ea44f]" strokeWidth={3} />
+              </button>
+            ) : (
+              <button type="button" onClick={() => onEditMissing(item.label)} className="text-[12px] font-extrabold text-[#175cd3]">
+                Add
+              </button>
+            )}
           </div>
         ))}
       </div>
-      <a href="/dashboard" className="mt-6 block text-center text-[12px] font-extrabold text-[#344054]">
+      <button type="button" onClick={advanceOnboardingStep} className="mt-6 block w-full text-center text-[12px] font-extrabold text-[#344054]">
         I&apos;ll add this later
-      </a>
-      <NextButton target="agent-behavior" />
+      </button>
+      <NextButton />
     </Card>
   );
 }
 
-function NextButton({ target }: { target: string }) {
+function NextButton({ target }: { target?: string }) {
   return (
     <button
       type="button"
-      onClick={() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+      onClick={() => {
+        const targetElement = target ? document.getElementById(target) : null;
+
+        if (targetElement) {
+          targetElement.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
+
+        advanceOnboardingStep();
+      }}
       className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-[8px] border border-[#eef1f5] bg-white text-[13px] font-extrabold text-black transition hover:bg-[#f8fafc]"
     >
       Next
@@ -1508,8 +1700,15 @@ function NextButton({ target }: { target: string }) {
   );
 }
 
-function BehaviorCard({ data }: { data: OnboardingData }) {
+function BehaviorCard({
+  data,
+  onChangeBehavior,
+}: {
+  data: OnboardingData;
+  onChangeBehavior: (key: keyof OnboardingData["behavior"], value: string) => void;
+}) {
   const selected = [data.behavior.tone, data.behavior.responseLength, data.behavior.followUp];
+  const behaviorKeys: (keyof OnboardingData["behavior"])[] = ["tone", "responseLength", "followUp"];
 
   return (
     <Card id="agent-behavior" className="lg:col-span-2">
@@ -1523,7 +1722,12 @@ function BehaviorCard({ data }: { data: OnboardingData }) {
                 const active = selected[columnIndex] === label;
 
                 return (
-                  <div key={label} className={`flex gap-3 rounded-[8px] p-3 ${active ? "bg-[#f5f5f5]" : ""}`}>
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => onChangeBehavior(behaviorKeys[columnIndex], label)}
+                    className={`flex w-full gap-3 rounded-[8px] p-3 text-left ${active ? "bg-[#f5f5f5]" : ""}`}
+                  >
                     <span className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border ${active ? "border-black" : "border-[#98a2b3]"}`}>
                       {active ? <span className="h-2.5 w-2.5 rounded-full bg-black" /> : null}
                     </span>
@@ -1531,14 +1735,14 @@ function BehaviorCard({ data }: { data: OnboardingData }) {
                       <p className="text-[13px] font-extrabold text-black">{label}</p>
                       <p className="mt-1 text-[11px] font-semibold text-[#667085]">{detail}</p>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </div>
         ))}
       </div>
-      <NextButton target="review-confirm" />
+      <NextButton />
     </Card>
   );
 }
@@ -1699,16 +1903,197 @@ function SafetyRow() {
   );
 }
 
+function OnboardingModal({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 py-5">
+      <section className="max-h-[92vh] w-full max-w-[520px] overflow-y-auto rounded-[10px] bg-white p-5 shadow-[0_28px_90px_rgba(0,0,0,0.28)]">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-[18px] font-extrabold text-black">{title}</h2>
+          <button type="button" onClick={onClose} className="rounded-[8px] border border-[#d0d5dd] px-3 py-2 text-[12px] font-extrabold text-black">
+            Close
+          </button>
+        </div>
+        <div className="mt-5">{children}</div>
+      </section>
+    </div>
+  );
+}
+
+function FieldLabel({ children }: { children: ReactNode }) {
+  return <label className="block text-[12px] font-extrabold text-[#344054]">{children}</label>;
+}
+
+function textInputClass() {
+  return "mt-2 h-11 w-full rounded-[8px] border border-[#d0d5dd] px-3 text-[13px] font-semibold text-black outline-none focus:border-black focus:ring-2 focus:ring-black/10";
+}
+
+function textAreaClass() {
+  return "mt-2 min-h-[96px] w-full rounded-[8px] border border-[#d0d5dd] px-3 py-2 text-[13px] font-semibold leading-relaxed text-black outline-none focus:border-black focus:ring-2 focus:ring-black/10";
+}
+
+function BusinessEditForm({
+  data,
+  onSave,
+}: {
+  data: OnboardingData;
+  onSave: (draft: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "offers">) => void;
+}) {
+  const [businessName, setBusinessName] = useState(data.businessName);
+  const [niche, setNiche] = useState(data.niche);
+  const [description, setDescription] = useState(data.description);
+  const [offersText, setOffersText] = useState(data.offers.map((offer) => offer.title).join("\n"));
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const offerTitles = offersText
+          .split(/\r?\n/)
+          .map((offer) => offer.trim())
+          .filter(Boolean);
+        const offers = offerTitles.map((title) => {
+          const existing = data.offers.find((offer) => offer.title === title);
+
+          return existing || {
+            title,
+            priceText: "",
+            priceAmount: null,
+            currency: data.revenueCurrency,
+            description: "",
+            permalink: "",
+            tags: [],
+          };
+        });
+
+        onSave({ businessName: businessName.trim(), niche: niche.trim(), description: description.trim(), offers });
+      }}
+    >
+      <div>
+        <FieldLabel>Business name</FieldLabel>
+        <input className={textInputClass()} value={businessName} onChange={(event) => setBusinessName(event.target.value)} />
+      </div>
+      <div>
+        <FieldLabel>Niche</FieldLabel>
+        <input className={textInputClass()} value={niche} onChange={(event) => setNiche(event.target.value)} />
+      </div>
+      <div>
+        <FieldLabel>Description</FieldLabel>
+        <textarea className={textAreaClass()} value={description} onChange={(event) => setDescription(event.target.value)} />
+      </div>
+      <div>
+        <FieldLabel>Offers, one per line</FieldLabel>
+        <textarea className={textAreaClass()} value={offersText} onChange={(event) => setOffersText(event.target.value)} />
+      </div>
+      <button type="submit" className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white">
+        Save Business Details
+      </button>
+    </form>
+  );
+}
+
+function ConversionActionForm({
+  action,
+  onSave,
+}: {
+  action: ConversionAction;
+  onSave: (url: string) => void;
+}) {
+  const [url, setUrl] = useState(action.href || (action.configured ? action.detail : ""));
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave(url.trim());
+      }}
+    >
+      <div>
+        <FieldLabel>{action.label} link</FieldLabel>
+        <input className={textInputClass()} placeholder="https://..." value={url} onChange={(event) => setUrl(event.target.value)} />
+        <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#667085]">
+          This updates the onboarding screen here. You can save permanent provider settings from the dashboard later.
+        </p>
+      </div>
+      <button type="submit" className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white">
+        Save Action
+      </button>
+    </form>
+  );
+}
+
+function MissingInfoForm({
+  item,
+  onSave,
+}: {
+  item: MissingItem;
+  onSave: (detail: string) => void;
+}) {
+  const [detail, setDetail] = useState(item.complete ? item.detail : "");
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave(detail.trim() || "Added in onboarding");
+      }}
+    >
+      <div>
+        <FieldLabel>{item.label}</FieldLabel>
+        <textarea className={textAreaClass()} value={detail} onChange={(event) => setDetail(event.target.value)} />
+      </div>
+      <button type="submit" className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white">
+        Save Information
+      </button>
+    </form>
+  );
+}
+
+function CustomRuleForm({ onSave }: { onSave: (label: string, action: string) => void }) {
+  const [label, setLabel] = useState("");
+  const [action, setAction] = useState("Escalate for approval");
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave(label.trim() || "Custom rule", action.trim() || "Escalate for approval");
+      }}
+    >
+      <div>
+        <FieldLabel>Rule name or keywords</FieldLabel>
+        <input className={textInputClass()} value={label} onChange={(event) => setLabel(event.target.value)} />
+      </div>
+      <div>
+        <FieldLabel>Action</FieldLabel>
+        <input className={textInputClass()} value={action} onChange={(event) => setAction(event.target.value)} />
+      </div>
+      <button type="submit" className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white">
+        Add Rule
+      </button>
+    </form>
+  );
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [data, setData] = useState<OnboardingData>(emptyData);
-  const [refreshing, setRefreshing] = useState(false);
+  const [draft, setDraft] = useState<OnboardingDraft>({});
+  const [activeModal, setActiveModal] = useState<ActiveModal>(null);
+  const [stepIndex, setStepIndex] = useState(0);
 
-  const loadOnboardingData = useCallback(async (showRefreshing = false) => {
-    if (showRefreshing) {
-      setRefreshing(true);
-    }
-
+  const loadOnboardingData = useCallback(async () => {
     try {
       const scanParams = new URLSearchParams({ scan: "1" });
       const [
@@ -1721,6 +2106,7 @@ export default function OnboardingPage() {
         escalationResult,
         outcomeProvidersResult,
         knowledgeResult,
+        onboardingSetupResult,
       ] = await Promise.allSettled([
         fetchJson("/api/auth/instagram/status"),
         fetchJson(`/api/instagram/content?${scanParams.toString()}`),
@@ -1731,21 +2117,29 @@ export default function OnboardingPage() {
         fetchJson("/api/escalation-rules"),
         fetchJson("/api/revenue/outcome-providers"),
         fetchJson("/api/knowledge/sources"),
+        fetchJson("/api/auth/onboarding"),
       ]);
 
-      setData(
-        buildOnboardingData({
-          statusPayload: statusResult.status === "fulfilled" ? statusResult.value : {},
-          contentPayload: contentResult.status === "fulfilled" ? contentResult.value : {},
-          conversationsPayload: conversationsResult.status === "fulfilled" ? conversationsResult.value : {},
-          ordersPayload: ordersResult.status === "fulfilled" ? ordersResult.value : {},
-          catalogPayload: catalogResult.status === "fulfilled" ? catalogResult.value : {},
-          profilePayload: profileResult.status === "fulfilled" ? profileResult.value : {},
-          escalationPayload: escalationResult.status === "fulfilled" ? escalationResult.value : {},
-          outcomeProvidersPayload: outcomeProvidersResult.status === "fulfilled" ? outcomeProvidersResult.value : {},
-          knowledgePayload: knowledgeResult.status === "fulfilled" ? knowledgeResult.value : {},
-        }),
+      const nextData = buildOnboardingData({
+        statusPayload: statusResult.status === "fulfilled" ? statusResult.value : {},
+        contentPayload: contentResult.status === "fulfilled" ? contentResult.value : {},
+        conversationsPayload: conversationsResult.status === "fulfilled" ? conversationsResult.value : {},
+        ordersPayload: ordersResult.status === "fulfilled" ? ordersResult.value : {},
+        catalogPayload: catalogResult.status === "fulfilled" ? catalogResult.value : {},
+        profilePayload: profileResult.status === "fulfilled" ? profileResult.value : {},
+        escalationPayload: escalationResult.status === "fulfilled" ? escalationResult.value : {},
+        outcomeProvidersPayload: outcomeProvidersResult.status === "fulfilled" ? outcomeProvidersResult.value : {},
+        knowledgePayload: knowledgeResult.status === "fulfilled" ? knowledgeResult.value : {},
+      });
+      const persistedSetup = getPersistedOnboardingSetup(
+        onboardingSetupResult.status === "fulfilled" ? onboardingSetupResult.value : {}
       );
+
+      setData(nextData);
+      setDraft((current) => ({
+        ...buildDraftFromPersistedSetup(persistedSetup, nextData),
+        ...current,
+      }));
     } catch (error) {
       setData({
         ...emptyData,
@@ -1753,8 +2147,6 @@ export default function OnboardingPage() {
         error: error instanceof Error ? error.message : "Could not load onboarding data",
         lastUpdated: new Date().toISOString(),
       });
-    } finally {
-      setRefreshing(false);
     }
   }, []);
 
@@ -1768,6 +2160,17 @@ export default function OnboardingPage() {
     };
   }, [loadOnboardingData]);
 
+  useEffect(() => {
+    function handleNextStep() {
+      setStepIndex((current) => Math.min(current + 1, onboardingScreenCount - 1));
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    window.addEventListener(onboardingNextEvent, handleNextStep);
+
+    return () => window.removeEventListener(onboardingNextEvent, handleNextStep);
+  }, []);
+
   const phaseOneSummary = useMemo(() => {
     if (!data.connected) {
       return "Connect Instagram to see live opportunities";
@@ -1775,6 +2178,22 @@ export default function OnboardingPage() {
 
     return `${formatCompactNumber(data.conversationCount)} conversations scanned`;
   }, [data.connected, data.conversationCount]);
+  const visibleData = useMemo(() => {
+    const offers = draft.offers ?? data.offers;
+
+    return {
+      ...data,
+      ...draft,
+      offers,
+      catalogCount: draft.offers ? offers.length : data.catalogCount,
+      businessGoal: draft.businessGoal ?? data.businessGoal,
+      conversionActions: draft.conversionActions ?? data.conversionActions,
+      escalationRules: draft.escalationRules ?? data.escalationRules,
+      permissions: draft.permissions ?? data.permissions,
+      missingItems: draft.missingItems ?? data.missingItems,
+      behavior: draft.behavior ?? data.behavior,
+    } satisfies OnboardingData;
+  }, [data, draft]);
 
   async function finishOnboarding() {
     window.localStorage.setItem("tractionflo_onboarding_completed", "true");
@@ -1795,81 +2214,337 @@ export default function OnboardingPage() {
     window.location.href = "/api/auth/instagram?next=/onboarding";
   }
 
-  return (
-    <main className="min-h-screen bg-[#fbfbfc] px-4 py-5 text-black sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1480px] space-y-8">
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-black text-[12px] font-extrabold text-white">TF</span>
-            <span className="text-[20px] font-extrabold text-black">TractionFlo</span>
-          </div>
+  function updateDraft(partial: OnboardingDraft) {
+    setDraft((current) => ({ ...current, ...partial }));
+    void saveOnboardingSetup(partial).catch((error) => {
+      console.error("Onboarding setup save failed:", error);
+    });
+  }
 
-          <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <span className="inline-flex h-9 items-center justify-center rounded-[8px] bg-gradient-to-r from-[#ff7a00] to-[#e83e8c] px-5 text-[12px] font-extrabold uppercase text-white">
-              Phase 1: Discovery
+  function updateBusinessDraft(partial: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "offers">) {
+    updateDraft(partial);
+    setActiveModal(null);
+  }
+
+  function selectBusinessGoal(goal: string) {
+    updateDraft({ businessGoal: goal });
+  }
+
+  function editConversionAction(actionLabel: string, url: string) {
+    const actions = visibleData.conversionActions.map((action) =>
+      action.label === actionLabel
+        ? {
+            ...action,
+            configured: Boolean(url),
+            href: url,
+            detail: url || action.detail,
+          }
+        : action
+    );
+
+    updateDraft({ conversionActions: actions });
+    setActiveModal(null);
+  }
+
+  function toggleEscalationRule(ruleId: string) {
+    updateDraft({
+      escalationRules: visibleData.escalationRules.map((rule) =>
+        rule.id === ruleId ? { ...rule, enabled: !rule.enabled } : rule
+      ),
+    });
+  }
+
+  function addCustomRule(label: string, action: string) {
+    const customRule: EscalationRule = {
+      id: `custom-${Date.now()}`,
+      label,
+      action,
+      priority: "Medium",
+      enabled: true,
+    };
+
+    updateDraft({ escalationRules: [...visibleData.escalationRules, customRule] });
+    setActiveModal(null);
+  }
+
+  function togglePermission(label: string) {
+    updateDraft({
+      permissions: visibleData.permissions.map((permission) =>
+        permission.label === label ? { ...permission, enabled: !permission.enabled } : permission
+      ),
+    });
+  }
+
+  function editMissingInfo(itemLabel: string, detail: string) {
+    updateDraft({
+      missingItems: visibleData.missingItems.map((item) =>
+        item.label === itemLabel
+          ? {
+              ...item,
+              complete: true,
+              detail: detail || "Added in onboarding",
+            }
+          : item
+      ),
+    });
+    setActiveModal(null);
+  }
+
+  function updateBehavior(key: keyof OnboardingData["behavior"], value: string) {
+    updateDraft({
+      behavior: {
+        ...visibleData.behavior,
+        [key]: value,
+      },
+    });
+  }
+
+  function goNext() {
+    setStepIndex((current) => Math.min(current + 1, onboardingScreenCount - 1));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function goBack() {
+    setStepIndex((current) => Math.max(current - 1, 0));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  const onboardingScreens = [
+    {
+      id: "connect",
+      phase: "Phase 1: Discovery",
+      label: "Connect Instagram",
+      width: "max-w-[430px]",
+      content: <ConnectInstagramCard data={visibleData} onConnect={connectInstagram} />,
+    },
+    {
+      id: "discovery",
+      phase: "Phase 1: Discovery",
+      label: "AI Discovery",
+      width: "max-w-[430px]",
+      content: <DiscoveryCard data={visibleData} />,
+    },
+    {
+      id: "report",
+      phase: "Phase 1: Discovery",
+      label: "Opportunity Report",
+      width: "max-w-[560px]",
+      content: <ReportCard data={visibleData} />,
+    },
+    {
+      id: "opportunities",
+      phase: "Phase 1: Discovery",
+      label: "Missed Opportunities",
+      width: "max-w-[560px]",
+      content: <OpportunitiesCard data={visibleData} />,
+    },
+    {
+      id: "unlock",
+      phase: "Phase 1: Discovery",
+      label: "Unlock Agent",
+      width: "max-w-[430px]",
+      content: <UnlockCard data={visibleData} onFinish={goNext} />,
+    },
+    {
+      id: "verify",
+      phase: "Phase 2: AI Sales Agent Setup",
+      label: "Verify Business",
+      width: "max-w-[430px]",
+      content: <VerifyBusinessCard data={visibleData} onEdit={() => setActiveModal({ type: "business" })} />,
+    },
+    {
+      id: "goal",
+      phase: "Phase 2: AI Sales Agent Setup",
+      label: "Business Goal",
+      width: "max-w-[430px]",
+      content: <GoalCard data={visibleData} onSelectGoal={selectBusinessGoal} />,
+    },
+    {
+      id: "actions",
+      phase: "Phase 2: AI Sales Agent Setup",
+      label: "Conversion Actions",
+      width: "max-w-[430px]",
+      content: <ConversionActionsCard data={visibleData} onEditAction={(actionLabel) => setActiveModal({ type: "conversion", actionLabel })} />,
+    },
+    {
+      id: "escalation",
+      phase: "Phase 2: AI Sales Agent Setup",
+      label: "Escalation Rules",
+      width: "max-w-[430px]",
+      content: (
+        <EscalationRulesCard
+          data={visibleData}
+          onToggleRule={toggleEscalationRule}
+          onCustomRule={() => setActiveModal({ type: "customRule" })}
+        />
+      ),
+    },
+    {
+      id: "permissions",
+      phase: "Phase 2: AI Sales Agent Setup",
+      label: "AI Permissions",
+      width: "max-w-[430px]",
+      content: <PermissionsCard data={visibleData} onTogglePermission={togglePermission} />,
+    },
+    {
+      id: "missing",
+      phase: "Phase 2: AI Sales Agent Setup",
+      label: "Missing Info",
+      width: "max-w-[430px]",
+      content: <MissingInfoCard data={visibleData} onEditMissing={(itemLabel) => setActiveModal({ type: "missing", itemLabel })} />,
+    },
+    {
+      id: "behavior",
+      phase: "Phase 2: AI Sales Agent Setup",
+      label: "Agent Behavior",
+      width: "max-w-[980px]",
+      content: <BehaviorCard data={visibleData} onChangeBehavior={updateBehavior} />,
+    },
+    {
+      id: "review",
+      phase: "Phase 2: AI Sales Agent Setup",
+      label: "Review",
+      width: "max-w-[560px]",
+      content: <ReviewCard data={visibleData} onFinish={goNext} />,
+    },
+    {
+      id: "next",
+      phase: "Final Review",
+      label: "What Happens Next",
+      width: "max-w-[1050px]",
+      content: <WhatHappensNext />,
+    },
+    {
+      id: "security",
+      phase: "Final Review",
+      label: "Security",
+      width: "max-w-[1050px]",
+      content: <SafetyRow />,
+    },
+    {
+      id: "ready",
+      phase: "Agent Ready",
+      label: "Ready",
+      width: "max-w-[860px]",
+      content: <ReadyCard onFinish={() => void finishOnboarding()} />,
+    },
+  ];
+  const currentScreen = onboardingScreens[Math.min(stepIndex, onboardingScreens.length - 1)];
+  const progress = ((stepIndex + 1) / onboardingScreens.length) * 100;
+  const isFinalScreen = currentScreen.id === "ready";
+  const nextDisabled = stepIndex === 0 && !visibleData.connected;
+  const activeConversionAction =
+    activeModal?.type === "conversion"
+      ? visibleData.conversionActions.find((action) => action.label === activeModal.actionLabel)
+      : undefined;
+  const activeMissingItem =
+    activeModal?.type === "missing"
+      ? visibleData.missingItems.find((item) => item.label === activeModal.itemLabel)
+      : undefined;
+
+  return (
+    <main className="h-dvh overflow-hidden bg-[#fbfbfc] px-4 py-2 text-black sm:px-6 lg:px-8">
+      <div className="mx-auto flex h-full max-w-[1180px] flex-col gap-2">
+        <header className="flex shrink-0 flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <BrandLogo className="h-10 w-44" preload sizes="176px" />
+
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <span className="inline-flex h-8 items-center justify-center rounded-[8px] bg-gradient-to-r from-[#ff7a00] to-[#e83e8c] px-4 text-[11px] font-extrabold uppercase text-white">
+              {currentScreen.phase}
             </span>
-            <div className="flex flex-wrap gap-3 text-[12px] font-extrabold text-black">
+            <div className="flex flex-wrap gap-3 text-[11px] font-extrabold text-black">
               <span>100% free</span>
               <span>No commitment</span>
               <span>{phaseOneSummary}</span>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => void loadOnboardingData(true)}
-            disabled={refreshing}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-[8px] border border-[#d0d5dd] bg-white px-4 text-[12px] font-extrabold text-black transition hover:bg-[#f8fafc] disabled:opacity-60"
-          >
-            <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} strokeWidth={2.4} />
-            Refresh live data
-          </button>
         </header>
 
         {data.error && data.connected ? (
-          <div className="rounded-[8px] border border-[#fedf89] bg-[#fffbeb] p-4 text-[13px] font-semibold text-[#7a4b00]">
+          <div className="shrink-0 rounded-[8px] border border-[#fedf89] bg-[#fffbeb] p-3 text-[13px] font-semibold text-[#7a4b00]">
             Some Instagram data was limited by API permissions: {data.error}
           </div>
         ) : null}
 
-        <section className="grid gap-5 lg:grid-cols-2 xl:grid-cols-[1.05fr_1.05fr_1.12fr_1.25fr_0.95fr]">
-          <ConnectInstagramCard data={data} onConnect={connectInstagram} />
-          <DiscoveryCard data={data} />
-          <ReportCard data={data} />
-          <OpportunitiesCard data={data} />
-          <UnlockCard data={data} onFinish={() => void finishOnboarding()} />
+        <section className="shrink-0 rounded-[10px] border border-[#e8ebf2] bg-white/70 p-2.5 shadow-[0_18px_60px_rgba(15,23,42,0.04)]">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-[11px] font-extrabold uppercase text-[#667085]">
+                Screen {stepIndex + 1} of {onboardingScreens.length}
+              </p>
+              <h1 className="mt-0.5 text-[20px] font-extrabold text-black">{currentScreen.label}</h1>
+            </div>
+            <div className="flex flex-col gap-2 lg:items-end">
+              <div className="flex flex-wrap gap-2">
+                {onboardingScreens.map((screen, index) => (
+                  <button
+                    key={screen.id}
+                    type="button"
+                    aria-label={`Go to ${screen.label}`}
+                    onClick={() => {
+                      if (index > 0 && !visibleData.connected) {
+                        return;
+                      }
+
+                      setStepIndex(index);
+                    }}
+                    className={`h-2.5 rounded-full transition ${
+                      index === stepIndex ? "w-9 bg-black" : index < stepIndex ? "w-2.5 bg-[#667085]" : "w-2.5 bg-[#d0d5dd]"
+                    } ${index > 0 && !visibleData.connected ? "cursor-not-allowed opacity-40" : ""}`}
+                  />
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={goBack}
+                  disabled={stepIndex === 0}
+                  className="h-9 rounded-[8px] border border-[#d0d5dd] px-4 text-[12px] font-extrabold text-black transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={isFinalScreen ? () => void finishOnboarding() : goNext}
+                  disabled={nextDisabled}
+                  className="flex h-9 items-center justify-center gap-2 rounded-[8px] bg-black px-4 text-[12px] font-extrabold text-white transition hover:bg-[#1f2937] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {isFinalScreen ? "Dashboard" : nextDisabled ? "Connect first" : "Next"}
+                  <ArrowRight size={15} strokeWidth={2.5} />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-[#eef1f5]">
+            <span className="block h-full rounded-full bg-black transition-all duration-300" style={{ width: `${progress}%` }} />
+          </div>
         </section>
 
-        <div className="flex flex-col gap-3 border-t border-[#e8ebf2] pt-7 md:flex-row md:items-center md:justify-center">
-          <span className="inline-flex h-10 items-center justify-center rounded-[8px] bg-black px-6 text-[14px] font-extrabold uppercase text-white">
-            Phase 2: AI Sales Agent Setup
-          </span>
-          <p className="text-center text-[12px] font-extrabold text-black md:text-left">
-            One-time setup <span className="mx-2 text-[#98a2b3]">|</span> We build the best AI sales agent for your business
-          </p>
-        </div>
-
-        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-          <VerifyBusinessCard data={data} />
-          <GoalCard data={data} />
-          <ConversionActionsCard data={data} />
-          <EscalationRulesCard data={data} />
-          <PermissionsCard data={data} />
-          <MissingInfoCard data={data} />
+        <section className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+          <div className={`max-h-full w-full overflow-hidden py-1 ${currentScreen.width}`}>{currentScreen.content}</div>
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-[1.35fr_0.8fr_1.15fr]">
-          <BehaviorCard data={data} />
-          <ReviewCard data={data} onFinish={() => void finishOnboarding()} />
-          <ReadyCard onFinish={() => void finishOnboarding()} />
-        </section>
-
-        <WhatHappensNext />
-        <SafetyRow />
-
-        <footer className="pb-3 text-center text-[12px] font-semibold text-[#667085]">
-          Live onboarding data refreshes every 30 seconds while this page is open.
-        </footer>
+        {activeModal?.type === "business" ? (
+          <OnboardingModal title="Edit Business Details" onClose={() => setActiveModal(null)}>
+            <BusinessEditForm data={visibleData} onSave={updateBusinessDraft} />
+          </OnboardingModal>
+        ) : null}
+        {activeConversionAction ? (
+          <OnboardingModal title={`Update ${activeConversionAction.label}`} onClose={() => setActiveModal(null)}>
+            <ConversionActionForm action={activeConversionAction} onSave={(url) => editConversionAction(activeConversionAction.label, url)} />
+          </OnboardingModal>
+        ) : null}
+        {activeMissingItem ? (
+          <OnboardingModal title={`Add ${activeMissingItem.label}`} onClose={() => setActiveModal(null)}>
+            <MissingInfoForm item={activeMissingItem} onSave={(detail) => editMissingInfo(activeMissingItem.label, detail)} />
+          </OnboardingModal>
+        ) : null}
+        {activeModal?.type === "customRule" ? (
+          <OnboardingModal title="Add Custom Escalation Rule" onClose={() => setActiveModal(null)}>
+            <CustomRuleForm onSave={addCustomRule} />
+          </OnboardingModal>
+        ) : null}
       </div>
     </main>
   );
