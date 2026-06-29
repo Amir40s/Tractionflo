@@ -630,13 +630,17 @@ Write the next best reply adhering strictly to the Layer progression rules.`,
     outcomeProviders
   );
 
-  const calculateLayerStatuses = (ros: RevenueOperatingSnapshot, hasCatalogOffer: boolean): RevenueOperatingSnapshot["layerStatuses"] => {
+  const calculateLayerStatuses = (
+    ros: RevenueOperatingSnapshot,
+    hasCatalogOffer: boolean,
+    hasCatalogContext: boolean
+  ): RevenueOperatingSnapshot["layerStatuses"] => {
     const isFilled = (val: any) => typeof val === "string" && val.trim().length > 0 && val.toLowerCase() !== "unknown" && val.toLowerCase() !== "none";
     
     const isGreeting = ros.conversationIntelligence.intent?.toLowerCase().includes("greeting");
 
     const l1Complete = !isGreeting && isFilled(ros.conversationIntelligence.intent) && isFilled(ros.conversationIntelligence.sentiment);
-    const l2Complete = l1Complete && (hasCatalogOffer || !!integration.instagramCatalogId);
+    const l2Complete = l1Complete && (hasCatalogOffer || hasCatalogContext);
     
     const bi = ros.buyerIntelligence;
     const bantFilled = isFilled(bi.budget) && isFilled(bi.authority) && isFilled(bi.need) && isFilled(bi.timeline) && isFilled(bi.goal);
@@ -662,7 +666,7 @@ Write the next best reply adhering strictly to the Layer progression rules.`,
     };
   };
 
-  finalRos.layerStatuses = calculateLayerStatuses(finalRos, Boolean(catalogOffer));
+  finalRos.layerStatuses = calculateLayerStatuses(finalRos, Boolean(catalogOffer), productCatalog.length > 0);
 
   // Guard CTAs and catalog overlays
   starter = removeUnrequestedBookingCta(starter, latestText);
