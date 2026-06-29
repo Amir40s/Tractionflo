@@ -876,6 +876,8 @@ async function generateWebhookAiReply({
     catalogOffers: result.catalogOffers,
     catalogCheckoutReady: result.catalogCheckoutReady,
     ros: result.ros,
+    handoff: result.handoff,
+    escalation: result.escalation,
   };
 }
 
@@ -1488,6 +1490,37 @@ async function processInstagramAutomations(
         catalogOffer = aiResult.catalogOffer;
         catalogOffers = aiResult.catalogOffers;
         catalogCheckoutReady = aiResult.catalogCheckoutReady;
+
+        // Human handoff: AI detected it can't answer — notify human and skip auto-send
+        if (aiResult.handoff) {
+          logger.info("processInstagramAutomations: AI requested human handoff (human_handoff tactic). Triggering handover notification.", {
+            userId: user.id,
+            senderId: event.senderId,
+          });
+          const handoffEscalation = aiResult.escalation;
+          const handoffTitle = handoffEscalation?.label || 'Human handoff requested';
+          const handoffBody = handoffEscalation?.summary || 'AI could not answer and has requested a human to take over.';
+          await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
+            type: 'escalation',
+            title: handoffTitle,
+            body: handoffBody,
+            url: '/conversations',
+            metadata: {
+              source: 'instagram-webhook-ai-handoff',
+              userId: user.id,
+              senderId: event.senderId,
+              conversationId: event.senderId,
+              messageId: event.mid,
+              category: 'human_handoff',
+              urgency: handoffEscalation?.urgency || 'High',
+              urgent: true,
+            },
+          }).catch((notificationError) => {
+            logger.error('Realtime Instagram handoff notification error:', { error: notificationError });
+          });
+          // Do NOT send the AI reply — hand the conversation to a human
+          continue;
+        }
       }
 
       if (!reply.trim()) {
