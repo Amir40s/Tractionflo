@@ -3397,6 +3397,23 @@ export default function Inbox() {
     };
   }, []);
 
+  // Listen for AI-requested human handoffs and auto-switch the conversation to human takeover
+  useEffect(() => {
+    function handleHumanTakeover(event: Event) {
+      const conversationId = (event as CustomEvent<{ conversationId: string }>).detail?.conversationId;
+      if (!conversationId) return;
+      setTakeoverModes((current) => {
+        if (current[conversationId] === "human") return current;
+        return { ...current, [conversationId]: "human" };
+      });
+    }
+
+    window.addEventListener("tractionflo:human-takeover", handleHumanTakeover);
+    return () => {
+      window.removeEventListener("tractionflo:human-takeover", handleHumanTakeover);
+    };
+  }, []);
+
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       setOauthError(getInstagramOAuthErrorFromLocation());
