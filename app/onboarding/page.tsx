@@ -744,7 +744,7 @@ function buildPermissions(connected: boolean, allowedPages: string[], conversati
   return [
     {
       label: "Reply to DMs",
-      detail: conversationCount > 0 ? `${conversationCount} thread${conversationCount === 1 ? "" : "s"} available` : "Respond to new DMs",
+      detail: conversationCount > 0 ? `${conversationCount} DM conversation${conversationCount === 1 ? "" : "s"} available` : "Respond to new DMs",
       enabled: hasInbox,
       icon: User,
     },
