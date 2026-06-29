@@ -1115,6 +1115,15 @@ async function processInstagramAutomations(
         continue;
       }
 
+      const senderAccount = await getFreshInstagramAccountByIgUserId(supabase, event.senderId).catch(() => null);
+      if (senderAccount?.access_token) {
+        logger.info("processInstagramAutomations: Sender is also a TractionFlo connected account. Skipping auto-reply to prevent bot loops.", {
+          recipientId: event.recipientId,
+          senderId: event.senderId
+        });
+        continue;
+      }
+
       // Fetch user to check settings and metadata
       const { data: { user }, error: userError } = await supabase.auth.admin.getUserById(account.user_id);
       if (userError || !user) {

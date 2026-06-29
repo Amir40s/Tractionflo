@@ -520,7 +520,7 @@ Recent conversation:
 ${conversationLines || 'No prior messages.'}
 
 CRITICAL FINAL INSTRUCTIONS BEFORE WRITING YOUR REPLY:
-1. Answer direct questions simply and casually. If the user asks a direct question (e.g. for a price), ONLY answer the question. Do NOT add unnecessary follow-up questions or pivots.
+1. Answer direct questions simply and casually. ONLY answer exactly what the user asked. NEVER provide unrequested information, especially pricing or long explanations, unless explicitly asked for. Be extremely brief. Do NOT add unnecessary follow-up questions or pivots.
 2. If asking a discovery question, make it sound like a quick DM from a friend, not a survey.
 3. NEVER use empathetic AI filler like "I understand", "I completely understand", or "I'm here to help". Just answer the question or make your point directly.
 4. NEVER use "This will help me assist you better" or any customer-service phrasing.
@@ -573,17 +573,14 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
     hasCatalogOffer: boolean,
     hasCatalogContext: boolean
   ): RevenueOperatingSnapshot["layerStatuses"] => {
-    const isFilled = (val: any) => typeof val === "string" && val.trim().length > 0 && val.toLowerCase() !== "unknown" && val.toLowerCase() !== "none";
-    
+  const isFilled = (val: any) => typeof val === "string" && val.trim().length > 0 && val.toLowerCase() !== "unknown" && val.toLowerCase() !== "none";
+  
     const isGreeting = ros.conversationIntelligence.intent?.toLowerCase().includes("greeting");
-
     const l1Complete = !isGreeting && isFilled(ros.conversationIntelligence.intent) && isFilled(ros.conversationIntelligence.sentiment);
     const l2Complete = l1Complete && (hasCatalogOffer || productCatalog.length > 0);
-    
     const bi = ros.buyerIntelligence;
     const bantFilled = isFilled(bi.budget) && isFilled(bi.authority) && isFilled(bi.need) && isFilled(bi.timeline) && isFilled(bi.goal);
     const l3Complete = l2Complete && bantFilled;
-    
     const l4Complete = l3Complete && isFilled(ros.revenueIntelligence.recommendation);
     const l5Complete = l4Complete && isFilled(ros.decision.bestNextAction);
     const l6Complete = l5Complete; 
@@ -606,7 +603,6 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
 
   finalRos.layerStatuses = calculateLayerStatuses(finalRos, Boolean(catalogOffer), productCatalog.length > 0);
 
-  // Guard CTAs and catalog overlays
   starter = removeUnrequestedBookingCta(starter, latestText);
   reply = removeUnrequestedBookingCta(reply, latestText);
   cta = removeUnrequestedBookingCta(cta, latestText);
