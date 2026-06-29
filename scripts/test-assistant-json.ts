@@ -33,8 +33,7 @@ async function testRun() {
   const apiKey = platformConfig.apiKey;
   const openai = new OpenAI({ apiKey });
 
-  // Get first user's assistant
-  const { data: { users } } = await supabase.auth.admin.listUsers();
+   const { data: { users } } = await supabase.auth.admin.listUsers();
   const user = users.find(u => u.user_metadata?.openai_assistant_id);
   if (!user) {
     console.error("No user with assistant ID found.");

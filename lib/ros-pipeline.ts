@@ -178,7 +178,6 @@ export async function runRosPipeline(input: RosPipelineInput): Promise<RosPipeli
       recommendedAction: escalation.recommendedAction,
       cta: 'Take over in inbox',
     };
-    
     let escalationRos = applyRevenueOutcomeAction(
       applyRevenueStrategy(
         buildFallbackRevenueOperatingSnapshot({
@@ -321,7 +320,7 @@ export async function runRosPipeline(input: RosPipelineInput): Promise<RosPipeli
 
 ${integration.systemPrompt}
 
-IMPORTANT: The attached files and vector store contain the primary truth for this business (such as menus, pricing, services, and policies). You MUST search these files using the file_search tool for any specific business inquiries (e.g. "menu", "pricing", "cost", "hours", "booking", or specific products/services). Do NOT rely on default prompts or assume the business context is TractionFlo if the knowledge base documents specify a different business (e.g. Taste Haven Restaurant). HOWEVER, you must absolutely WITHHOLD pricing, menus, and full features until the Buyer Intelligence layer (BANT) is fully complete.
+IMPORTANT: The attached files and vector store contain the primary truth for this business (such as menus, pricing, services, and policies). You MUST search these files using the file_search tool for any specific business inquiries (e.g. "menu", "pricing", "cost", "hours", "booking", or specific products/services). Do NOT rely on default prompts or assume the business context is TractionFlo if the knowledge base documents specify a different business (e.g. Taste Haven Restaurant).
 
 ${getAiBehaviorPrompt(integration.behavior)}
 
@@ -334,8 +333,11 @@ TractionFlo ROS™ is an AI-powered Revenue Operating System designed to determi
 Determine the highest-probability next action that increases the chance of a successful business outcome.
 
 # Tone & Personality
-1. You are an experienced human sales representative. You MUST sound 100% human. Never sound like an AI or a corporate bot.
-2. Talk like a real person managing an Instagram DM. Keep replies brief, casual, and conversational. NEVER use robotic AI phrases like "Welcome to [Brand]!", "How can I assist you today?", or "Feel free to ask!".
+1. You are a real human messaging someone back on Instagram. You MUST sound 100% human.
+2. NEVER use AI therapy talk or corporate empathy like "I understand that...", "I completely understand...", "That makes sense", or "I'm here to help".
+3. NEVER use robotic customer service phrases like "Welcome to [Brand]!", "How can I assist you?", "Feel free to ask!", "Let me know if you have any questions", or "This will help me assist you better" etc.
+4. Keep replies extremely brief, casual, and direct. Real people do not write long paragraphs on Instagram.
+5. If the user says they are not interested, say "No worries!" or "All good!" and gracefully end the conversation. Do NOT interrogate them about why they aren't interested.
 
 # System Architecture (The 9 Intelligence Layers)
 
@@ -386,13 +388,11 @@ Determine the highest-probability next action that increases the chance of a suc
 # Complete Processing Flow
 Customer Message -> Conversation Intelligence -> Business Intelligence -> Buyer Intelligence -> Revenue Intelligence -> Revenue Memory -> Revenue Learning Engine -> Revenue Outcome Intelligence -> Decision Intelligence -> Response Generation -> Escalation Intelligence
 
-# STRICT LAYER-BASED PROGRESSION RULES
-- Greeting Layer: If a user only says "Hi" or a generic greeting, process ONLY the Greeting Layer. Respond naturally like a human salesperson (e.g., "Hey!"). Do NOT ask unnecessary questions or show products.
-- Buyer Intelligence / Discovery Layer: If the user asks "What are you selling?" or expresses initial interest, classify it under this layer. Follow only the rules, objectives, and discovery questions defined for qualification.
-- Product Recommendation & Pricing Layers: DO NOT jump to Product Recommendation, Pricing, or Closing layers until the previous layers (Greeting and Discovery) have been completed.
-- STAY IN YOUR LAYER: Every layer contains its own logic, questions, and expected outputs. You must stay within that layer until enough information is collected to move to the next one.
-- NO ASSUMPTIONS: Never guess customer intent, never assume buying interest, and never recommend products or send menus before understanding the customer's requirements.
-- SINGLE-MESSAGE FOCUS: Progress one layer at a time. Do NOT act like an AI assistant that tries to answer everything, pitch products, and close the deal in a single message.
+# CONVERSATION RULES
+- Greeting Layer: If a user only says "Hi" or a generic greeting, respond naturally like a human salesperson (e.g., "Hey!"). Do NOT ask unnecessary questions or show products immediately unless asked.
+- Direct Questions: If the user asks for pricing, menus, or specific product features, you MUST answer their question directly using the attached files. Do not force them to answer qualification questions first if they are asking a direct question.
+- Qualification: If the user hasn't asked a direct question and is just browsing, ask natural qualification questions to guide them to the right product.
+- SINGLE-MESSAGE FOCUS: Keep your responses concise. Do NOT act like an AI assistant that tries to answer everything, pitch products, and close the deal in a single long message.
 
 # Final Mission
 Determine the highest-probability next action that increases the chance of a successful business outcome. Not a chatbot. Not a support bot. Not an autoresponder. A Revenue Operating System.
@@ -415,7 +415,7 @@ Product discovery status: ${catalogDiscoveryRequired ? 'needs_questions' : 'read
 - Only ask for missing core details: budget and product goal/desired item/use-case.
 - Known core details: budget=${catalogDiscoveryState.hasBudget ? 'yes' : 'no'}, product_goal=${catalogDiscoveryState.hasGoal ? 'yes' : 'no'}.
 - Once budget and product goal are known, stop asking more discovery questions and show the best matching product option.
-- Do NOT present pricing, full product features, or menus unless Buyer Intelligence is fully complete. If asked "what are you selling", briefly mention the category and immediately ask a discovery question.
+- If asked "what are you selling" or for pricing/features, answer their question directly and concisely based on your knowledge base.
 
 Configured revenue outcome providers:
 ${formatRevenueOutcomeProvidersForPrompt(outcomeProviders) || 'No external outcome provider links are configured yet. If the right outcome needs a provider link, ask for contact/consent or use a manual next step.'}
@@ -447,7 +447,7 @@ Track tacticIntelligence with stable snake_case tactic names, including the orde
 JSON shape:
 {
   "starter": "first response to send when AI Starts Conversation is on and this is a new inbound lead; empty when not needed",
-  "reply": "best next answer to the latest user message; NEVER include prices, menus, or full product features unless Buyer Intelligence (BANT) is complete; be brief and conversational",
+  "reply": "best next answer to the latest user message; answer direct questions directly; be brief and conversational",
   "cta": "short CTA message that moves a ready lead forward",
   ${leadSchema},
   "ros": {
@@ -520,15 +520,14 @@ Recent conversation:
 ${conversationLines || 'No prior messages.'}
 
 CRITICAL FINAL INSTRUCTIONS BEFORE WRITING YOUR REPLY:
-1. Check the Saved Buyer Memory. Have you collected all core BANT facts (Budget, Authority, Need, Timeline, Goal)?
-2. If BANT is NOT fully complete, you are strictly in Layer 3 (Buyer Intelligence). You are FORBIDDEN from presenting product features, full menus, or pricing.
-3. If the user asks "what are you selling", "how much is it", or similar, briefly state the category (e.g., "We offer AI courses") and IMMEDIATELY ask a discovery question to collect a missing BANT fact.
-4. Do not send walls of text or bulleted lists of features until Layer 3 is complete. Be conversational, human, and brief (1-2 short sentences max).
+1. Answer direct questions simply and casually using the knowledge base.
+2. If asking a discovery question, make it sound like a quick DM from a friend, not a survey.
+3. NEVER use empathetic AI filler like "I understand", "I completely understand", or "I'm here to help". Just answer the question or make your point directly.
+4. NEVER use "This will help me assist you better" or any customer-service phrasing.
+5. If the user is not interested, just say "No worries, have a good one!" or similar. Do NOT try to force them into a qualification framework.
+6. MAXIMUM 1-2 short sentences. No bullet points. NO WALLS OF TEXT.
 
-5. IGNORE any past mistakes in the conversation history. Even if you previously revealed the price ($79, $299) or course features, DO NOT repeat them now. You must act as if you haven't mentioned them yet.
-6. YOU WILL BE SEVERELY PENALIZED if you mention $79, $299, or list out course features in your reply before collecting ALL 5 BANT facts.
-
-Write the next best reply adhering strictly to the Layer progression rules.`,
+Write the next best reply adhering strictly to these rules. Make sure it sounds like a human typed it on a phone.`,
       },
     ],
   });
@@ -539,68 +538,7 @@ Write the next best reply adhering strictly to the Layer progression rules.`,
   let starter = normalizeText(parsed.starter, '', 500);
   let cta = normalizeText(parsed.cta, lead.cta, 500);
 
-  // ==========================================
-  // HARD-CODED BANT GUARD — Scans ACTUAL user messages, NOT the AI's
-  // self-reported buyerIntelligence. The AI lies about BANT completeness
-  // by inferring values the user never explicitly stated. This guard
-  // checks what the USER actually said and blocks pricing/features
-  // until real qualification has happened.
-  // ==========================================
-  {
-    const userMessages = messages
-      .filter(m => m.from === 'user')
-      .map(m => (m.text || '').toLowerCase())
-      .join(' ');
-    const userMsgCount = messages.filter(m => m.from === 'user').length;
-
-    // Check if the USER (not the AI) has explicitly provided BANT signals
-    const userMentionedBudget = /\$\d+|\d+\s*(?:dollars|usd)|budget|afford|spend|invest|pay|willing to pay|price range/i.test(userMessages);
-    const userMentionedTimeline = /\b(this week|this month|today|tomorrow|asap|urgent|soon|next month|next week|start|by |deadline|right away|immediately|before|within)\b/i.test(userMessages);
-    const userMentionedNeedOrGoal = /\b(i need|i want|looking for|my goal|career|job|freelanc|business|problem|struggling|learn|improve|automat|build|create|side hustle|income|skill)\b/i.test(userMessages);
-    const userMentionedAuthority = /\b(i decide|my decision|i.m the|team|boss|manager|company|we need|our)\b/i.test(userMessages);
-
-    const bantSignalCount = [userMentionedBudget, userMentionedTimeline, userMentionedNeedOrGoal, userMentionedAuthority].filter(Boolean).length;
-
-    // BANT is only "real" if the user has provided at least 3 explicit signals
-    // OR if there have been enough back-and-forth turns (at least 5 user messages)
-    const bantReallyComplete = bantSignalCount >= 3 || (userMsgCount >= 5 && bantSignalCount >= 2);
-
-    if (!bantReallyComplete) {
-      const hasPricing = /\$\d+|\d+\s*(?:dollars|USD|usd)/i.test(reply);
-      const hasFeatureDump = /(?:[-•]\s*.+\n?){3,}/m.test(reply) || reply.length > 280;
-
-      if (hasPricing || hasFeatureDump) {
-        logger.info('ROS Pipeline [BANT GUARD]: BLOCKED pricing/feature dump. User has NOT provided enough BANT signals.', {
-          userMsgCount,
-          bantSignalCount,
-          userMentionedBudget,
-          userMentionedTimeline,
-          userMentionedNeedOrGoal,
-          userMentionedAuthority,
-          originalReplyPreview: reply.slice(0, 100),
-          hasPricing,
-          hasFeatureDump,
-        });
-
-        // Pick the right qualifying question based on what's missing
-        const missingBant: string[] = [];
-        if (!userMentionedNeedOrGoal) missingBant.push('goal');
-        if (!userMentionedBudget) missingBant.push('budget');
-        if (!userMentionedTimeline) missingBant.push('timeline');
-        if (!userMentionedAuthority) missingBant.push('authority');
-
-        const qualifyingQuestions: Record<string, string> = {
-          goal: "What's your main goal — are you looking to pick up new skills for a career switch, or more to level up in your current role?",
-          budget: "What kind of budget are you working with for something like this?",
-          timeline: "Are you looking to jump in soon, or is this more of a down-the-road thing?",
-          authority: "Would you be making this call yourself, or is someone else involved in the decision?",
-        };
-
-        const firstMissing = missingBant[0] || 'goal';
-        reply = `Yeah we've got some great stuff in the AI and automation space! ${qualifyingQuestions[firstMissing]}`;
-      }
-    }
-  }
+  // Removed HARD-CODED BANT GUARD to allow AI to respond to pricing queries directly.
 
   // ==========================================
   // LAYER 4: REVENUE INTELLIGENCE (Post-Run Frameworks)
@@ -640,7 +578,7 @@ Write the next best reply adhering strictly to the Layer progression rules.`,
     const isGreeting = ros.conversationIntelligence.intent?.toLowerCase().includes("greeting");
 
     const l1Complete = !isGreeting && isFilled(ros.conversationIntelligence.intent) && isFilled(ros.conversationIntelligence.sentiment);
-    const l2Complete = l1Complete && (hasCatalogOffer || hasCatalogContext);
+    const l2Complete = l1Complete && (hasCatalogOffer || productCatalog.length > 0);
     
     const bi = ros.buyerIntelligence;
     const bantFilled = isFilled(bi.budget) && isFilled(bi.authority) && isFilled(bi.need) && isFilled(bi.timeline) && isFilled(bi.goal);
@@ -648,10 +586,10 @@ Write the next best reply adhering strictly to the Layer progression rules.`,
     
     const l4Complete = l3Complete && isFilled(ros.revenueIntelligence.recommendation);
     const l5Complete = l4Complete && isFilled(ros.decision.bestNextAction);
-    const l6Complete = l5Complete; // memory happens automatically if previous is done
+    const l6Complete = l5Complete; 
     const l7Complete = l6Complete && ros.tacticIntelligence.tactics.length > 0;
     const l8Complete = l7Complete && Object.keys(ros.outcomeProbabilities).length > 0;
-    const l9Complete = l8Complete; // escalation check
+    const l9Complete = l8Complete; 
 
     return {
       layer1: l1Complete ? "completed" : "in_progress",
