@@ -83,6 +83,15 @@ function emitNotificationEvent(notification: RealtimeNotificationPayload) {
 
   window.dispatchEvent(new CustomEvent(realtimeNotificationHistoryEventName, { detail: history }));
   window.dispatchEvent(new CustomEvent(realtimeNotificationEventName, { detail: notification }));
+
+  // Auto-switch conversation to human takeover when the AI requested a handoff
+  if (notification.metadata?.autoHumanTakeover && notification.metadata?.senderId) {
+    window.dispatchEvent(
+      new CustomEvent("tractionflo:human-takeover", {
+        detail: { conversationId: notification.metadata.senderId },
+      })
+    );
+  }
 }
 
 async function sendBrowserNotification(notification: RealtimeNotificationPayload) {
