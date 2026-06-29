@@ -620,6 +620,17 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
     cta = buildCatalogOfferReply(cta, checkoutCatalogOffer);
   }
 
+  const isHandoff = finalRos.tacticIntelligence?.tactics?.includes('human_handoff') || false;
+  const pipelineEscalation = isHandoff ? {
+    intent: 'human_handoff' as const,
+    label: 'Human handoff requests',
+    urgency: 'High' as const,
+    summary: 'AI requested human handoff during conversation.',
+    recommendedAction: 'Switch this conversation to human takeover and respond personally.',
+    signals: ['human_handoff'],
+    reply: '',
+  } : null;
+
   // ==========================================
   // LAYER 6: REVENUE MEMORY (Post-Run Persistence)
   // ==========================================
@@ -631,7 +642,7 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
     conversationId,
     messages: messages as any,
     snapshot: finalRos,
-    escalation: null,
+    escalation: pipelineEscalation,
     outcomeProviders,
     source: 'ai_pipeline_ros',
     reply,
@@ -643,8 +654,8 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
     reply,
     starter,
     cta,
-    handoff: false,
-    escalation: null,
+    handoff: isHandoff,
+    escalation: pipelineEscalation,
     lead,
     ros: finalRos,
     catalogOffer: checkoutCatalogOffer,
