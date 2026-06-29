@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import { normalizeNotificationSettings } from "@/lib/notification-preferences";
 import { createClient } from "@/utils/supabase/server";
 
@@ -54,9 +55,10 @@ export async function POST(request: Request) {
     }
 
     const notifications = normalizeNotificationSettings(payload.notifications);
+    const metadata = compactUserAuthMetadata(user.user_metadata);
     const { error } = await supabase.auth.updateUser({
       data: {
-        ...user.user_metadata,
+        ...metadata,
         notification_preferences: notifications,
       },
     });

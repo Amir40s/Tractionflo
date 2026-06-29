@@ -1,11 +1,93 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
+  type CommerceOrder,
   getCommerceOrderById,
   prepareCommerceOrderCheckout,
 } from "@/lib/commerce-orders";
+import { getFreshInstagramAccount, getFreshInstagramAccountByIgUserId } from "@/lib/instagram-token";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
+
+function getOrderConversationId(order: { conversationId?: string; instagramSenderId?: string }) {
+  return order.conversationId || order.instagramSenderId || "";
+}
+
+function addOrderReturnParams(url: URL, order: { id: string; conversationId?: string; instagramSenderId?: string }) {
+  url.searchParams.set("order_id", order.id);
+
+  const conversationId = getOrderConversationId(order);
+
+  if (conversationId) {
+    url.searchParams.set("conversation", conversationId);
+  }
+}
+
+function getReturnTo(requestUrl: URL) {
+  if (requestUrl.searchParams.get("return_to") === "instagram") {
+    return "instagram";
+  }
+
+  return requestUrl.searchParams.get("return_to") === "inbox" ? "inbox" : "";
+}
+
+function buildInstagramInboxUrl(username = "") {
+  const normalizedUsername = username.replace(/^@/, "").trim();
+
+  if (normalizedUsername) {
+    return new URL(`https://ig.me/m/${encodeURIComponent(normalizedUsername)}`);
+  }
+
+  return new URL("https://www.instagram.com/direct/inbox/");
+}
+
+function getMetadataString(metadata: Record<string, unknown> | undefined, keys: string[]) {
+  const record = metadata || {};
+
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+async function getInstagramBusinessUsername(supabase: ReturnType<typeof createSupabaseServiceClient>, order: CommerceOrder) {
+  const savedUsername = getMetadataString(order.metadata, ["businessInstagramUsername", "business_instagram_username"]);
+  const savedInstagramId = getMetadataString(order.metadata, ["businessInstagramId", "business_instagram_id", "recipientId", "recipient_id"]);
+
+  if (savedUsername) {
+    return savedUsername;
+  }
+
+  try {
+    let account = savedInstagramId
+      ? await getFreshInstagramAccountByIgUserId(supabase, savedInstagramId)
+      : null;
+
+    if (!account?.access_token) {
+      account = await getFreshInstagramAccount(supabase, order.userId);
+    }
+
+    if (!account?.access_token) {
+      return "";
+    }
+
+    const profileUrl = new URL("https://graph.instagram.com/v21.0/me");
+    profileUrl.searchParams.set("fields", "id,username");
+    profileUrl.searchParams.set("access_token", account.access_token);
+
+    const response = await fetch(profileUrl.toString(), { cache: "no-store" });
+    const profile = (await response.json().catch(() => ({}))) as { username?: string };
+
+    return response.ok && typeof profile.username === "string" ? profile.username.trim() : "";
+  } catch {
+    return "";
+  }
+}
 
 export async function GET(
   request: NextRequest,
@@ -13,7 +95,7 @@ export async function GET(
 ) {
   const requestUrl = new URL(request.url);
   const cancelUrl = new URL("/checkout/cancel", requestUrl.origin);
-  const returnTo = requestUrl.searchParams.get("return_to") === "inbox" ? "inbox" : "";
+  const returnTo = getReturnTo(requestUrl);
 
   if (returnTo) {
     cancelUrl.searchParams.set("return_to", returnTo);
@@ -30,8 +112,12 @@ export async function GET(
     }
 
     if (order.status === "paid" || order.paymentStatus === "paid") {
+      if (returnTo === "instagram") {
+        return NextResponse.redirect(buildInstagramInboxUrl(await getInstagramBusinessUsername(supabase, order)), 303);
+      }
+
       const successUrl = new URL(returnTo === "inbox" ? "/conversations" : "/checkout/success", requestUrl.origin);
-      successUrl.searchParams.set("order_id", order.id);
+      addOrderReturnParams(successUrl, order);
       if (returnTo === "inbox") {
         successUrl.searchParams.set("payment", "success");
       }

@@ -32,6 +32,10 @@ function getTimestamp(value: StoredInstagramMessageInput["timestamp"]) {
   return Date.now();
 }
 
+function normalizeMessageText(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 function isSchemaMismatch(error: unknown) {
   const message =
     error && typeof error === "object" && "message" in error && typeof error.message === "string"
@@ -44,6 +48,54 @@ function isSchemaMismatch(error: unknown) {
     message.includes("not found") ||
     message.includes("column")
   );
+}
+
+async function hasNearbyStoredDuplicate({
+  supabase,
+  userId,
+  conversationId,
+  senderId,
+  recipientId,
+  direction,
+  text,
+  timestamp,
+}: {
+  supabase: SupabaseServiceClient;
+  userId: string | null;
+  conversationId: string | null;
+  senderId: string | null;
+  recipientId: string | null;
+  direction: StoredInstagramMessageInput["direction"];
+  text: string;
+  timestamp: number;
+}) {
+  const normalizedText = normalizeMessageText(text);
+
+  if (!userId || !conversationId || !senderId || !recipientId || !normalizedText) {
+    return false;
+  }
+
+  const { data, error } = await supabase
+    .from("messages")
+    .select("text,timestamp")
+    .eq("user_id", userId)
+    .eq("conversation_id", conversationId)
+    .eq("sender_id", senderId)
+    .eq("recipient_id", recipientId)
+    .eq("direction", direction)
+    .gte("timestamp", timestamp - 120_000)
+    .lte("timestamp", timestamp + 120_000)
+    .limit(20);
+
+  if (error) {
+    if (!isSchemaMismatch(error)) {
+      console.warn("Stored Instagram message duplicate check failed:", error);
+    }
+
+    return false;
+  }
+
+  return (data || []).some((row) => normalizeMessageText(String(row.text || "")) === normalizedText);
 }
 
 export async function storeInstagramMessage({
@@ -59,18 +111,38 @@ export async function storeInstagramMessage({
   rawEvent = {},
   metadata = {},
 }: StoredInstagramMessageInput) {
+  const normalizedMid = typeof mid === "string" ? mid.trim() : mid || null;
+  const normalizedTimestamp = getTimestamp(timestamp);
   const payload = {
-    mid: mid || null,
+    mid: normalizedMid || null,
     user_id: userId || null,
     conversation_id: conversationId || senderId || null,
     sender_id: senderId || null,
     recipient_id: recipientId || null,
     direction,
     text: text || "",
-    timestamp: getTimestamp(timestamp),
+    timestamp: normalizedTimestamp,
     raw_event: rawEvent,
     metadata,
   };
+
+  if (!payload.mid) {
+    const duplicateExists = await hasNearbyStoredDuplicate({
+      supabase,
+      userId: payload.user_id,
+      conversationId: payload.conversation_id,
+      senderId: payload.sender_id,
+      recipientId: payload.recipient_id,
+      direction,
+      text: payload.text,
+      timestamp: payload.timestamp,
+    });
+
+    if (duplicateExists) {
+      return;
+    }
+  }
+
   const { error } = await supabase.from("messages").insert(payload);
 
   if (!error || ("code" in error && error.code === "23505")) {
@@ -82,10 +154,10 @@ export async function storeInstagramMessage({
   }
 
   const fallbackPayload = {
-    mid: mid || null,
+    mid: normalizedMid || null,
     sender_id: senderId || recipientId || null,
     text: text || "",
-    timestamp: getTimestamp(timestamp),
+    timestamp: normalizedTimestamp,
   };
   const { error: fallbackError } = await supabase.from("messages").insert(fallbackPayload);
 

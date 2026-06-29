@@ -3,6 +3,7 @@ import {
   normalizeRevenueOutcomeProviderSettings,
   revenueOutcomeProvidersMetadataKey,
 } from "@/lib/revenue-outcome-providers";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import {
   loadRevenueOutcomeProviderSettings,
   saveRevenueProviderConnections,
@@ -13,6 +14,19 @@ import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
+
+function isProviderConfigured(provider: { enabled: boolean; actionUrl: string; webhookUrl: string; apiEndpoint: string; outcomeType: string }) {
+  return Boolean(
+    provider.enabled &&
+      (
+        provider.actionUrl ||
+        provider.webhookUrl ||
+        provider.apiEndpoint ||
+        provider.outcomeType === "purchase_product" ||
+        provider.outcomeType === "follow_creator"
+      )
+  );
+}
 
 async function getAuthenticatedUser() {
   const supabase = await createClient();
@@ -61,7 +75,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const metadata = user.user_metadata || {};
+    const metadata = compactUserAuthMetadata(user.user_metadata);
     const outcomeProviders = normalizeRevenueOutcomeProviderSettings(
       payload && typeof payload === "object" && "outcomeProviders" in payload
         ? (payload as { outcomeProviders?: unknown }).outcomeProviders
@@ -80,11 +94,8 @@ export async function POST(request: Request) {
       secrets: providerSecrets,
     });
 
-    const { data, error } = await supabase.auth.updateUser({
-      data: {
-        ...metadata,
-        [revenueOutcomeProvidersMetadataKey]: outcomeProviders,
-      },
+    const { error } = await supabase.auth.updateUser({
+      data: metadata,
     });
 
     if (error) {
@@ -97,7 +108,7 @@ export async function POST(request: Request) {
       body: "Newsletter, booking, trial, renewal, upgrade, cart, or testimonial outcome routes were updated.",
       url: "/settings",
       metadata: {
-        connectedProviders: outcomeProviders.providers.filter((provider) => provider.enabled && provider.actionUrl).length,
+        connectedProviders: outcomeProviders.providers.filter(isProviderConfigured).length,
       },
     }).catch((notificationError) => {
       console.error("Realtime outcome provider notification error:", notificationError);
@@ -106,7 +117,7 @@ export async function POST(request: Request) {
     const mergedOutcomeProviders = await loadRevenueOutcomeProviderSettings({
       supabase: serviceSupabase,
       userId: user.id,
-      metadataValue: (data.user?.user_metadata || {})[revenueOutcomeProvidersMetadataKey] || outcomeProviders,
+      metadataValue: outcomeProviders,
     });
 
     return NextResponse.json({

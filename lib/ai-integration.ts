@@ -110,7 +110,7 @@ export const defaultAiIntegrationSettings: AiIntegrationSettings = {
   leadQualificationRules:
     "Qualify leads by budget, timeline, problem fit, engagement intent, and whether they are ready for a call or pricing.",
   ctaMessage: "Would you like to book a quick call or should I send pricing details here?",
-  autoSend: false,
+  autoSend: true,
 };
 
 export function maskOpenAiKey(apiKey: unknown) {

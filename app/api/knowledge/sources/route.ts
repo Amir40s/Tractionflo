@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { canAccessPage, getUserPermissionProfile } from "@/lib/agent-permissions";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import {
   buildKnowledgeSourceIndex,
   createKnowledgeStoragePaths,
@@ -18,8 +19,8 @@ import {
 } from "@/lib/knowledge-base";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
-import { getStoredOpenAiKey } from "@/lib/ai-integration";
 import { getOrCreateAssistant, getOrCreateVectorStore, attachVectorStoreToAssistant, uploadFileToVectorStore, syncVectorStoreWithStorage } from "@/lib/openai-assistants";
+import { resolvePlatformAiConfig } from "@/lib/platform-ai-config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -96,7 +97,7 @@ export async function GET() {
     const sources = await listKnowledgeSourceIndexes(supabase, user.id);
 
     const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-    const apiKey = getStoredOpenAiKey(metadata);
+    const { apiKey } = await resolvePlatformAiConfig(supabase);
     const vectorStoreId = metadata.openai_vector_store_id as string | undefined;
 
     if (apiKey && vectorStoreId) {
@@ -136,10 +137,10 @@ export async function POST(request: Request) {
     const existingSources = await listKnowledgeSourceIndexes(supabase, user.id);
 
     const metadata = (user.user_metadata || {}) as Record<string, unknown>;
-    const apiKey = getStoredOpenAiKey(metadata);
+    const { apiKey } = await resolvePlatformAiConfig(supabase);
 
     if (!apiKey) {
-      return NextResponse.json({ error: "OpenAI API key is missing. Please save it in Settings first to use the Assistants API." }, { status: 400 });
+      return NextResponse.json({ error: "OpenAI API key is missing. Ask a superadmin to save the platform key first." }, { status: 400 });
     }
 
     let assistantId = metadata.openai_assistant_id as string | undefined;
@@ -155,7 +156,8 @@ export async function POST(request: Request) {
       
       const authSupabase = await createClient();
       await authSupabase.auth.updateUser({ 
-        data: { 
+        data: {
+          ...compactUserAuthMetadata(metadata),
           openai_assistant_id: assistantId,
           openai_vector_store_id: vectorStoreId
         } 

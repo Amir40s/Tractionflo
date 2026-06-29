@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from '@/lib/ai-integration';
+import { getAiBehaviorPrompt } from '@/lib/ai-integration';
 import { requestOpenAiChatCompletion } from '@/lib/openai-chat';
 import { recordOpenAiUsage } from '@/lib/openai-usage';
+import { resolvePlatformAiConfig } from '@/lib/platform-ai-config';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
@@ -24,15 +25,14 @@ export async function POST() {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    const metadata = user.user_metadata || {};
-    const apiKey = getStoredOpenAiKey(metadata);
+    const serviceSupabase = createSupabaseServiceClient();
+    const platformConfig = await resolvePlatformAiConfig(serviceSupabase);
+    const { apiKey, integration } = platformConfig;
 
     if (!apiKey) {
-      return NextResponse.json({ error: 'Save your OpenAI API key first.' }, { status: 400 });
+      return NextResponse.json({ error: 'Ask a superadmin to add the platform OpenAI key first.' }, { status: 400 });
     }
 
-    const integration = normalizeAiIntegrationMetadata(metadata);
-    const serviceSupabase = createSupabaseServiceClient();
     const reply = await requestOpenAiChatCompletion({
       apiKey,
       model: integration.model,

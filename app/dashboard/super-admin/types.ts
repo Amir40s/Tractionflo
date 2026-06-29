@@ -13,6 +13,7 @@ export type SuperAdminPage =
   | "platform-instagram"
   | "platform-api"
   | "platform-queue"
+  | "ai-integration"
   | "ai-usage"
   | "ai-costs"
   | "ai-escalations"
@@ -39,6 +40,7 @@ export type AccountProfile = {
 
 export type Opportunity = {
   id?: string;
+  conversationId?: string;
   title: string;
   eyebrow: string;
   body: string[];
@@ -224,6 +226,8 @@ export type SuperAdminAiResponse = {
     creators: number;
     configuredCreators: number;
     autoSendCreators: number;
+    platformKeyConfigured: boolean;
+    platformAiSource: string;
     totalMessages: number;
     messagesToday: number;
     aiReadyMessages: number;

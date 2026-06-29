@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import {
   defaultInstagramWelcomeAutomation,
   instagramWelcomeAutomationMetadataKey,
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const metadata = user.user_metadata || {};
+    const metadata = compactUserAuthMetadata(user.user_metadata || {});
     const current = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
     const nextAutomation = normalizeInstagramWelcomeAutomation({
       ...current,

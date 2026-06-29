@@ -17,7 +17,6 @@ import {
   Shield,
   ShoppingCart,
   Sparkles,
-  Star,
   Target,
   TriangleAlert,
   User,
@@ -67,6 +66,7 @@ type AdminDateRangePreset = "7d" | "30d" | "90d";
 
 type Opportunity = {
   id?: string;
+  conversationId?: string;
   title: string;
   eyebrow: string;
   body: string[];
@@ -86,6 +86,7 @@ type PipelineStep = {
 
 type OpportunityPageCard = {
   id: string;
+  conversationId: string;
   name: string;
   subtitle: string;
   detail: string;
@@ -585,6 +586,27 @@ function hasCreatorVipLeadEscalationSignal(text: string, buyerHits: number, inbo
   );
 }
 
+function hasCreatorSalesLeadSignal(text: string, buyerHits: number, inboundCount: number) {
+  return (
+    hasCreatorBuyingIntentSignal(text, buyerHits) ||
+    hasCreatorQuantityEscalationSignal(text) ||
+    hasCreatorUrgentOrderSignal(text) ||
+    hasCreatorVipLeadEscalationSignal(text, buyerHits, inboundCount)
+  );
+}
+
+function hasCreatorPauseEscalationSignal(text: string, rules: EscalationRuleSetting[]) {
+  const activeRules = normalizeEscalationRuleSettings(rules);
+  const complaintsEnabled = isCreatorEscalationRuleEnabled(activeRules, "complaints");
+
+  return (
+    (hasCreatorKeyword(text, creatorRefundEscalationKeywords) && isCreatorEscalationRuleEnabled(activeRules, "refunds")) ||
+    ((hasCreatorKeyword(text, creatorProductIssueEscalationKeywords) || hasCreatorKeyword(text, creatorComplaintEscalationKeywords)) && complaintsEnabled) ||
+    ((hasCreatorKeyword(text, creatorHumanEscalationKeywords) || hasCreatorKeyword(text, creatorComplexEscalationKeywords)) &&
+      isCreatorEscalationRuleEnabled(activeRules, "human_handoff"))
+  );
+}
+
 function hasCreatorTimelineSignal(text: string) {
   return (
     hasCreatorPhrase(text, creatorTimelineKeywords) ||
@@ -638,8 +660,13 @@ function getCreatorLeadQualification({
   const hasGoal = hasCreatorGoalSignal(text);
   const hasBudget = hasCreatorBudgetSignal(text);
   const hasTimeline = hasCreatorTimelineSignal(text);
-  const hasBuyingIntent = hasCreatorBuyingIntentSignal(text, buyerHits);
-  const hasInterest = buyerHits > 0 || partnershipHits > 0 || communityHits > 0 || hasCreatorPhrase(text, ["interested", "tell me more", "details", "info", "information"]);
+  const hasBuyingIntent = hasCreatorSalesLeadSignal(text, buyerHits, inboundCount);
+  const hasInterest =
+    hasBuyingIntent ||
+    buyerHits > 0 ||
+    partnershipHits > 0 ||
+    communityHits > 0 ||
+    hasCreatorPhrase(text, ["interested", "tell me more", "details", "info", "information"]);
   const qualificationScore = clampCreatorScore(
     10 +
       (hasInterest ? 20 : 0) +
@@ -661,6 +688,7 @@ function getCreatorLeadQualification({
   const urgency = getCreatorLeadUrgency(qualificationScore, text);
   const signals = [
     buyerHits > 0 ? "Buying or booking language" : "",
+    hasBuyingIntent && buyerHits === 0 ? "Urgent or quantity order signal" : "",
     partnershipHits > 0 ? "Partnership/collaboration language" : "",
     communityHits > 0 ? "Community or referral signal" : "",
     hasGoal ? "Goal or need mentioned" : "",
@@ -833,20 +861,78 @@ function getCreatorEscalationEvidence(
   return evidence ? truncateCreatorText(evidence, 110) : "";
 }
 
+function getCreatorEscalationSourceKey(conversation: InstagramSettingsConversation, category: string) {
+  const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
+  const matcher = (text: string) => {
+    if (category === "refund") return hasCreatorKeyword(text, creatorRefundEscalationKeywords);
+    if (category === "product_issue") return hasCreatorKeyword(text, creatorProductIssueEscalationKeywords);
+    if (category === "complaint") return hasCreatorKeyword(text, creatorComplaintEscalationKeywords);
+    if (category === "custom_bulk") return hasCreatorKeyword(text, creatorCustomBulkEscalationKeywords) || hasCreatorQuantityEscalationSignal(text);
+    if (category === "urgent_order") return hasCreatorUrgentOrderSignal(text);
+    if (category === "brand_deal") return countCreatorKeywordHits(text, creatorPartnershipKeywords) > 0;
+    if (category === "vip_lead") return hasCreatorVipLeadEscalationSignal(text, countCreatorKeywordHits(text, creatorBuyerKeywords), inboundCount);
+    if (category === "human") return hasCreatorKeyword(text, creatorHumanEscalationKeywords);
+    if (category === "complex") return hasCreatorKeyword(text, creatorComplexEscalationKeywords);
+
+    return hasCreatorKeyword(text, creatorEscalationKeywords) || hasCreatorQuantityEscalationSignal(text);
+  };
+  const matchingMessage = getCreatorSortedMessages(conversation).find(
+    (message) => message.from === "user" && matcher(getCreatorMessageText(message))
+  );
+  const source = matchingMessage?.id || matchingMessage?.time || String(getCreatorConversationTime(conversation));
+
+  return source.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+function sanitizeCreatorStateKey(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function getCreatorOpportunitySourceKey(
+  conversation: InstagramSettingsConversation,
+  opportunity: { badge: string }
+) {
+  const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
+  const matcher = (text: string) => {
+    const buyerHits = countCreatorKeywordHits(text, creatorBuyerKeywords);
+
+    if (opportunity.badge === "PARTNERSHIP") {
+      return countCreatorKeywordHits(text, creatorPartnershipKeywords) > 0;
+    }
+
+    if (opportunity.badge === "COMMUNITY") {
+      return countCreatorKeywordHits(text, creatorCommunityKeywords) > 0;
+    }
+
+    return hasCreatorSalesLeadSignal(text, buyerHits, inboundCount);
+  };
+  const matchingMessage = getCreatorSortedMessages(conversation).find(
+    (message) => message.from === "user" && matcher(getCreatorMessageText(message))
+  );
+  const source = matchingMessage?.id || matchingMessage?.time || String(getCreatorConversationTime(conversation));
+
+  return [
+    sanitizeCreatorStateKey(conversation.id),
+    sanitizeCreatorStateKey(opportunity.badge.toLowerCase()),
+    sanitizeCreatorStateKey(source),
+  ].join("-");
+}
+
 function isCreatorEscalationRuleEnabled(rules: EscalationRuleSetting[], ruleId: string) {
   const rule = normalizeEscalationRuleSettings(rules).find((item) => item.id === ruleId);
   return !rule || (rule.enabled && rule.action !== "Monitor only");
 }
 
 export function classifyCreatorOpportunity(conversation: InstagramSettingsConversation, rules: EscalationRuleSetting[] = defaultEscalationRuleSettings) {
-  const text = getCreatorConversationText(conversation);
+  const latestText = getCreatorLatestInboundText(conversation);
+  const text = latestText || getCreatorConversationText(conversation);
   const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
   const buyerHits = countCreatorKeywordHits(text, creatorBuyerKeywords);
   const partnershipHits = countCreatorKeywordHits(text, creatorPartnershipKeywords);
   const communityHits = countCreatorKeywordHits(text, creatorCommunityKeywords);
-  const escalation = classifyCreatorEscalation(conversation, rules);
+  const hasSalesLead = hasCreatorSalesLeadSignal(text, buyerHits, inboundCount);
 
-  if (escalation && !["vip_lead", "brand_deal", "custom_bulk", "urgent_order"].includes(escalation.category)) {
+  if (latestText && hasCreatorPauseEscalationSignal(latestText, rules)) {
     return null;
   }
 
@@ -864,9 +950,11 @@ export function classifyCreatorOpportunity(conversation: InstagramSettingsConver
     };
   }
 
-  if (buyerHits > 0) {
-    const badge = "HIGH INTENT";
-    const subtitle = "Buying intent";
+  if (hasSalesLead) {
+    const urgentSignal = hasCreatorUrgentOrderSignal(text);
+    const quantitySignal = hasCreatorQuantityEscalationSignal(text);
+    const badge = urgentSignal ? "URGENT LEAD" : quantitySignal ? "BULK LEAD" : "HIGH INTENT";
+    const subtitle = urgentSignal ? "Urgent buying intent" : quantitySignal ? "Large order interest" : "Buying intent";
 
     return {
       badge,
@@ -985,80 +1073,6 @@ export function classifyCreatorEscalations(
         summary: "Customer expressed dissatisfaction, complaint language, or poor-service feedback.",
         evidence: evidenceFor((messageText) => hasCreatorKeyword(messageText, creatorComplaintEscalationKeywords)),
         recommendedAction: "Take over with an apology, acknowledge the complaint, collect the order/context, and resolve it manually.",
-      });
-    }
-
-    if (hasBulkSignal && isCreatorEscalationRuleEnabled(activeRules, "bulk_orders")) {
-      escalations.push({
-        category: "custom_bulk",
-        badge: hasUrgentSignal ? "Urgent Bulk Order" : "Custom/Bulk Order",
-        badgeTone: "bg-[#eef4ff] text-[#3044ff]",
-        borderTone: "border-[#cad6ff]",
-        glowTone: "bg-[#fbfcff]",
-        dotTone: "bg-[#3044ff]",
-        icon: Crown,
-        risk: "High",
-        riskLevel: "High",
-        summary: "Customer asked about a bulk, wholesale, custom, or large-quantity order.",
-        evidence: evidenceFor(
-          (messageText) =>
-            hasCreatorKeyword(messageText, creatorCustomBulkEscalationKeywords) ||
-            hasCreatorQuantityEscalationSignal(messageText)
-        ),
-        recommendedAction: "Take over to confirm quantity, customization details, deadline, stock, pricing, advance payment, and delivery feasibility.",
-      });
-    }
-
-    if (hasUrgentSignal && isCreatorEscalationRuleEnabled(activeRules, "urgent_orders")) {
-      escalations.push({
-        category: "urgent_order",
-        badge: "Urgent Order",
-        badgeTone: "bg-[#eef4ff] text-[#3044ff]",
-        borderTone: "border-[#cad6ff]",
-        glowTone: "bg-[#fbfcff]",
-        dotTone: "bg-[#3044ff]",
-        icon: Crown,
-        risk: "High",
-        riskLevel: "High",
-        summary: "Customer needs an urgent or time-sensitive order.",
-        evidence: evidenceFor((messageText) => hasCreatorUrgentOrderSignal(messageText)),
-        recommendedAction: "Take over immediately to confirm availability, delivery feasibility, payment timing, and next steps.",
-      });
-    }
-
-    if (partnershipHits > 0 && isCreatorEscalationRuleEnabled(activeRules, "partnerships")) {
-      escalations.push({
-        category: "brand_deal",
-        badge: "Brand Deal",
-        badgeTone: "bg-[#eafaf0] text-[#0a9b3f]",
-        borderTone: "border-[#bdeacb]",
-        glowTone: "bg-[#fbfffc]",
-        dotTone: "bg-[#13a84f]",
-        icon: BriefcaseBusiness,
-        risk: "Medium",
-        riskLevel: "Medium",
-        summary: "Customer asked about partnership, collaboration, sponsor, affiliate, or brand deal work.",
-        evidence: evidenceFor((messageText) => countCreatorKeywordHits(messageText, creatorPartnershipKeywords) > 0),
-        recommendedAction: "Take over and ask for campaign scope, brand details, budget, deliverables, timeline, and contact information.",
-      });
-    }
-
-    if (hasVipSignal && isCreatorEscalationRuleEnabled(activeRules, "vip")) {
-      escalations.push({
-        category: "vip_lead",
-        badge: "High-Ticket Lead",
-        badgeTone: "bg-[#eef4ff] text-[#3044ff]",
-        borderTone: "border-[#cad6ff]",
-        glowTone: "bg-[#fbfcff]",
-        dotTone: "bg-[#3044ff]",
-        icon: Star,
-        risk: "High",
-        riskLevel: "High",
-        summary: "Customer appears ready to buy, book, pay, or discuss a high-value order.",
-        evidence: evidenceFor((messageText) =>
-          hasCreatorVipLeadEscalationSignal(messageText, countCreatorKeywordHits(messageText, creatorBuyerKeywords), inboundCount)
-        ),
-        recommendedAction: "Take over or review immediately. The customer appears ready to buy, book, or receive a payment/checkout link.",
       });
     }
 
@@ -1190,9 +1204,11 @@ export function buildCreatorLiveSummary(
   const opportunityCards: OpportunityPageCard[] = opportunityRecords.map(({ conversation, opportunity }) => {
     const preview = getCreatorConversationPreview(conversation);
     const score = opportunity.score;
+    const opportunityId = getCreatorOpportunitySourceKey(conversation, opportunity);
 
     return {
-      id: conversation.id,
+      id: opportunityId,
+      conversationId: conversation.id,
       name: getCreatorParticipantName(conversation),
       subtitle: opportunity.subtitle,
       detail: preview === "No messages" ? "Real conversation loaded from Instagram. No user message text is available yet." : truncateCreatorText(preview),
@@ -1221,6 +1237,7 @@ export function buildCreatorLiveSummary(
 
   const dashboardOpportunities: Opportunity[] = opportunityCards.slice(0, 4).map((card) => ({
     id: card.id,
+    conversationId: card.conversationId,
     title: card.subtitle,
     eyebrow: card.badge,
     body: [card.name, card.detail],
@@ -1235,7 +1252,7 @@ export function buildCreatorLiveSummary(
     const evidenceDetail = escalation.evidence ? ` Message: "${escalation.evidence}"` : "";
 
     return {
-      id: `${conversation.id}-${escalation.category}`,
+      id: `${conversation.id}-${escalation.category}-${getCreatorEscalationSourceKey(conversation, escalation.category)}`,
       conversationId: conversation.id,
       name: getCreatorParticipantName(conversation),
       handle: getCreatorParticipantHandle(conversation),
@@ -1405,7 +1422,7 @@ export function buildCreatorLiveSummary(
     },
     {
       label: "Needs Attention",
-      detail: "Refunds, complaints, damaged orders, brand deals, urgent orders, VIP leads, custom requests, or human handoffs",
+      detail: "Refunds, complaints, damaged orders, complex requests, or human handoffs",
       count: formatCreatorInteger(escalationRecords.length),
       change: `${formatCreatorPercent(escalatedConversationCount, Math.max(1, totalCount))}`,
       tone: "bg-[#fff0f3] text-[#df405b]",
@@ -1450,9 +1467,6 @@ export function buildCreatorLiveSummary(
     { id: "refunds", label: "Refunds", count: formatCreatorInteger(escalations.filter((item) => item.category === "refund").length), tone: "text-[#df405b] bg-[#fff0f3]", icon: Shield },
     { id: "complaints", label: "Complaints", count: formatCreatorInteger(escalations.filter((item) => ["complaint", "product_issue", "issue"].includes(item.category)).length), tone: "text-[#ff850d] bg-[#fff3e6]", icon: Sparkles },
     { id: "human", label: "Human", count: formatCreatorInteger(escalations.filter((item) => ["human", "complex"].includes(item.category)).length), tone: "text-[#7a35ff] bg-[#f0edff]", icon: Users },
-    { id: "brand_deals", label: "Brand Deals", count: formatCreatorInteger(escalations.filter((item) => item.category === "brand_deal").length), tone: "text-[#0a9b3f] bg-[#eafaf0]", icon: BriefcaseBusiness },
-    { id: "orders", label: "Orders", count: formatCreatorInteger(escalations.filter((item) => ["custom_bulk", "urgent_order"].includes(item.category)).length), tone: "text-[#3044ff] bg-[#eef4ff]", icon: Flame },
-    { id: "vip_leads", label: "VIP Leads", count: formatCreatorInteger(escalations.filter((item) => item.category === "vip_lead").length), tone: "text-[#3044ff] bg-[#eef4ff]", icon: Star },
   ];
 
   const firstEscalation = escalations[0];
@@ -1757,7 +1771,7 @@ export function buildAnalyticsSummary(
     {
       label: "Human escalation",
       value: formatAnalyticsInteger(escalationRecords.length),
-      detail: "Refunds, complaints, partnerships, VIP, or human help",
+      detail: "Refunds, complaints, complex requests, or human help",
       tone: "bg-[#fff0f3] text-[#df405b]",
       icon: TriangleAlert,
     },

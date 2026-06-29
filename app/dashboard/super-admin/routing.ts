@@ -11,6 +11,7 @@ const superAdminPageIds: SuperAdminPage[] = [
   "platform-instagram",
   "platform-api",
   "platform-queue",
+  "ai-integration",
   "ai-usage",
   "ai-costs",
   "ai-escalations",

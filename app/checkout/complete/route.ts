@@ -1,9 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { sendCommerceOrderPaymentThankYou } from "@/lib/commerce-payment-notifications";
 import {
+  type CommerceOrder,
   getCommerceOrderById,
   markCommerceOrderPaid,
 } from "@/lib/commerce-orders";
+import { getFreshInstagramAccount, getFreshInstagramAccountByIgUserId } from "@/lib/instagram-token";
 import logger from "@/lib/logger";
 import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from "@/lib/pusher";
 import { recordRevenueConversionEvent } from "@/lib/revenue-intelligence";
@@ -28,26 +30,122 @@ function getStripeSecretKey() {
 }
 
 function getReturnTo(requestUrl: URL) {
+  if (requestUrl.searchParams.get("return_to") === "instagram") {
+    return "instagram";
+  }
+
   return requestUrl.searchParams.get("return_to") === "inbox" ? "inbox" : "";
 }
 
-function getCompletionRedirect(requestUrl: URL, orderId: string) {
+function getOrderConversationId(order: { conversationId?: string; instagramSenderId?: string }) {
+  return order.conversationId || order.instagramSenderId || "";
+}
+
+function setInboxOrderParams(url: URL, order: { id: string; conversationId?: string; instagramSenderId?: string }) {
+  url.searchParams.set("payment", "success");
+  url.searchParams.set("order_id", order.id);
+
+  const conversationId = getOrderConversationId(order);
+
+  if (conversationId) {
+    url.searchParams.set("conversation", conversationId);
+  }
+}
+
+function buildInstagramInboxUrl(username = "") {
+  const normalizedUsername = username.replace(/^@/, "").trim();
+
+  if (normalizedUsername) {
+    return new URL(`https://ig.me/m/${encodeURIComponent(normalizedUsername)}`);
+  }
+
+  return new URL("https://www.instagram.com/direct/inbox/");
+}
+
+function getMetadataString(metadata: Record<string, unknown> | undefined, keys: string[]) {
+  const record = metadata || {};
+
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+async function getInstagramBusinessUsername(supabase: ReturnType<typeof createSupabaseServiceClient>, order: CommerceOrder) {
+  const savedUsername = getMetadataString(order.metadata, ["businessInstagramUsername", "business_instagram_username"]);
+  const savedInstagramId = getMetadataString(order.metadata, ["businessInstagramId", "business_instagram_id", "recipientId", "recipient_id"]);
+
+  if (savedUsername) {
+    return savedUsername;
+  }
+
+  try {
+    let account = savedInstagramId
+      ? await getFreshInstagramAccountByIgUserId(supabase, savedInstagramId)
+      : null;
+
+    if (!account?.access_token) {
+      account = await getFreshInstagramAccount(supabase, order.userId);
+    }
+
+    if (!account?.access_token) {
+      return "";
+    }
+
+    const profileUrl = new URL("https://graph.instagram.com/v21.0/me");
+    profileUrl.searchParams.set("fields", "id,username");
+    profileUrl.searchParams.set("access_token", account.access_token);
+
+    const response = await fetch(profileUrl.toString(), { cache: "no-store" });
+    const profile = (await response.json().catch(() => ({}))) as { username?: string };
+
+    return response.ok && typeof profile.username === "string" ? profile.username.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+async function getCompletionRedirect(
+  supabase: ReturnType<typeof createSupabaseServiceClient>,
+  requestUrl: URL,
+  order: CommerceOrder
+) {
   const returnTo = getReturnTo(requestUrl);
+
+  if (returnTo === "instagram") {
+    return buildInstagramInboxUrl(await getInstagramBusinessUsername(supabase, order));
+  }
 
   if (returnTo === "inbox") {
     const inboxUrl = new URL("/conversations", requestUrl.origin);
-    inboxUrl.searchParams.set("payment", "success");
-    inboxUrl.searchParams.set("order_id", orderId);
+    setInboxOrderParams(inboxUrl, order);
     return inboxUrl;
   }
 
   const successUrl = new URL("/checkout/success", requestUrl.origin);
-  successUrl.searchParams.set("order_id", orderId);
+  successUrl.searchParams.set("order_id", order.id);
+  successUrl.searchParams.set("return_to", "instagram");
+
+  const conversationId = getOrderConversationId(order);
+
+  if (conversationId) {
+    successUrl.searchParams.set("conversation", conversationId);
+  }
+
   return successUrl;
 }
 
 function getCancelRedirect(requestUrl: URL, reason: string, orderId = "") {
   const returnTo = getReturnTo(requestUrl);
+
+  if (returnTo === "instagram") {
+    return buildInstagramInboxUrl();
+  }
 
   if (returnTo === "inbox") {
     const inboxUrl = new URL("/conversations", requestUrl.origin);
@@ -128,7 +226,7 @@ export async function GET(request: NextRequest) {
 
     if (order.paymentStatus === "paid" || order.status === "paid") {
       await sendCommerceOrderPaymentThankYou(supabase, order, "stripe-return-already-paid");
-      return NextResponse.redirect(getCompletionRedirect(requestUrl, order.id), 303);
+      return NextResponse.redirect(await getCompletionRedirect(supabase, requestUrl, order), 303);
     }
 
     const session = await retrieveStripeCheckoutSession(sessionId);
@@ -198,7 +296,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return NextResponse.redirect(getCompletionRedirect(requestUrl, order.id), 303);
+    return NextResponse.redirect(await getCompletionRedirect(supabase, requestUrl, paidOrder || order), 303);
   } catch (error) {
     logger.error("Stripe checkout completion error:", {
       error,

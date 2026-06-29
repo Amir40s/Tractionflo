@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import {
   escalationRulesMetadataKey,
   normalizeEscalationRuleSettings,
@@ -57,9 +58,10 @@ export async function POST(request: Request) {
     }
 
     const rules = normalizeEscalationRuleSettings(payload.rules);
+    const metadata = compactUserAuthMetadata(user.user_metadata);
     const { error } = await supabase.auth.updateUser({
       data: {
-        ...user.user_metadata,
+        ...metadata,
         [escalationRulesMetadataKey]: rules,
       },
     });

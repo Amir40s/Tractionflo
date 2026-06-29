@@ -70,6 +70,12 @@ export type InstagramCatalogOffer = Pick<
   matchScore: number;
 };
 
+type CatalogOfferMatch = {
+  item: InstagramProductCatalogItem;
+  score: number;
+  specificMatchCount: number;
+};
+
 type CatalogPrice = {
   priceText: string;
   priceAmount: number | null;
@@ -100,6 +106,27 @@ const productIntentWords = [
   "photo",
   "product",
   "item",
+  "option",
+  "options",
+  "catalog",
+  "collection",
+  "collections",
+  "sell",
+  "selling",
+  "jewelry",
+  "jewellery",
+  "clothes",
+  "clothing",
+  "outfit",
+  "outfits",
+  "dress",
+  "dresses",
+  "kurta",
+  "kurtas",
+  "necklace",
+  "necklaces",
+  "choker",
+  "chokers",
   "package",
   "plan",
   "size",
@@ -154,14 +181,198 @@ const stopWords = new Set([
   "need",
   "interested",
   "available",
+  "budget",
+  "range",
+  "dollar",
+  "dollars",
+  "pkr",
+  "rs",
+  "usd",
+  "have",
+  "having",
+  "any",
+  "thing",
+  "things",
+  "new",
+  "fancy",
+  "regarding",
 ]);
+
+const genericCatalogSearchWords = new Set([
+  "show",
+  "send",
+  "see",
+  "view",
+  "browse",
+  "image",
+  "images",
+  "photo",
+  "photos",
+  "picture",
+  "pictures",
+  "product",
+  "products",
+  "item",
+  "items",
+  "option",
+  "options",
+  "catalog",
+  "carousel",
+  "slider",
+  "more",
+  "some",
+  "our",
+  "all",
+  "package",
+  "packages",
+  "plan",
+  "plans",
+  "order",
+  "orders",
+]);
+
+const broadCatalogCategoryWords = new Set([
+  "product",
+  "products",
+  "item",
+  "items",
+  "option",
+  "options",
+  "catalog",
+  "collection",
+  "collections",
+  "design",
+  "designs",
+  "jewelry",
+  "jewellery",
+  "clothes",
+  "clothing",
+  "wear",
+  "things",
+  "stuff",
+]);
+
+const catalogGoalWords = new Set([
+  "wedding",
+  "bridal",
+  "bride",
+  "groom",
+  "engagement",
+  "party",
+  "gift",
+  "birthday",
+  "eid",
+  "daily",
+  "office",
+  "formal",
+  "casual",
+  "school",
+  "event",
+]);
+
+const specificCatalogProductTypeWords = new Set([
+  "jewelry",
+  "jewellery",
+  "clothes",
+  "clothing",
+  "outfit",
+  "outfits",
+  "necklace",
+  "necklaces",
+  "choker",
+  "chokers",
+  "earring",
+  "earrings",
+  "bracelet",
+  "bracelets",
+  "ring",
+  "rings",
+  "bangle",
+  "bangles",
+  "pendant",
+  "pendants",
+  "chain",
+  "chains",
+  "set",
+  "sets",
+  "dress",
+  "dresses",
+  "frock",
+  "frocks",
+  "shirt",
+  "shirts",
+  "tshirt",
+  "tshirts",
+  "tee",
+  "tees",
+  "denim",
+  "jeans",
+  "kurta",
+  "kurtas",
+  "suit",
+  "suits",
+  "course",
+  "courses",
+  "program",
+  "programs",
+  "package",
+  "packages",
+]);
+
+const catalogSearchSynonymGroups = [
+  ["kid", "kids", "child", "children", "boy", "boys", "girl", "girls", "toddler", "toddlers", "baby", "babies"],
+  [
+    "cloth",
+    "cloths",
+    "clothes",
+    "clothing",
+    "wear",
+    "wears",
+    "outfit",
+    "outfits",
+    "dress",
+    "dresses",
+    "frock",
+    "frocks",
+    "shirt",
+    "shirts",
+    "tshirt",
+    "tshirts",
+    "tee",
+    "tees",
+    "denim",
+    "jean",
+    "jeans",
+    "kurta",
+    "kurtas",
+    "kameez",
+    "suit",
+    "suits",
+  ],
+  ["dress", "dresses", "frock", "frocks"],
+  ["necklace", "necklaces", "choker", "chokers", "pendant", "pendants"],
+  ["earring", "earrings", "jhumka", "jhumkas"],
+  ["bracelet", "bracelets", "bangle", "bangles"],
+  ["ring", "rings"],
+  ["shirt", "shirts", "tshirt", "tshirts", "tee", "tees"],
+  ["denim", "jean", "jeans"],
+  ["kurta", "kurtas", "kameez", "suit", "suits"],
+  ["coach", "coaches", "coaching", "training", "program", "course", "courses"],
+];
 
 function compactText(value = "") {
   return value.replace(/\s+/g, " ").trim();
 }
 
 function normalizeSearchText(value = "") {
-  return compactText(value.toLowerCase().replace(/[#_/-]+/g, " "));
+  return compactText(
+    value
+      .toLowerCase()
+      .replace(/\bclothses\b/g, "clothes")
+      .replace(/\bclotheses\b/g, "clothes")
+      .replace(/\bcloths\b/g, "clothes")
+      .replace(/[#_/-]+/g, " ")
+  );
 }
 
 function truncateText(value: string, maxLength: number) {
@@ -403,69 +614,482 @@ function getSearchTokens(value: string) {
     .filter((token) => token.length >= 3 && !stopWords.has(token));
 }
 
+function getMeaningfulCatalogTokens(value: string) {
+  return [
+    ...new Set(
+      getSearchTokens(value).filter((token) => !genericCatalogSearchWords.has(token))
+    ),
+  ];
+}
+
+function getCatalogProductTypeTokens(value: string) {
+  return [
+    ...new Set(getSearchTokens(value).filter((token) => specificCatalogProductTypeWords.has(token))),
+  ];
+}
+
+function getCatalogTokenSynonyms(token: string) {
+  return getCatalogSynonymGroup(token) || [token];
+}
+
+function catalogTokenSetsOverlap(first: string[], second: string[]) {
+  const expandedSecond = new Set(second.flatMap(getCatalogTokenSynonyms));
+  return first.some((token) => getCatalogTokenSynonyms(token).some((synonym) => expandedSecond.has(synonym)));
+}
+
+function stripConversationLabel(line: string) {
+  return line.replace(/^\s*(instagram user|customer|lead|user|business|assistant|internal note)\s*:\s*/i, "").trim();
+}
+
+function isSameCatalogText(first = "", second = "") {
+  return normalizeSearchText(stripConversationLabel(first)) === normalizeSearchText(stripConversationLabel(second));
+}
+
+function isBusinessCatalogContextLine(line: string) {
+  return /^\s*(business|assistant|internal note)\s*:/i.test(line);
+}
+
+function isCatalogConfirmationOnlyLine(text: string) {
+  const normalized = normalizeSearchText(text);
+  return /^(confirm|confirmed|confirm order|confirmed order|approve order|approved order|order confirmed)$/i.test(normalized);
+}
+
+function hasCatalogBudgetSignal(normalized: string) {
+  return (
+    /\b(budget|under|below|less than|around|about|between|from|to|rs|pkr|usd|dollar|dollars|price range)\b/.test(normalized) ||
+    /[$€£¥₨]\s*\d+|\b\d+\s*(rs|pkr|usd|dollars?|bucks?)\b/.test(normalized)
+  );
+}
+
+function getCatalogBudgetAmount(normalized: string) {
+  if (!hasCatalogBudgetSignal(normalized)) {
+    return null;
+  }
+
+  const amounts = [
+    ...normalized.matchAll(/[$€£¥₨]\s*(\d+(?:[.,]\d+)?)/g),
+    ...normalized.matchAll(/\b(\d+(?:[.,]\d+)?)\s*(?:rs|pkr|usd|dollars?|bucks?)\b/g),
+    ...normalized.matchAll(/\b(?:budget|under|below|less than|around|about|price range|range)\D{0,18}(\d+(?:[.,]\d+)?)/g),
+  ]
+    .map((match) => Number(String(match[1] || "").replace(/,/g, "")))
+    .filter((amount) => Number.isFinite(amount) && amount > 0);
+
+  if (amounts.length === 0) {
+    return null;
+  }
+
+  return Math.max(...amounts);
+}
+
+function hasCatalogStyleOrMaterialSignal(normalized: string) {
+  return /\b(gold|silver|rose gold|plated|diamond|pearl|stone|beads|traditional|modern|classic|antique|indian|pakistani|western|simple|heavy|light|premium|custom|customized|elegant|trendy|casual|formal|bridal|wedding|party|daily|office|gift|birthday|eid|black|white|pink|red|blue|green|yellow|purple|brown)\b/.test(
+    normalized
+  );
+}
+
+function hasCatalogGoalSignal(normalized: string) {
+  const tokens = getSearchTokens(normalized);
+  const hasBroadCategory = tokens.some((token) => broadCatalogCategoryWords.has(token));
+  const hasSpecificProductType = tokens.some((token) => specificCatalogProductTypeWords.has(token));
+  const hasGoalWord = tokens.some((token) => catalogGoalWords.has(token));
+
+  return hasSpecificProductType || hasGoalWord || (hasBroadCategory && hasCatalogStyleOrMaterialSignal(normalized));
+}
+
+function isCatalogContextUseful(line: string) {
+  const normalized = normalizeSearchText(line);
+  return (
+    hasCatalogBudgetSignal(normalized) ||
+    hasCatalogGoalSignal(normalized) ||
+    hasCatalogShoppingIntent(normalized) ||
+    /\b(show|send|see|view|browse|catalog|carousel|slider|options?|images?|pictures?|photos?|details?|designs?|collection|available|availability|what kind|what type|what do you have)\b/.test(
+      normalized
+    )
+  );
+}
+
+export function isCatalogAvailabilityRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized || isCatalogDeclineRequest(normalized) || isCatalogBookingOnlyRequest(normalized)) {
+    return false;
+  }
+
+  if (getCatalogProductTypeTokens(normalized).length === 0) {
+    return false;
+  }
+
+  const directCheckoutIntent =
+    /\b(confirm order|place order|order it|checkout|payment|pay|paid|buy now|purchase now|send payment link|pay now)\b/.test(normalized);
+
+  if (directCheckoutIntent) {
+    return false;
+  }
+
+  return (
+    /\b(?:do you|you|u|we)\s+have\b/.test(normalized) ||
+    /\b(any|available|availability|in stock|stock|option|options|collection|collections|sell|selling|carry|offer|offers)\b/.test(normalized) ||
+    /\bwhat\s+(?:kind|kinds|type|types)\b/.test(normalized)
+  );
+}
+
+export function isFreshCatalogCategoryRequest(latestText = "", conversationContext = "") {
+  const latest = normalizeSearchText(stripConversationLabel(latestText));
+
+  if (!latest || isCatalogDeclineRequest(latest) || isCatalogBookingOnlyRequest(latest)) {
+    return false;
+  }
+
+  const latestProductTypes = getCatalogProductTypeTokens(latest);
+
+  if (latestProductTypes.length === 0) {
+    return false;
+  }
+
+  const asksCategoryQuestion =
+    isCatalogAvailabilityRequest(latest) ||
+    /\b(any|available|availability|option|options|collection|collections|sell|selling|show|send|see|view|browse)\b/.test(latest);
+
+  if (!asksCategoryQuestion) {
+    return false;
+  }
+
+  const previousProductTypes = getCatalogProductTypeTokens(
+    conversationContext
+      .split(/\r?\n/)
+      .filter((line) => !isBusinessCatalogContextLine(line))
+      .map(stripConversationLabel)
+      .filter((line) => line && !isSameCatalogText(line, latest))
+      .join(" ")
+  );
+
+  return previousProductTypes.length === 0 || !catalogTokenSetsOverlap(latestProductTypes, previousProductTypes);
+}
+
+export function getCatalogDiscoveryState(text: string) {
+  const normalized = normalizeSearchText(text);
+  const hasBudget = hasCatalogBudgetSignal(normalized);
+  const hasGoal = hasCatalogGoalSignal(normalized);
+
+  return {
+    hasBudget,
+    hasGoal,
+    ready: hasBudget && hasGoal,
+    missing: [
+      !hasGoal ? "product goal" : "",
+      !hasBudget ? "budget" : "",
+    ].filter(Boolean),
+  };
+}
+
+export function buildCatalogSearchText(latestText = "", conversationContext = "") {
+  if (isFreshCatalogCategoryRequest(latestText, conversationContext)) {
+    return compactText(stripConversationLabel(latestText));
+  }
+
+  const lines = `${conversationContext}\n${latestText}`
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const relevantLines: string[] = [];
+
+  lines.forEach((line) => {
+    if (isBusinessCatalogContextLine(line)) {
+      return;
+    }
+
+    const text = stripConversationLabel(line);
+
+    if (!text) {
+      return;
+    }
+
+    if (isCatalogConfirmationOnlyLine(text)) {
+      return;
+    }
+
+    if (isCatalogDeclineRequest(text)) {
+      relevantLines.length = 0;
+      return;
+    }
+
+    if (isCatalogContextUseful(text)) {
+      relevantLines.push(text);
+    }
+  });
+
+  const latest = compactText(stripConversationLabel(latestText));
+  if (latest && !relevantLines.includes(latest) && !isCatalogDeclineRequest(latest)) {
+    relevantLines.push(latest);
+  }
+
+  return compactText(relevantLines.join("\n")) || latest;
+}
+
+function getCatalogSynonymGroup(token: string) {
+  return catalogSearchSynonymGroups.find((group) => group.includes(token));
+}
+
+function catalogTokenMatchesText(text: string, token: string) {
+  if (text.includes(token)) {
+    return true;
+  }
+
+  const synonymGroup = getCatalogSynonymGroup(token);
+  return Boolean(synonymGroup?.some((synonym) => text.includes(synonym)));
+}
+
+function catalogItemMatchesAnyProductType(item: InstagramProductCatalogItem, productTypeTokens: string[]) {
+  if (productTypeTokens.length === 0) {
+    return true;
+  }
+
+  const itemText = normalizeSearchText(`${item.title} ${item.description} ${item.tags.join(" ")} ${item.sourceCaption}`);
+  return productTypeTokens.some((token) => catalogTokenMatchesText(itemText, token));
+}
+
+function getSpecificCatalogMatchCount(item: InstagramProductCatalogItem, text: string) {
+  const tokens = getMeaningfulCatalogTokens(text);
+  const itemText = normalizeSearchText(`${item.title} ${item.description} ${item.tags.join(" ")} ${item.sourceCaption}`);
+
+  return tokens.reduce((count, token) => count + (catalogTokenMatchesText(itemText, token) ? 1 : 0), 0);
+}
+
+export function isCatalogBrowseRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+  if (isCatalogDeclineRequest(normalized) || isCatalogDiscoveryOnlyRequest(normalized) || isCatalogSingleProductDetailRequest(normalized)) {
+    return false;
+  }
+
+  const asksForGallery = /\b(show|send|see|view|browse|catalog|carousel|slider|options?|images?|pictures?|photos?)\b/.test(
+    normalized
+  );
+  const directCheckoutIntent = /\b(confirm|checkout|payment|pay|paid|buy now|purchase now|place order|book it|order it)\b/.test(
+    normalized
+  );
+
+  return asksForGallery && !directCheckoutIntent;
+}
+
+export function isCatalogDeclineRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    /\b(no thanks|no thank you|not now|maybe later|later|not interested|not looking|not required|not needed|no need|hold off|stop)\b/.test(normalized) ||
+    /\b(?:don'?t|do not|dont|no)\s+(?:need|want|send|show|share|give|require|order|buy|purchase|checkout)\b/.test(normalized) ||
+    /\b(?:don'?t|do not|dont)\s+(?:need|want|require)\b.*\b(?:product|products|item|items|detail|details|price|pricing|cost|offer|offers|option|options)\b/.test(normalized) ||
+    /\b(?:product|products|item|items|detail|details|price|pricing|cost|offer|offers|option|options)\b.*\b(?:not needed|not required|no need|not now)\b/.test(normalized)
+  );
+}
+
 export function hasCatalogShoppingIntent(text: string) {
   const normalized = normalizeSearchText(text);
-  return productIntentWords.some((word) => normalized.includes(word));
+  if (isCatalogDeclineRequest(normalized)) {
+    return false;
+  }
+
+  return productIntentWords.some((word) => normalized.includes(word)) || getCatalogProductTypeTokens(normalized).length > 0;
+}
+
+export function isCatalogSingleProductDetailRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized || isCatalogDeclineRequest(normalized) || isCatalogBookingOnlyRequest(normalized)) {
+    return false;
+  }
+
+  const asksForDetails =
+    /\b(detail|details|description|describe|information|info|more info|material|materials|design|designs)\b/.test(normalized) ||
+    /\bshow\b.*\b(detail|details|description|information|info)\b/.test(normalized);
+
+  if (!asksForDetails) {
+    return false;
+  }
+
+  const hasBroadCatalogRequest = /\b(all|whole|full|every|catalog|collection|products|items|options)\b/.test(normalized);
+  const productTypeCount = getCatalogProductTypeTokens(normalized).length;
+  const meaningfulCount = getMeaningfulCatalogTokens(normalized).length;
+
+  return productTypeCount > 0 || (!hasBroadCatalogRequest && meaningfulCount >= 2);
+}
+
+export function isCatalogDiscoveryOnlyRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized || isCatalogDeclineRequest(normalized) || isCatalogBookingOnlyRequest(normalized)) {
+    return false;
+  }
+
+  const directCheckoutIntent =
+    /\b(confirm order|place order|order it|checkout|payment|pay|paid|buy now|purchase now|send payment link|pay now)\b/.test(normalized);
+
+  if (directCheckoutIntent) {
+    return false;
+  }
+
+  if (isCatalogAvailabilityRequest(normalized)) {
+    return false;
+  }
+
+  const asksToBrowseOrLearn =
+    /\b(show|send|see|view|browse|catalog|carousel|slider|options?|images?|pictures?|photos?|details?|designs?|collection|available|availability|price|pricing|cost|how much|what kind|what type|what do you have)\b/.test(
+      normalized
+    );
+
+  if (!asksToBrowseOrLearn && !hasCatalogShoppingIntent(normalized)) {
+    return false;
+  }
+
+  const tokens = getSearchTokens(normalized);
+  const hasBroadCategory = tokens.some((token) => broadCatalogCategoryWords.has(token));
+  const discoveryState = getCatalogDiscoveryState(normalized);
+
+  if (discoveryState.ready) {
+    return false;
+  }
+
+  return asksToBrowseOrLearn && (hasBroadCategory || discoveryState.hasGoal || hasCatalogShoppingIntent(normalized));
+}
+
+export function isCatalogBookingOnlyRequest(text: string) {
+  const normalized = normalizeSearchText(text);
+
+  if (!normalized) {
+    return false;
+  }
+
+  const asksForAppointment =
+    /\b(book|booking|schedule|scheduled|set up|arrange)\b.*\b(call|appointment|meeting|consult|consultation|demo)\b/.test(normalized) ||
+    /\b(call|appointment|meeting|consult|consultation|demo)\b.*\b(book|booking|schedule|scheduled|set up|arrange)\b/.test(normalized) ||
+    /\b(book a call|book call|schedule a call|schedule call|book appointment|schedule appointment|book meeting|schedule meeting)\b/.test(normalized);
+  const hasProductCheckoutIntent =
+    /\b(confirm order|place order|order it|checkout|payment|pay|buy|purchase|product|item|size|variant|shipping|delivery)\b/.test(normalized);
+
+  return asksForAppointment && !hasProductCheckoutIntent;
 }
 
 export function scoreCatalogItemForText(item: InstagramProductCatalogItem, text: string) {
   const normalizedText = normalizeSearchText(text);
   const tokens = getSearchTokens(text);
   const itemText = normalizeSearchText(`${item.title} ${item.description} ${item.tags.join(" ")} ${item.sourceCaption}`);
+  const itemTitle = normalizeSearchText(item.title);
+  const budgetAmount = getCatalogBudgetAmount(normalizedText);
   let score = 0;
 
   tokens.forEach((token) => {
-    if (itemText.includes(token)) {
-      score += item.title.toLowerCase().includes(token) ? 12 : 6;
+    if (catalogTokenMatchesText(itemText, token)) {
+      score += catalogTokenMatchesText(itemTitle, token) ? 12 : 6;
     }
   });
 
   if (hasCatalogShoppingIntent(normalizedText)) score += 14;
   if (item.priceText && /\b(price|pricing|cost|how much|rate)\b/.test(normalizedText)) score += 14;
+  if (budgetAmount && item.priceAmount && item.priceAmount <= budgetAmount) score += 18;
   if (item.imageUrl && /\b(image|picture|photo|show|send)\b/.test(normalizedText)) score += 8;
   score += Math.min(12, Math.round(item.confidence / 10));
 
   return score;
 }
 
-export function findBestCatalogOffer(text: string, catalog: InstagramProductCatalogItem[]): InstagramCatalogOffer | null {
-  if (catalog.length === 0 || !hasCatalogShoppingIntent(text)) {
-    return null;
-  }
-
-  const [best] = catalog
-    .map((item) => ({ item, score: scoreCatalogItemForText(item, text) }))
-    .sort((first, second) => second.score - first.score);
-
-  if (!best || best.score < 18) {
-    return null;
-  }
-
+function toCatalogOffer(match: CatalogOfferMatch): InstagramCatalogOffer {
   return {
-    id: best.item.id,
-    sourceMediaId: best.item.sourceMediaId,
-    title: best.item.title,
-    priceText: best.item.priceText,
-    priceAmount: best.item.priceAmount,
-    currency: best.item.currency,
-    description: best.item.description,
-    imageUrl: best.item.imageUrl,
-    thumbnailUrl: best.item.thumbnailUrl,
-    permalink: best.item.permalink,
-    confidence: best.item.confidence,
-    matchScore: best.score,
+    id: match.item.id,
+    sourceMediaId: match.item.sourceMediaId,
+    title: match.item.title,
+    priceText: match.item.priceText,
+    priceAmount: match.item.priceAmount,
+    currency: match.item.currency,
+    description: match.item.description,
+    imageUrl: match.item.imageUrl,
+    thumbnailUrl: match.item.thumbnailUrl,
+    permalink: match.item.permalink,
+    confidence: match.item.confidence,
+    matchScore: match.score,
   };
 }
 
+function getCatalogOfferMatches(text: string, catalog: InstagramProductCatalogItem[]) {
+  if (
+    catalog.length === 0 ||
+    isCatalogDeclineRequest(text) ||
+    isCatalogDiscoveryOnlyRequest(text) ||
+    !hasCatalogShoppingIntent(text) ||
+    isCatalogBookingOnlyRequest(text)
+  ) {
+    return [];
+  }
+
+  const meaningfulTokenCount = getMeaningfulCatalogTokens(text).length;
+  const requestedProductTypes = getCatalogProductTypeTokens(text);
+  const budgetAmount = getCatalogBudgetAmount(normalizeSearchText(text));
+  const minimumScore = meaningfulTokenCount > 0 ? 18 : 30;
+
+  return catalog
+    .map((item) => ({
+      item,
+      score: scoreCatalogItemForText(item, text),
+      specificMatchCount: getSpecificCatalogMatchCount(item, text),
+    }))
+    .filter((match) => {
+      if (!catalogItemMatchesAnyProductType(match.item, requestedProductTypes)) {
+        return false;
+      }
+
+      if (budgetAmount && match.item.priceAmount && match.item.priceAmount > budgetAmount) {
+        return false;
+      }
+
+      if (meaningfulTokenCount > 0 && match.specificMatchCount === 0) {
+        return false;
+      }
+
+      return match.score >= minimumScore;
+    })
+    .sort((first, second) => {
+      const specificDiff = second.specificMatchCount - first.specificMatchCount;
+      if (specificDiff !== 0) return specificDiff;
+      return second.score - first.score;
+    });
+}
+
+export function findCatalogOffers(text: string, catalog: InstagramProductCatalogItem[], maxItems = 6): InstagramCatalogOffer[] {
+  return getCatalogOfferMatches(text, catalog).slice(0, maxItems).map(toCatalogOffer);
+}
+
+export function shouldUseSingleCatalogOffer(text: string, offers: InstagramCatalogOffer[]) {
+  if (offers.length === 0) {
+    return false;
+  }
+
+  if (isCatalogSingleProductDetailRequest(text)) {
+    return true;
+  }
+
+  if ((isCatalogAvailabilityRequest(text) || isCatalogBrowseRequest(text)) && !getCatalogDiscoveryState(text).ready) {
+    return false;
+  }
+
+  return true;
+}
+
+export function findBestCatalogOffer(text: string, catalog: InstagramProductCatalogItem[]): InstagramCatalogOffer | null {
+  const offers = findCatalogOffers(text, catalog, 2);
+  return shouldUseSingleCatalogOffer(text, offers) ? offers[0] : null;
+}
+
 export function formatCatalogForPrompt(catalog: InstagramProductCatalogItem[], text: string, maxItems = 6) {
-  if (catalog.length === 0 || !hasCatalogShoppingIntent(text)) {
+  if (catalog.length === 0 || isCatalogDeclineRequest(text) || isCatalogDiscoveryOnlyRequest(text) || !hasCatalogShoppingIntent(text)) {
     return "";
   }
 
-  return catalog
-    .map((item) => ({ item, score: scoreCatalogItemForText(item, text) }))
-    .sort((first, second) => second.score - first.score)
-    .slice(0, maxItems)
+  const promptItemLimit = isCatalogSingleProductDetailRequest(text) ? 1 : maxItems;
+
+  return getCatalogOfferMatches(text, catalog)
+    .slice(0, promptItemLimit)
     .map(({ item }, index) => {
       const price = item.priceText ? `Price: ${item.priceText}` : "Price: not detected";
       const link = item.permalink ? `Post: ${item.permalink}` : "Post: unavailable";

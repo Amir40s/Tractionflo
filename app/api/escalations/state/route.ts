@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import {
   escalationWorkflowStateMetadataKey,
   mergeEscalationWorkflowState,
@@ -29,13 +30,20 @@ async function getAuthenticatedUser() {
 
 export async function GET() {
   try {
-    const { user } = await getAuthenticatedUser();
+    const { supabase, user } = await getAuthenticatedUser();
 
     if (!user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+    const compactMetadata = compactUserAuthMetadata(metadata);
+
+    if (JSON.stringify(compactMetadata) !== JSON.stringify(metadata)) {
+      await supabase.auth.updateUser({ data: compactMetadata }).catch((pruneError) => {
+        console.error("Escalation state metadata prune error:", pruneError);
+      });
+    }
 
     return NextResponse.json({
       state: normalizeEscalationWorkflowState(metadata[escalationWorkflowStateMetadataKey]),
@@ -59,9 +67,10 @@ export async function PATCH(request: Request) {
     const metadata = (user.user_metadata || {}) as Record<string, unknown>;
     const currentState = normalizeEscalationWorkflowState(metadata[escalationWorkflowStateMetadataKey]);
     const nextState = mergeEscalationWorkflowState(currentState, payload.state || {});
+    const compactMetadata = compactUserAuthMetadata(metadata);
     const { error } = await supabase.auth.updateUser({
       data: {
-        ...metadata,
+        ...compactMetadata,
         [escalationWorkflowStateMetadataKey]: nextState,
       },
     });

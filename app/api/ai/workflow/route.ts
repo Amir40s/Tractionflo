@@ -9,16 +9,20 @@ import {
   defaultAiLeadInsight,
   getEnabledWorkflowMap,
   getAiBehaviorPrompt,
-  getStoredOpenAiKey,
-  normalizeAiIntegrationMetadata,
   type AiLeadInsight,
   type AiWorkflowRunResult,
 } from '@/lib/ai-integration';
+import { getConditionalCtaPrompt, hasExplicitBookingCtaRequest, removeUnrequestedBookingCta } from '@/lib/booking-cta-policy';
 import {
+  buildCatalogSearchText,
   buildCatalogOfferReply,
-  findBestCatalogOffer,
+  findCatalogOffers,
   formatCatalogForPrompt,
+  getCatalogDiscoveryState,
   getInstagramProductCatalogForUser,
+  isFreshCatalogCategoryRequest,
+  isCatalogDiscoveryOnlyRequest,
+  shouldUseSingleCatalogOffer,
 } from '@/lib/instagram-product-catalog';
 import { isCommerceOrderConfirmationText } from '@/lib/commerce-orders';
 import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
@@ -26,6 +30,12 @@ import { runAssistantThread } from '@/lib/openai-assistants';
 import { getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import {
   buildFallbackRevenueOperatingSnapshot,
+  formatBuyerIntelligenceForPrompt,
+  formatRevenueMemoryForPrompt,
+  loadRosProspectBuyerProfile,
+  loadRosProspectRevenueMemory,
+  mergeBuyerIntelligenceProfiles,
+  mergeRevenueMemoryProfiles,
   normalizeRevenueOperatingSnapshot,
   persistRevenueOperatingSnapshot,
 } from '@/lib/revenue-intelligence';
@@ -37,8 +47,10 @@ import {
 import { loadRevenueOutcomeProviderSettings } from '@/lib/revenue-provider-execution';
 import { formatRevenueLearningForPrompt } from '@/lib/revenue-learning';
 import { applyRevenueStrategy } from '@/lib/revenue-strategy';
+import { resolvePlatformAiConfig } from '@/lib/platform-ai-config';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
+import { runRosPipeline } from '@/lib/ros-pipeline';
 
 
 
@@ -75,8 +87,14 @@ function formatConversationLine(message: WorkflowMessage) {
   const attachmentSummary = message.attachments?.length
     ? ` [${message.attachments.map((attachment) => attachment.type || attachment.name || 'attachment').join(', ')}]`
     : '';
+  const body = `${text || 'Sent an attachment'}${attachmentSummary}`;
 
-  return `${sender}: ${text || 'Sent an attachment'}${attachmentSummary}`;
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `${sender}: ${line}`)
+    .join('\n');
 }
 
 function getLatestUserQuestion(messages: WorkflowMessage[] = []) {
@@ -181,30 +199,26 @@ function normalizeLeadQualificationCache(value: unknown): Record<string, AiLeadI
   ) as Record<string, AiLeadInsight>;
 }
 
-function withCachedLeadQualification(
-  currentCache: Record<string, AiLeadInsight>,
-  participantId: string,
-  lead: AiLeadInsight
-) {
-  return Object.fromEntries(
-    Object.entries({
-      ...currentCache,
-      [participantId]: lead,
-    }).slice(-maxCachedLeadQualifications)
-  );
-}
-
 function extractJsonObject(value: string) {
   const fencedMatch = value.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = fencedMatch?.[1] || value;
   const firstBrace = candidate.indexOf('{');
   const lastBrace = candidate.lastIndexOf('}');
 
+  // If no JSON braces found, the AI returned plain text — treat it as the reply
   if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    throw new Error('OpenAI did not return valid workflow JSON.');
+    const plainText = value.trim();
+    logger.warn('AI Workflow: AI returned plain text instead of JSON. Using as reply fallback.', { preview: plainText.slice(0, 120) });
+    return { reply: plainText, starter: '', cta: '', lead: null, ros: null } as Record<string, unknown>;
   }
 
-  return JSON.parse(candidate.slice(firstBrace, lastBrace + 1)) as Record<string, unknown>;
+  try {
+    return JSON.parse(candidate.slice(firstBrace, lastBrace + 1)) as Record<string, unknown>;
+  } catch (parseError) {
+    const plainText = value.trim();
+    logger.warn('AI Workflow: Failed to parse AI JSON response. Using as reply fallback.', { preview: plainText.slice(0, 120) });
+    return { reply: plainText, starter: '', cta: '', lead: null, ros: null } as Record<string, unknown>;
+  }
 }
 
 function normalizeLeadInsight(value: unknown): AiLeadInsight {
@@ -279,19 +293,67 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    if (payload.takeoverMode === 'human') {
-      return NextResponse.json({ error: 'AI workflow is paused while human takeover is active.' }, { status: 409 });
-    }
-
     const assistantId = resolveAssistantId(payload, user.id);
 
     if (!assistantId) {
       return NextResponse.json({ error: 'Assistant ID does not match the authenticated account.' }, { status: 403 });
     }
 
-    const metadata = user.user_metadata || {};
-    const integration = normalizeAiIntegrationMetadata(metadata);
     const serviceSupabase = createSupabaseServiceClient();
+    const participantId = payload.participant?.id || '';
+    const forceRefresh = Boolean(payload.forceRefresh);
+    const metadata = user.user_metadata || {};
+    const platformConfig = await resolvePlatformAiConfig(serviceSupabase);
+    const integration = platformConfig.integration;
+    const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
+
+    // Try to load cached ROS snapshot first to save tokens
+    if (!forceRefresh) {
+      const query = serviceSupabase
+        .from('ros_revenue_decisions')
+        .select('payload')
+        .eq('user_id', user.id);
+
+      const filters: string[] = [];
+      if (payload.conversationId) filters.push(`conversation_id.eq.${payload.conversationId}`);
+      if (participantId) filters.push(`instagram_sender_id.eq.${participantId}`);
+
+      const { data: cachedDecisions } = filters.length > 0
+        ? await query.or(filters.join(',')).order('created_at', { ascending: false }).limit(1)
+        : { data: null };
+
+      const latestDecision = cachedDecisions?.[0];
+      if (latestDecision && typeof latestDecision.payload === 'object' && latestDecision.payload !== null) {
+        const cachedPayload = latestDecision.payload as any;
+        logger.info("Found cached ROS snapshot in database. Returning to save tokens.");
+        return NextResponse.json({
+          assistantId,
+          assistant_id: assistantId,
+          autoSend: false,
+          starter: cachedPayload.starter || '',
+          reply: cachedPayload.reply || '',
+          cta: cachedPayload.ros?.revenueIntelligence?.recommendation || '',
+          handoff: cachedPayload.handoff || false,
+          escalation: cachedPayload.escalation || null,
+          lead: cachedPayload.lead || (cachedPayload.ros?.buyerIntelligence ? {
+            score: cachedPayload.ros.buyerIntelligence.readiness === 'high' ? 85 : cachedPayload.ros.buyerIntelligence.readiness === 'medium' ? 55 : 25,
+            stage: cachedPayload.ros.revenueIntelligence?.salesStage || 'consideration',
+            urgency: cachedPayload.ros.buyerIntelligence.readiness === 'high' ? 'High' : 'Medium',
+            intent: cachedPayload.ros.conversationIntelligence?.intent || 'inquiry',
+            summary: cachedPayload.ros.decision?.rationale || 'Loaded from cache',
+            signals: cachedPayload.ros.conversationIntelligence?.signals || [],
+            missing: cachedPayload.ros.buyerIntelligence?.missing || [],
+            recommendedAction: cachedPayload.ros.decision?.bestNextAction || 'No recommended action',
+            cta: cachedPayload.ros.revenueIntelligence?.recommendation || '',
+          } : null),
+          ros: cachedPayload.ros || cachedPayload,
+          enabledWorkflows,
+          knowledge: { mode: 'none' as const, matches: [], totalSources: 0 },
+          cached: true,
+        });
+      }
+    }
+
     const outcomeProviders = await loadRevenueOutcomeProviderSettings({
       supabase: serviceSupabase,
       userId: user.id,
@@ -301,10 +363,6 @@ export async function POST(request: Request) {
       supabase: serviceSupabase,
       userId: user.id,
     }).catch(() => '');
-    const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
-
-    const participantId = payload.participant?.id || '';
-    const forceRefresh = Boolean(payload.forceRefresh);
     const userMessageCount = (payload.messages || []).filter((msg) => msg.from === 'user').length;
 
     // Load lead qualifications cache
@@ -313,21 +371,25 @@ export async function POST(request: Request) {
 
     const messages = payload.messages || [];
     const lastMessage = messages[messages.length - 1];
-
-    if (lastMessage?.from === 'me') {
-      logger.info("Skipping OpenAI Assistant run because the last message in the conversation is from the business.");
-      return NextResponse.json({
-        starter: '',
-        reply: '',
-        cta: '',
-        lead: cachedLead || {
-          ...defaultAiLeadInsight,
-          summary: 'Waiting for the user to respond.',
-          recommendedAction: 'Wait for user response.',
-        },
-        enabledWorkflows,
-      } satisfies AiWorkflowRunResult);
-    }
+    const previousBuyerProfile = await loadRosProspectBuyerProfile({
+      supabase: serviceSupabase,
+      userId: user.id,
+      participant: payload.participant,
+    }).catch((buyerMemoryError) => {
+      logger.warn('Could not load saved buyer memory for workflow prompt:', { error: buyerMemoryError, participantId });
+      return null;
+    });
+    const buyerMemoryPrompt = formatBuyerIntelligenceForPrompt(previousBuyerProfile);
+    const previousRevenueMemory = await loadRosProspectRevenueMemory({
+      supabase: serviceSupabase,
+      userId: user.id,
+      participant: payload.participant,
+    }).catch((revenueMemoryError) => {
+      logger.warn('Could not load saved revenue memory for workflow prompt:', { error: revenueMemoryError, participantId });
+      return null;
+    });
+    const revenueMemoryPrompt = formatRevenueMemoryForPrompt(previousRevenueMemory);
+    const latestMessageIsFromBusiness = lastMessage?.from === 'me';
 
     if (lastMessage?.from === 'user' && isCommerceOrderConfirmationText(lastMessage.text || '')) {
       logger.info("Skipping OpenAI Assistant run because the latest user message is an order confirmation.");
@@ -349,388 +411,81 @@ export async function POST(request: Request) {
       });
     }
 
-    const escalation = detectConversationEscalation(messages, {
-      rules: metadata[escalationRulesMetadataKey],
-    });
-    const pauseForEscalation = shouldPauseAiForEscalation(escalation);
+    const cleanMessages = (payload.messages || []).map((msg) => ({
+      from: msg.from === 'me' ? 'me' as const : msg.from === 'note' ? 'note' as const : 'user' as const,
+      text: msg.text || '',
+      time: msg.time,
+    }));
 
-    if (escalation) {
-      const notificationTitle = `${escalation.label} detected`;
-      const notificationBody = escalation.summary;
+    const result = await runRosPipeline({
+      supabase: serviceSupabase,
+      user,
+      participant: {
+        id: participantId,
+        username: payload.participant?.username,
+        name: payload.participant?.name,
+      },
+      conversationId: payload.conversationId || payload.conversation_id || participantId,
+      latestText: getLatestUserQuestion(payload.messages),
+      messages: cleanMessages,
+      forceRefresh,
+    });
+
+    const knowledge = { mode: 'none' as const, matches: [], totalSources: 0, sourceTitle: undefined };
+
+    if (result.handoff && result.escalation) {
+      const notificationTitle = `${result.escalation.label} detected`;
+      const notificationBody = result.escalation.summary;
       const notificationMetadata = {
         assistantId,
-        category: escalation.intent,
-        urgency: escalation.urgency,
-        urgent: escalation.urgency === 'High',
+        conversationId: payload.conversationId || payload.conversation_id || participantId,
+        participantId,
+        category: result.escalation.intent,
+        urgency: result.escalation.urgency,
+        urgent: result.escalation.urgency === 'High',
       };
+      const notificationId = `escalation:${assistantId}:${participantId || notificationMetadata.conversationId}:${result.escalation.intent}`;
 
       if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
         await triggerRealtimeNotification(getUserChannel(user.id), {
+          id: notificationId,
           type: 'escalation',
           title: notificationTitle,
           body: notificationBody,
-          url: '/conversations',
+          url: '/escalations',
           metadata: notificationMetadata,
         }).catch((notificationError) => {
           logger.error('Realtime workflow escalation notification error:', { error: notificationError });
         });
       }
 
-      if (!pauseForEscalation) {
-        logger.info('Workflow escalation is sales-related; continuing AI auto-reply.', {
-          intent: escalation.intent,
-          urgency: escalation.urgency,
-        });
-      }
-    }
-
-    if (escalation && pauseForEscalation) {
-      const escalationLead = {
-        ...defaultAiLeadInsight,
-        score: escalation.urgency === 'High' ? 92 : 78,
-        stage: 'Needs human',
-        urgency: escalation.urgency,
-        intent: escalation.label,
-        summary: escalation.summary,
-        signals: escalation.signals,
-        missing: [],
-        recommendedAction: escalation.recommendedAction,
-        cta: 'Take over in inbox',
-      };
-      const escalationRos = applyRevenueOutcomeAction(
-        applyRevenueStrategy(
-          buildFallbackRevenueOperatingSnapshot({
-            lead: escalationLead,
-            cta: 'Take over in inbox',
-            escalation,
-          }),
-          {
-            latestText: getLatestUserQuestion(messages),
-            escalation,
-          }
-        ),
-        outcomeProviders
-      );
-
-      await persistRevenueOperatingSnapshot({
-        supabase: serviceSupabase,
-        userId: user.id,
-        participant: payload.participant,
-        conversationId: payload.conversationId || payload.conversation_id || participantId,
-        messages,
-        snapshot: escalationRos,
-        escalation,
-        outcomeProviders,
-        source: 'ai_workflow_escalation',
-      }).catch((persistError) => {
-        logger.warn('ROS escalation decision persistence skipped or failed:', { error: persistError });
-      });
-
       return NextResponse.json({
         assistantId,
         assistant_id: assistantId,
         autoSend: false,
         starter: '',
-        reply: escalation.reply,
+        reply: result.reply,
         cta: '',
         handoff: true,
-        escalation,
-        lead: escalationLead,
-        ros: escalationRos,
+        escalation: result.escalation,
+        lead: result.lead,
+        ros: result.ros,
         enabledWorkflows,
         knowledge: summarizeKnowledgeForResponse({ mode: 'none', matches: [] }, assistantId),
       });
     }
 
-    // Determine if we should qualify this lead during this run
-    let shouldQualifyLeads = false;
-    let qualificationMocked = false;
-    let qualificationReason = '';
-    const immediateQualificationSignal = hasImmediateLeadQualificationSignal(payload.messages);
-
-    if (enabledWorkflows.qualifyLeads) {
-      if (forceRefresh || immediateQualificationSignal) {
-        shouldQualifyLeads = true;
-      } else if (userMessageCount < 15) {
-        shouldQualifyLeads = false;
-        qualificationMocked = true;
-        qualificationReason = `Qualification will run once 15 messages are exchanged (currently at ${userMessageCount} user messages).`;
-      } else {
-        if (forceRefresh || !cachedLead) {
-          shouldQualifyLeads = true;
-        } else {
-          shouldQualifyLeads = false;
-        }
-      }
-    }
-
-    const runWorkflows = {
-      ...enabledWorkflows,
-      qualifyLeads: shouldQualifyLeads,
-    };
-
-    const newInboundLead = isNewInboundLead(payload.messages);
-    const latestUserQuestion = getLatestUserQuestion(payload.messages);
-
-    const assistantIdFromMetadata = metadata.openai_assistant_id as string | undefined;
-    if (!assistantIdFromMetadata) {
-      return NextResponse.json({ error: 'Assistant ID not found in settings. Please save your API key in Settings.' }, { status: 400 });
-    }
-
-    const knowledge = { mode: 'none' as const, matches: [], totalSources: 0, sourceTitle: undefined };
-
-    const apiKey = getStoredOpenAiKey(metadata);
-
-    if (!apiKey) {
-      logger.warn("OpenAI API key is missing. Bailing out of workflow request.");
-      return NextResponse.json({ error: 'Save your OpenAI API key in Settings > AI Integration first.' }, { status: 400 });
-    }
-
-    const participantName =
-      payload.participant?.username || payload.participant?.name || 'this Instagram lead';
-    const conversationLines = (payload.messages || [])
-      .slice(-16)
-      .map(formatConversationLine)
-      .join('\n');
-    const catalogQuery = `${latestUserQuestion}\n${conversationLines}`;
-    const productCatalog = await getInstagramProductCatalogForUser(serviceSupabase, user.id).catch((catalogError) => {
-      logger.warn('Instagram catalog unavailable during AI workflow:', { error: catalogError });
-      return [];
-    });
-    const catalogPrompt = formatCatalogForPrompt(productCatalog, catalogQuery);
-    const catalogOffer = findBestCatalogOffer(catalogQuery, productCatalog);
-    const leadSchema = runWorkflows.qualifyLeads
-      ? `"lead": {
-    "score": 0-100,
-    "stage": "New | Warm | Qualified | Ready for CTA | Needs human",
-    "urgency": "Low | Medium | High",
-    "intent": "short intent label",
-    "summary": "one sentence",
-    "signals": ["up to five buying or support signals"],
-    "missing": ["up to five missing qualification facts"],
-    "recommendedAction": "one next action for the business",
-    "cta": "best CTA for this lead"
-  }`
-      : `"lead": null`;
-
-    const rawResult = await runAssistantThread({
-      apiKey,
-      assistantId: assistantIdFromMetadata,
-      maxTokens: 1100,
-      responseFormat: "json_object",
-      additionalInstructions: `${integration.systemPrompt}
-
-IMPORTANT: The attached files and vector store contain the primary truth for this business (such as menus, pricing, services, and policies). You MUST search these files using the file_search tool for any specific business inquiries (e.g. "menu", "pricing", "cost", "hours", "booking", or specific products/services). Do NOT rely on default prompts or assume the business context is TractionFlo if the knowledge base documents specify a different business (e.g. Taste Haven Restaurant).
-
-${getAiBehaviorPrompt(integration.behavior)}
-
-Lead qualification rules: ${integration.leadQualificationRules}
-Preferred CTA: ${integration.ctaMessage}
-
-Auto-detected Instagram product catalog:
-${catalogPrompt || 'No relevant catalog product was detected for this conversation.'}
-
-Configured revenue outcome providers:
-${formatRevenueOutcomeProvidersForPrompt(outcomeProviders) || 'No external outcome provider links are configured yet. If the right outcome needs a provider link, ask for contact/consent or use a manual next step.'}
-
-Creator-specific revenue learning:
-${revenueLearningPrompt || 'No creator-specific learning is available yet. Use the default ROS strategy and persist the decision for future learning.'}
-
-Return only valid JSON. No markdown. No commentary.
-Never ask again for booking details that the customer already gave earlier in the conversation.
-Always include a "ros" object. The ROS object is the Revenue Operating System decision layer and must choose the highest-probability next action that advances a business outcome.
-JSON shape:
-{
-  "starter": "first response to send when AI Starts Conversation is on and this is a new inbound lead; empty when not needed",
-  "reply": "best next answer to the latest user message; use exact attached file_search knowledge when provided instead of vague ranges",
-  "cta": "short CTA message that moves a ready lead forward",
-  ${leadSchema},
-  "ros": {
-    "conversationIntelligence": {
-      "intent": "short intent label",
-      "sentiment": "positive | neutral | negative | mixed",
-      "emotion": "curious | hesitant | ready | frustrated | unknown",
-      "objection": "cost | trust | timing | fit | none",
-      "buyingSignal": "detected buying signal or empty string",
-      "urgencySignal": "detected urgency signal or empty string",
-      "stage": "new | awareness | consideration | qualified | ready_for_cta | needs_human",
-      "questions": ["questions the user asked"],
-      "signals": ["up to five important conversation signals"]
-    },
-    "buyerIntelligence": {
-      "goal": "known goal or empty string",
-      "problem": "known problem or empty string",
-      "budget": "known budget or empty string",
-      "authority": "known authority or empty string",
-      "need": "known need or empty string",
-      "timeline": "known timeline or empty string",
-      "behavior": "short behavior summary",
-      "readiness": "low | medium | high",
-      "missing": ["missing qualification facts"]
-    },
-    "revenueIntelligence": {
-      "framework": "BANT, SPIN, MEDDIC, consultative selling, or other useful framework",
-      "method": "ask | explain | handle_objection | present_offer | escalate | follow_up",
-      "nextQuestion": "one qualification question if needed",
-      "objection": "current objection or empty string",
-      "salesStage": "current revenue stage",
-      "recommendation": "specific next action for the business"
-    },
-    "outcomeProbabilities": {
-      "follow_creator": 0-100,
-      "join_newsletter": 0-100,
-      "book_call": 0-100,
-      "start_trial": 0-100,
-      "purchase_product": 0-100,
-      "upgrade_plan": 0-100,
-      "recover_abandoned_cart": 0-100,
-      "renew_subscription": 0-100,
-      "collect_testimonial": 0-100
-    },
-    "decision": {
-      "bestNextAction": "single best next action",
-      "confidence": 0-100,
-      "rationale": "short reason for this decision"
-    },
-    "memory": {
-      "objections": ["objections to remember"],
-      "questionsAsked": ["important questions already asked"],
-      "offersPresented": ["offers or CTAs already presented"],
-      "followUpNeeded": true
-    }
-  }
-}`,
-      messages: [
-        {
-          role: 'user',
-          content: `Business account: ${payload.accountName || 'TractionFlo'}
-Instagram participant: ${participantName}
-Enabled jobs:
-- AI Starts Conversation: ${runWorkflows.startConversation ? 'on' : 'off'}
-- AI Answers Questions: ${runWorkflows.answerQuestions ? 'on' : 'off'}
-- AI Qualifies Leads: ${runWorkflows.qualifyLeads ? 'on' : 'off'}
-- AI Moves Lead to CTA: ${runWorkflows.moveToCta ? 'on' : 'off'}
-Conversation state:
-- New inbound lead with no business reply yet: ${newInboundLead ? 'yes' : 'no'}
-
-Recent conversation:
-${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}`,
-        },
-      ],
-    });
-
-
-
-    const normalizedWorkflowResult = normalizeWorkflowResult(rawResult, runWorkflows);
-    const workflowResult =
-      newInboundLead &&
-        runWorkflows.startConversation &&
-        !normalizedWorkflowResult.starter &&
-        normalizedWorkflowResult.reply
-        ? {
-          ...normalizedWorkflowResult,
-          starter: normalizedWorkflowResult.reply,
-        }
-        : normalizedWorkflowResult;
-
-    if (catalogOffer) {
-      workflowResult.reply = buildCatalogOfferReply(workflowResult.reply, catalogOffer);
-      workflowResult.starter = buildCatalogOfferReply(workflowResult.starter, catalogOffer);
-      workflowResult.cta = buildCatalogOfferReply(workflowResult.cta, catalogOffer);
-    }
-
-    // Apply mock or cached lead details if we did not run qualification
-    if (enabledWorkflows.qualifyLeads) {
-      if (qualificationMocked) {
-        workflowResult.lead = {
-          ...defaultAiLeadInsight,
-          summary: qualificationReason,
-          recommendedAction: 'Keep chatting to build context.',
-        };
-      } else if (cachedLead && !shouldQualifyLeads) {
-        workflowResult.lead = cachedLead;
-      }
-    }
-
-    if (escalation && !pauseForEscalation) {
-      workflowResult.lead = {
-        ...workflowResult.lead,
-        score: Math.max(workflowResult.lead.score, escalation.urgency === 'High' ? 92 : 78),
-        stage: workflowResult.lead.stage === defaultAiLeadInsight.stage ? 'Ready for CTA' : workflowResult.lead.stage,
-        urgency: escalation.urgency,
-        intent: escalation.label,
-        summary: escalation.summary,
-        signals: Array.from(new Set([...escalation.signals, ...workflowResult.lead.signals])).slice(0, 5),
-        recommendedAction: escalation.recommendedAction,
-        cta: workflowResult.lead.cta || integration.ctaMessage || defaultAiLeadInsight.cta,
-      };
-    }
-
-    workflowResult.ros = applyRevenueOutcomeAction(
-      applyRevenueStrategy(
-        normalizeRevenueOperatingSnapshot(
-          workflowResult.ros,
-          buildFallbackRevenueOperatingSnapshot({
-            lead: workflowResult.lead,
-            cta: workflowResult.cta || workflowResult.lead.cta || integration.ctaMessage,
-            escalation,
-          })
-        ),
-        {
-          latestText: latestUserQuestion,
-          hasCatalogOffer: Boolean(catalogOffer),
-          escalation,
-        }
-      ),
-      outcomeProviders
-    );
-
-    // Save generated qualification to user metadata cache
-    if (shouldQualifyLeads && participantId) {
-      const nextQualifications = withCachedLeadQualification(leadQualifications, participantId, workflowResult.lead);
-
-      try {
-        const { error: updateError } = await supabase.auth.updateUser({
-          data: {
-            ...metadata,
-            lead_qualifications: nextQualifications,
-          },
-        });
-        if (updateError) {
-          logger.error("Failed to save lead qualification in user metadata:", { error: updateError });
-        } else {
-          logger.info("Successfully cached lead qualification in user metadata", { participantId, lead: workflowResult.lead });
-        }
-      } catch (saveError) {
-        logger.error("Failed to save lead qualification to user metadata:", { error: saveError });
-      }
-    }
-
-    await persistRevenueOperatingSnapshot({
-      supabase: serviceSupabase,
-      userId: user.id,
-      participant: payload.participant,
-      conversationId: payload.conversationId || payload.conversation_id || participantId,
-      messages,
-      snapshot: workflowResult.ros,
-      escalation,
-      outcomeProviders,
-      source: 'ai_workflow',
-    }).catch((persistError) => {
-      logger.warn('ROS decision persistence skipped or failed:', { error: persistError });
-    });
-
     await triggerRealtimeNotification(getUserChannel(user.id), {
       type: 'ai',
       title: 'AI workflow completed',
-      body: `Lead score ${workflowResult.lead.score}/100: ${workflowResult.ros.decision.bestNextAction}`,
+      body: `Lead score ${result.lead.score}/100: ${result.ros.decision.bestNextAction}`,
       url: '/conversations',
       metadata: {
         assistantId,
-        score: workflowResult.lead.score,
-        urgency: workflowResult.lead.urgency,
-        bestNextAction: workflowResult.ros.decision.bestNextAction,
-        decisionConfidence: workflowResult.ros.decision.confidence,
+        score: result.lead.score,
+        urgency: result.lead.urgency,
+        bestNextAction: result.ros.decision.bestNextAction,
+        decisionConfidence: result.ros.decision.confidence,
         knowledgeMode: knowledge.mode,
         sourceTitle: knowledge.sourceTitle || '',
       },
@@ -743,10 +498,14 @@ ${conversationLines || 'No prior messages. Treat this as a new Instagram lead.'}
       assistant_id: assistantId,
       autoSend: integration.autoSend,
       handoff: false,
-      escalation: escalation || undefined,
-      ...workflowResult,
-      catalogOffer,
-      enabledWorkflows, // Return original workflows configurations to frontend
+      reply: result.reply,
+      starter: result.starter,
+      cta: result.cta,
+      lead: result.lead,
+      ros: result.ros,
+      catalogOffer: result.catalogOffer,
+      catalogOffers: result.catalogOffers,
+      enabledWorkflows,
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
     });
   } catch (error) {

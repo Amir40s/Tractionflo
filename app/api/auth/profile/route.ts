@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getUserPermissionProfile } from '@/lib/agent-permissions';
+import { compactUserAuthMetadata } from '@/lib/auth-metadata';
 import { getSuperAdminChannel, getUserChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createClient } from '@/utils/supabase/server';
 
@@ -106,25 +107,32 @@ export async function POST(request: Request) {
     const timeZone = payload.timeZone?.trim();
     const language = payload.language?.trim();
     const currency = payload.currency?.trim();
-    const currentPermissions = getUserPermissionProfile((user.user_metadata || {}) as Record<string, unknown>);
-    const nextRole = currentPermissions.isAgent ? 'Agent' : role || user.user_metadata?.role || 'Creator';
+    const metadata = compactUserAuthMetadata(user.user_metadata);
+    const currentPermissions = getUserPermissionProfile(metadata);
+    const currentRole = typeof metadata.role === 'string' ? metadata.role : 'Creator';
+    const currentName = typeof metadata.name === 'string' ? metadata.name : '';
+    const currentFullName = typeof metadata.full_name === 'string' ? metadata.full_name : '';
+    const currentTimeZone = typeof metadata.time_zone === 'string' ? metadata.time_zone : '(GMT-5) Eastern Time';
+    const currentLanguage = typeof metadata.language === 'string' ? metadata.language : 'English';
+    const currentCurrency = typeof metadata.currency === 'string' ? metadata.currency : 'USD ($)';
+    const nextRole = currentPermissions.isAgent ? 'Agent' : role || currentRole;
 
     const updatePayload: Parameters<typeof supabase.auth.updateUser>[0] = {
       data: {
-        ...user.user_metadata,
-        full_name: name || user.user_metadata?.full_name || user.user_metadata?.name || '',
-        name: name || user.user_metadata?.name || user.user_metadata?.full_name || '',
+        ...metadata,
+        full_name: name || currentFullName || currentName || '',
+        name: name || currentName || currentFullName || '',
         role: nextRole,
         avatar_url: avatarUrl || '',
-        time_zone: timeZone || user.user_metadata?.time_zone || '(GMT-5) Eastern Time',
-        language: language || user.user_metadata?.language || 'English',
-        currency: currency || user.user_metadata?.currency || 'USD ($)',
-        account_role: user.user_metadata?.account_role,
-        is_agent: user.user_metadata?.is_agent,
-        status: user.user_metadata?.status,
-        allowed_pages: user.user_metadata?.allowed_pages,
-        assigned_conversation_ids: user.user_metadata?.assigned_conversation_ids,
-        human_escalation: user.user_metadata?.human_escalation,
+        time_zone: timeZone || currentTimeZone,
+        language: language || currentLanguage,
+        currency: currency || currentCurrency,
+        account_role: metadata.account_role,
+        is_agent: metadata.is_agent,
+        status: metadata.status,
+        allowed_pages: metadata.allowed_pages,
+        assigned_conversation_ids: metadata.assigned_conversation_ids,
+        human_escalation: metadata.human_escalation,
       },
     };
 

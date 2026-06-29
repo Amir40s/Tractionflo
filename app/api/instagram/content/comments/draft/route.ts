@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { canAccessPage, getUserPermissionProfile } from "@/lib/agent-permissions";
-import { getAiBehaviorPrompt, getStoredOpenAiKey, normalizeAiIntegrationMetadata } from "@/lib/ai-integration";
+import { getAiBehaviorPrompt } from "@/lib/ai-integration";
+import { getConditionalCtaPrompt, removeUnrequestedBookingCta } from "@/lib/booking-cta-policy";
 import { searchKnowledgeSources } from "@/lib/knowledge-base";
 import { requestOpenAiChatCompletion } from "@/lib/openai-chat";
 import { recordOpenAiUsage } from "@/lib/openai-usage";
+import { resolvePlatformAiConfig } from "@/lib/platform-ai-config";
 import { getUserChannel, triggerRealtimeNotification } from "@/lib/pusher";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
@@ -55,22 +57,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Instagram content is not enabled for this agent." }, { status: 403 });
     }
 
-    const metadata = user.user_metadata || {};
-    const integration = normalizeAiIntegrationMetadata(metadata);
+    const serviceSupabase = createSupabaseServiceClient();
+    const platformConfig = await resolvePlatformAiConfig(serviceSupabase);
+    const integration = platformConfig.integration;
     const canAnswer = integration.workflows.find((workflow) => workflow.id === "answerQuestions")?.enabled;
 
     if (!canAnswer) {
       return NextResponse.json({ error: "AI Answers Questions is turned off." }, { status: 400 });
     }
 
-    const serviceSupabase = createSupabaseServiceClient();
     const knowledge = await searchKnowledgeSources({
       supabase: serviceSupabase,
       userId: user.id,
       question: commentText,
     });
 
-    if (knowledge.mode === "direct" && knowledge.directAnswer && !getStoredOpenAiKey(metadata)) {
+    if (knowledge.mode === "direct" && knowledge.directAnswer && !platformConfig.apiKey) {
       return NextResponse.json({
         reply: clampReply(knowledge.directAnswer),
         knowledge: {
@@ -81,10 +83,10 @@ export async function POST(request: Request) {
       });
     }
 
-    const apiKey = getStoredOpenAiKey(metadata);
+    const apiKey = platformConfig.apiKey;
 
     if (!apiKey) {
-      return NextResponse.json({ error: "Save your OpenAI API key in Settings > AI Integration first." }, { status: 400 });
+      return NextResponse.json({ error: "Ask a superadmin to add the platform OpenAI key first." }, { status: 400 });
     }
 
     const knowledgeContext = knowledge.mode === "direct" && knowledge.directAnswer
@@ -115,7 +117,7 @@ ${knowledge.context}`
 ${getAiBehaviorPrompt(integration.behavior)}
 
 Lead qualification rules: ${integration.leadQualificationRules}
-Preferred CTA: ${integration.ctaMessage}
+${getConditionalCtaPrompt(integration.ctaMessage, commentText)}
 
 You write public Instagram comment replies for the connected business.
 Return only the reply text. Keep it friendly, specific, and under 280 characters unless exact saved knowledge requires more.
@@ -138,7 +140,7 @@ Write the best public reply.`,
       ],
     });
 
-    const finalReply = clampReply(reply);
+    const finalReply = clampReply(removeUnrequestedBookingCta(reply, commentText));
 
     await triggerRealtimeNotification(getUserChannel(user.id), {
       type: "ai",

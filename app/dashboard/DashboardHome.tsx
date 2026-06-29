@@ -23,6 +23,7 @@ import {
   allPagePermissionIds,
   type PagePermissionId,
 } from "@/lib/agent-permissions";
+import AppSkeleton from "../components/AppSkeleton";
 import {
   escalationRulesChangedEvent,
   normalizeEscalationRuleSettings,
@@ -62,6 +63,10 @@ import type {
   OpportunityPageCard,
 } from "./creator/types";
 import { buildCreatorLiveSummary } from "./creator-insights";
+import {
+  liveEscalationSnapshotsChangedEvent,
+  mergeLiveEscalationSnapshots,
+} from "@/lib/live-escalation-snapshots";
 import { emptyEscalationWorkflowState } from "@/lib/escalation-workflow-state";
 import { emptyOpportunityWorkflowState } from "@/lib/opportunity-workflow-state";
 
@@ -522,9 +527,15 @@ function DashboardContent() {
   const [creatorEscalationRules, setCreatorEscalationRules] = useState<EscalationRuleSetting[]>(() => readStoredSettingsState().rules);
   const [escalationWorkflowState, setEscalationWorkflowState] = useState(emptyEscalationWorkflowState);
   const [opportunityWorkflowState, setOpportunityWorkflowState] = useState(emptyOpportunityWorkflowState);
+  const [liveEscalationSnapshotTick, setLiveEscalationSnapshotTick] = useState(0);
+  const [isAccountProfileLoading, setIsAccountProfileLoading] = useState(true);
   const hasLoadedAccountProfileRef = useRef(false);
+  const creatorConversationsForSummary =
+    liveEscalationSnapshotTick >= 0
+      ? mergeLiveEscalationSnapshots(creatorConversationResponse.conversations || [])
+      : creatorConversationResponse.conversations || [];
   const creatorSummary = buildCreatorLiveSummary(
-    creatorConversationResponse.conversations || [],
+    creatorConversationsForSummary,
     creatorConversationResponse.conversation_count,
     creatorConversationResponse.account,
     creatorDateRangePreset,
@@ -570,6 +581,21 @@ function DashboardContent() {
   }, []);
 
   useEffect(() => {
+    const syncLiveEscalationSnapshots = () => {
+      setLiveEscalationSnapshotTick((tick) => tick + 1);
+    };
+
+    syncLiveEscalationSnapshots();
+    window.addEventListener("storage", syncLiveEscalationSnapshots);
+    window.addEventListener(liveEscalationSnapshotsChangedEvent, syncLiveEscalationSnapshots);
+
+    return () => {
+      window.removeEventListener("storage", syncLiveEscalationSnapshots);
+      window.removeEventListener(liveEscalationSnapshotsChangedEvent, syncLiveEscalationSnapshots);
+    };
+  }, []);
+
+  useEffect(() => {
     const timeout = window.setTimeout(() => {
       async function loadAccountProfile() {
         const storedProfile = readStoredAccountProfile();
@@ -590,6 +616,7 @@ function DashboardContent() {
           setAccountProfile(storedProfile);
         } finally {
           hasLoadedAccountProfileRef.current = true;
+          setIsAccountProfileLoading(false);
         }
       }
 
@@ -716,8 +743,12 @@ function DashboardContent() {
 
     async function loadCreatorConversations() {
       try {
+        const shouldScanForLeadSignals = ["dashboard", "opportunities", "audience", "analytics"].includes(activeTab);
+        const conversationsUrl = shouldScanForLeadSignals
+          ? "/api/instagram/conversations?scan=1"
+          : "/api/instagram/conversations";
         const [conversationResponse, orderResponse] = await Promise.all([
-          fetch("/api/instagram/conversations", {
+          fetch(conversationsUrl, {
             headers: { Accept: "application/json" },
             cache: "no-store",
           }),
@@ -775,7 +806,7 @@ function DashboardContent() {
       }
       window.removeEventListener("focus", handleWindowFocus);
     };
-  }, [creatorAutoRefreshOn]);
+  }, [activeTab, creatorAutoRefreshOn]);
 
   function handleTabChange(tab: DashboardTab) {
     if (!canOpenDashboardTab(accountProfile, tab)) {
@@ -816,6 +847,10 @@ function DashboardContent() {
 
   if (isSuperAdminProfile(accountProfile)) {
     return <SuperAdminDashboard profile={accountProfile} onProfileChange={updateAccountProfile} />;
+  }
+
+  if (isAccountProfileLoading || isLoadingCreatorData) {
+    return <AppSkeleton />;
   }
 
   return (

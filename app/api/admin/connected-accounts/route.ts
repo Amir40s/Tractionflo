@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { getUserPermissionProfile } from "@/lib/agent-permissions";
+import { resolvePlatformAiConfig } from "@/lib/platform-ai-config";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 
@@ -586,12 +587,13 @@ export async function GET() {
     }
 
     const supabase = createSupabaseServiceClient();
-    const [users, instagramResult] = await Promise.all([
+    const [users, instagramResult, platformConfig] = await Promise.all([
       listAllUsers(supabase),
       supabase
         .from("instagram_accounts")
         .select("ig_user_id, access_token, created_at")
         .order("created_at", { ascending: false }),
+      resolvePlatformAiConfig(supabase),
     ]);
 
     if (instagramResult.error) {
@@ -640,8 +642,8 @@ export async function GET() {
       },
       {
         label: "OpenAI API",
-        status: process.env.OPENAI_API_KEY ? "Healthy" : "Not configured",
-        tone: process.env.OPENAI_API_KEY ? "green" : "amber",
+        status: platformConfig.apiKey ? "Healthy" : "Not configured",
+        tone: platformConfig.apiKey ? "green" : "amber",
       },
       { label: "Database", status: "Healthy", tone: "green" },
       {

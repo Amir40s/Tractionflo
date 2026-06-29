@@ -39,6 +39,26 @@ type InstagramMediaMessagePayload = {
   };
 };
 
+type InstagramTemplateButton =
+  | {
+      type: "web_url";
+      title: string;
+      url: string;
+    }
+  | {
+      type: "postback";
+      title: string;
+      payload: string;
+    };
+
+export type InstagramGenericTemplateElement = {
+  title: string;
+  subtitle?: string;
+  imageUrl?: string;
+  defaultActionUrl?: string;
+  buttons: InstagramTemplateButton[];
+};
+
 type InstagramTemplateMessagePayload = {
   attachment: {
     type: "template";
@@ -52,11 +72,7 @@ type InstagramTemplateMessagePayload = {
           type: "web_url";
           url: string;
         };
-        buttons: Array<{
-          type: "web_url";
-          title: string;
-          url: string;
-        }>;
+        buttons: InstagramTemplateButton[];
       }>;
     };
   };
@@ -189,6 +205,48 @@ export function sendInstagramAttachmentMessage(
   });
 }
 
+export function sendInstagramGenericTemplate(
+  accessToken: string,
+  recipientId: string,
+  elements: InstagramGenericTemplateElement[]
+) {
+  const templateElements: InstagramTemplateMessagePayload["attachment"]["payload"]["elements"] = elements
+    .slice(0, 10)
+    .map((element) => {
+      const templateElement: InstagramTemplateMessagePayload["attachment"]["payload"]["elements"][number] = {
+        title: truncateInstagramText(element.title || "Instagram product", 80),
+        buttons: element.buttons.slice(0, 3),
+      };
+
+      if (element.subtitle) {
+        templateElement.subtitle = truncateInstagramText(element.subtitle, 80);
+      }
+
+      if (element.imageUrl?.startsWith("https://")) {
+        templateElement.image_url = element.imageUrl;
+      }
+
+      if (element.defaultActionUrl?.startsWith("https://")) {
+        templateElement.default_action = {
+          type: "web_url",
+          url: element.defaultActionUrl,
+        };
+      }
+
+      return templateElement;
+    });
+
+  return sendInstagramApiMessage(accessToken, recipientId, {
+    attachment: {
+      type: "template",
+      payload: {
+        template_type: "generic",
+        elements: templateElements,
+      },
+    },
+  });
+}
+
 export function sendInstagramCheckoutButtonTemplate(
   accessToken: string,
   recipientId: string,
@@ -254,34 +312,39 @@ export async function sendInstagramCommercePaymentMessage({
 
   const shouldTryButton = Boolean(checkoutUrl && sendCheckoutButton);
 
+  if (shouldTryButton) {
+    try {
+      const sentButton = await sendInstagramCheckoutButtonTemplate(accessToken, recipientId, order, checkoutUrl);
+      result.checkoutButtonMessageId = sentButton.message_id || "";
+      result.checkoutButtonSent = true;
+      result.messageId = result.checkoutButtonMessageId || result.messageId;
+      return result;
+    } catch (error) {
+      result.checkoutButtonError = error instanceof Error ? error.message : "Instagram checkout button failed.";
+    }
+  }
+
   if (sendText) {
     const text = buildCommerceOrderPaymentReply(order, checkoutUrl, alreadyConfirmed, {
-      includeCheckoutUrl: !shouldTryButton,
+      includeCheckoutUrl: Boolean(checkoutUrl),
     });
     const sentText = await sendInstagramTextMessage(accessToken, recipientId, text);
     result.textMessageId = sentText.message_id || "";
+    if (shouldTryButton && result.checkoutButtonError) {
+      result.checkoutFallbackMessageId = result.textMessageId;
+      result.checkoutFallbackSent = true;
+    }
     result.messageId = result.textMessageId;
-  }
-
-  if (!checkoutUrl || !sendCheckoutButton) {
     return result;
   }
 
-  try {
-    const sentButton = await sendInstagramCheckoutButtonTemplate(accessToken, recipientId, order, checkoutUrl);
-    result.checkoutButtonMessageId = sentButton.message_id || "";
-    result.checkoutButtonSent = true;
-    result.messageId = result.checkoutButtonMessageId || result.messageId;
-    return result;
-  } catch (error) {
-    result.checkoutButtonError = error instanceof Error ? error.message : "Instagram checkout button failed.";
+  if (checkoutUrl && shouldTryButton) {
+    const fallbackText = buildCheckoutFallbackText(checkoutUrl);
+    const fallback = await sendInstagramTextMessage(accessToken, recipientId, fallbackText);
+    result.checkoutFallbackMessageId = fallback.message_id || "";
+    result.checkoutFallbackSent = true;
+    result.messageId = result.checkoutFallbackMessageId || result.messageId;
   }
-
-  const fallbackText = buildCheckoutFallbackText(checkoutUrl);
-  const fallback = await sendInstagramTextMessage(accessToken, recipientId, fallbackText);
-  result.checkoutFallbackMessageId = fallback.message_id || "";
-  result.checkoutFallbackSent = true;
-  result.messageId = result.checkoutFallbackMessageId || result.messageId;
 
   return result;
 }

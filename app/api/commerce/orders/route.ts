@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import {
+  cancelPendingCommerceOrdersForSender,
   confirmLatestPendingCommerceOrder,
   createPendingCommerceOrder,
+  type CommerceOrder,
   getCommerceOrderPublicCheckoutUrl,
   getLatestCommerceOrderForSender,
   hasCommerceOrderCheckoutButtonMessage,
@@ -13,7 +15,7 @@ import {
 } from "@/lib/commerce-orders";
 import { sendInstagramCommercePaymentMessage } from "@/lib/instagram-send-api";
 import { getFreshInstagramAccount } from "@/lib/instagram-token";
-import { findBestCatalogOffer, getInstagramProductCatalogForUser } from "@/lib/instagram-product-catalog";
+import { findBestCatalogOffer, getInstagramProductCatalogForUser, isCatalogDeclineRequest } from "@/lib/instagram-product-catalog";
 import { recordRevenueConversionEvent } from "@/lib/revenue-intelligence";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
@@ -47,6 +49,80 @@ async function getAuthenticatedUser() {
   return { user };
 }
 
+async function hasRecentProductRefusal({
+  supabase,
+  userId,
+  conversationId,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  userId: string;
+  conversationId: string;
+}) {
+  if (!conversationId) {
+    return false;
+  }
+
+  const { data, error } = await supabase
+    .from("messages")
+    .select("text")
+    .eq("user_id", userId)
+    .eq("conversation_id", conversationId)
+    .eq("direction", "inbound")
+    .order("timestamp", { ascending: false })
+    .limit(8);
+
+  if (error) {
+    console.warn("Could not check recent product refusals for pending orders:", error);
+    return false;
+  }
+
+  return (data || []).some((row) => isCatalogDeclineRequest(String(row.text || "")));
+}
+
+async function cancelRefusedPendingOrders({
+  supabase,
+  userId,
+  orders,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  userId: string;
+  orders: CommerceOrder[];
+}) {
+  const pendingBySender = new Map<string, CommerceOrder>();
+
+  for (const order of orders) {
+    if (order.status !== "pending_confirmation" || !order.instagramSenderId) {
+      continue;
+    }
+
+    pendingBySender.set(order.instagramSenderId, order);
+  }
+
+  const cancelled: CommerceOrder[] = [];
+  for (const order of pendingBySender.values()) {
+    const conversationId = order.conversationId || order.instagramSenderId;
+    const hasRefusal = await hasRecentProductRefusal({
+      supabase,
+      userId,
+      conversationId,
+    });
+
+    if (!hasRefusal) {
+      continue;
+    }
+
+    const cancelledOrders = await cancelPendingCommerceOrdersForSender(supabase, {
+      userId,
+      instagramSenderId: order.instagramSenderId,
+      reason: "Recent customer message declined product offers.",
+      source: "commerce_orders_get_product_refusal_cleanup",
+    });
+    cancelled.push(...cancelledOrders);
+  }
+
+  return cancelled;
+}
+
 export async function GET() {
   try {
     const { user } = await getAuthenticatedUser();
@@ -57,6 +133,17 @@ export async function GET() {
 
     const serviceSupabase = createSupabaseServiceClient();
     const result = await listCommerceOrdersForUser(serviceSupabase, user.id);
+    const cancelled = result.tableReady
+      ? await cancelRefusedPendingOrders({
+          supabase: serviceSupabase,
+          userId: user.id,
+          orders: result.orders,
+        })
+      : [];
+
+    if (cancelled.length > 0) {
+      return NextResponse.json(await listCommerceOrdersForUser(serviceSupabase, user.id));
+    }
 
     return NextResponse.json(result);
   } catch (error) {

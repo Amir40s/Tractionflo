@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import {
   mergeOpportunityWorkflowState,
   normalizeOpportunityWorkflowState,
@@ -29,13 +30,20 @@ async function getAuthenticatedUser() {
 
 export async function GET() {
   try {
-    const { user } = await getAuthenticatedUser();
+    const { supabase, user } = await getAuthenticatedUser();
 
     if (!user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+    const compactMetadata = compactUserAuthMetadata(metadata);
+
+    if (JSON.stringify(compactMetadata) !== JSON.stringify(metadata)) {
+      await supabase.auth.updateUser({ data: compactMetadata }).catch((pruneError) => {
+        console.error("Lead state metadata prune error:", pruneError);
+      });
+    }
 
     return NextResponse.json({
       state: normalizeOpportunityWorkflowState(metadata[opportunityWorkflowStateMetadataKey]),
@@ -59,9 +67,10 @@ export async function PATCH(request: Request) {
     const metadata = (user.user_metadata || {}) as Record<string, unknown>;
     const currentState = normalizeOpportunityWorkflowState(metadata[opportunityWorkflowStateMetadataKey]);
     const nextState = mergeOpportunityWorkflowState(currentState, payload.state || {});
+    const compactMetadata = compactUserAuthMetadata(metadata);
     const { error } = await supabase.auth.updateUser({
       data: {
-        ...metadata,
+        ...compactMetadata,
         [opportunityWorkflowStateMetadataKey]: nextState,
       },
     });

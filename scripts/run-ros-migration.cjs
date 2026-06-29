@@ -51,6 +51,7 @@ async function main() {
   const sqlPaths = [
     path.join(root, "migrations", "20260622_revenue_operating_system.sql"),
     path.join(root, "migrations", "20260622_ros_phase2.sql"),
+    path.join(root, "migrations", "20260623_messages_schema_backfill.sql"),
     path.join(root, "migrations", "20260623_ros_enterprise_phase3.sql"),
   ];
   const url = new URL(databaseUrl);

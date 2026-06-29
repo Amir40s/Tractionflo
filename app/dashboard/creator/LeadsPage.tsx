@@ -11,8 +11,13 @@ import {
   opportunityWorkflowStateChangedEvent,
   readStoredOpportunityWorkflowState,
   saveOpportunityWorkflowStateToDatabase,
+  writeStoredOpportunityWorkflowState,
 } from "../opportunity-resolution";
-import { emptyOpportunityWorkflowState } from "@/lib/opportunity-workflow-state";
+import {
+  emptyOpportunityWorkflowState,
+  mergeOpportunityWorkflowState,
+  type OpportunityWorkflowStatePatch,
+} from "@/lib/opportunity-workflow-state";
 
 const opportunityToneClasses = {
   purple: {
@@ -246,7 +251,7 @@ function OpportunityPageCardView({
               tone={tone.action}
               onClick={() => {
                 onMarkWorking();
-                window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.id)}`;
+                window.location.href = `/conversations?conversation=${encodeURIComponent(opportunity.conversationId || opportunity.id)}`;
               }}
             >
               {opportunity.action}
@@ -336,15 +341,24 @@ export function OpportunitiesPage({
       return;
     }
 
+    applyOpportunityWorkflowPatch({ workingIds: [opportunityId], readIds: [opportunityId] });
     void saveOpportunityWorkflowStateToDatabase({ workingIds: [opportunityId], readIds: [opportunityId] }).catch((stateError) => {
       console.error("Lead working state save error:", stateError);
     });
+  }
+
+  function applyOpportunityWorkflowPatch(patch: OpportunityWorkflowStatePatch) {
+    const nextState = mergeOpportunityWorkflowState(readStoredOpportunityWorkflowState(), patch);
+
+    writeStoredOpportunityWorkflowState(nextState);
+    setOpportunityWorkflowState(nextState);
   }
 
   function handleResolveOpportunity(opportunityId: string) {
     const nextFilteredCount = filteredOpportunityCards.filter((opportunity) => opportunity.id !== opportunityId).length;
     const nextTotalPages = Math.max(1, Math.ceil(nextFilteredCount / leadsPerPage));
 
+    applyOpportunityWorkflowPatch({ resolvedIds: [opportunityId] });
     void saveOpportunityWorkflowStateToDatabase({ resolvedIds: [opportunityId] }).catch((stateError) => {
       console.error("Lead resolve state save error:", stateError);
     });

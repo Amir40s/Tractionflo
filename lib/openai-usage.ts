@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import { compactUserAuthMetadata } from "@/lib/auth-metadata";
 import type { createSupabaseServiceClient } from "@/lib/supabase";
 import type { OpenAiUsage } from "@/lib/openai-chat";
 
@@ -60,7 +61,7 @@ export async function recordOpenAiUsage({
     return;
   }
 
-  const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+  const metadata = compactUserAuthMetadata(user.user_metadata);
   const cost = estimateOpenAiUsageCost(model, usage);
   const nextReplies = getMetadataNumber(metadata, "ai_replies") + 1;
   const nextPromptTokens = getMetadataNumber(metadata, "ai_prompt_tokens") + usage.promptTokens;
