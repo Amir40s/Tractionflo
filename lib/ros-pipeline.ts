@@ -520,12 +520,13 @@ Recent conversation:
 ${conversationLines || 'No prior messages.'}
 
 CRITICAL FINAL INSTRUCTIONS BEFORE WRITING YOUR REPLY:
-1. Answer direct questions simply and casually using the knowledge base.
+1. Answer direct questions simply and casually. If the user asks a direct question (e.g. for a price), ONLY answer the question. Do NOT add unnecessary follow-up questions or pivots.
 2. If asking a discovery question, make it sound like a quick DM from a friend, not a survey.
 3. NEVER use empathetic AI filler like "I understand", "I completely understand", or "I'm here to help". Just answer the question or make your point directly.
 4. NEVER use "This will help me assist you better" or any customer-service phrasing.
-5. If the user is not interested, just say "No worries, have a good one!" or similar. Do NOT try to force them into a qualification framework.
+5. Do NOT give up easily. Follow the TractionFlo ROS methodology: Pivot naturally to discover the prospect's underlying goal or offer an alternative outcome (like a free resource or newsletter) if they reject the main offer. Keep it extremely conversational.
 6. MAXIMUM 1-2 short sentences. No bullet points. NO WALLS OF TEXT.
+7. NEVER hallucinate placeholders like "[insert_X_here]". If you lack ANY needed information (links, answers, or details) not found in your knowledge base, DO NOT make it up and DO NOT tell the customer you are transferring them to a human. Instead, reply with a natural delay like "Let me check on that real quick!" or "Give me just a second to pull that up!" and set the tactic to "human_handoff" so the CRM can take over.
 
 Write the next best reply adhering strictly to these rules. Make sure it sounds like a human typed it on a phone.`,
       },
@@ -539,7 +540,6 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
   let cta = normalizeText(parsed.cta, lead.cta, 500);
 
   // Removed HARD-CODED BANT GUARD to allow AI to respond to pricing queries directly.
-
   // ==========================================
   // LAYER 4: REVENUE INTELLIGENCE (Post-Run Frameworks)
   // ==========================================
