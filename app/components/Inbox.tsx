@@ -2207,16 +2207,14 @@ function EscalationFlagCarousel({
                         ))}
                       </div>
                     ) : null}
-                    {!isHumanTakeover ? (
-                      <button
-                        type="button"
-                        onClick={onToggleTakeoverMode}
-                        className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-3 text-[11px] font-extrabold text-white shadow-[0_12px_24px_rgba(48,68,255,0.18)]"
-                      >
-                        <Users size={13} strokeWidth={2.4} />
-                        Take over human
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      onClick={onToggleTakeoverMode}
+                      className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-3 text-[11px] font-extrabold text-white shadow-[0_12px_24px_rgba(48,68,255,0.18)]"
+                    >
+                      <Users size={13} strokeWidth={2.4} />
+                      {isHumanTakeover ? "Take over AI" : "Take over human"}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -3856,7 +3854,9 @@ export default function Inbox() {
   }, [fetchConvs]);
 
   const activeConv = convs.find(c => c.id === activeId) ?? null;
-  const activeTakeoverMode: ConversationTakeoverMode = activeConv ? takeoverModes[activeConv.id] || "ai" : "ai";
+  const activeTakeoverMode: ConversationTakeoverMode = activeConv
+    ? takeoverModes[activeConv.id] || takeoverModes[activeConv.participant?.id ?? ''] || "ai"
+    : "ai";
   const activeConversationIsStarred = Boolean(activeId && starredConversationIds.includes(activeId));
   const activeCommerceOrder = activeConv
     ? commerceOrders.find(
