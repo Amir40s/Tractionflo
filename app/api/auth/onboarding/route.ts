@@ -5,6 +5,12 @@ import {
   normalizeEscalationRuleSettings,
 } from "@/lib/conversation-escalation";
 import {
+  buildKnowledgeSourceIndex,
+  createKnowledgeStoragePaths,
+  listKnowledgeSourceIndexes,
+  saveKnowledgeSourceIndex,
+} from "@/lib/knowledge-base";
+import {
   normalizeRevenueOutcomeProviderSettings,
   revenueOutcomeProvidersMetadataKey,
   type RevenueOutcomeProviderSettings,
@@ -98,7 +104,7 @@ function cleanMissingItems(value: unknown) {
 
   return value.filter(isRecord).slice(0, 20).map((item) => ({
     label: cleanString(item.label, 160),
-    detail: cleanString(item.detail, 800),
+    detail: cleanString(item.detail, 3000),
     complete: cleanBoolean(item.complete),
   })).filter((item) => item.label);
 }
@@ -118,11 +124,11 @@ function cleanBehavior(value: unknown) {
 function cleanOnboardingSetup(value: unknown) {
   const input = isRecord(value) ? value : {};
   const setup: Record<string, unknown> = {};
-  const stringFields = ["businessName", "niche", "description", "businessGoal"];
+  const stringFields = ["businessName", "niche", "description", "businessGoal", "websiteUrl"];
 
   stringFields.forEach((field) => {
     if (field in input) {
-      setup[field] = cleanString(input[field], field === "description" ? 1600 : 240);
+      setup[field] = cleanString(input[field], field === "description" ? 1600 : field === "websiteUrl" ? 500 : 240);
     }
   });
 
@@ -184,6 +190,87 @@ function buildRevenueProviderSettingsFromConversionActions(value: unknown): Reve
   };
 }
 
+function buildAiSystemPrompt(setup: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const name = cleanString(setup.businessName, 160);
+  const niche = cleanString(setup.niche, 120);
+  const description = cleanString(setup.description, 800);
+  const websiteUrl = cleanString(setup.websiteUrl, 400);
+  const offers = Array.isArray(setup.offers) ? (setup.offers as Array<Record<string, unknown>>) : [];
+
+  if (name) parts.push(`Business name: ${name}`);
+  if (niche) parts.push(`Niche: ${niche}`);
+  if (description) parts.push(`About: ${description}`);
+  if (websiteUrl) parts.push(`Website / Purchase link: ${websiteUrl}`);
+  if (offers.length) {
+    const offerSummary = offers
+      .slice(0, 8)
+      .map((o) => {
+        const title = cleanString(o.title, 120);
+        const price = cleanString(o.priceText, 40);
+        const link = cleanString(o.permalink, 300) || websiteUrl;
+        return [title, price, link].filter(Boolean).join(' — ');
+      })
+      .filter(Boolean)
+      .join('; ');
+    if (offerSummary) parts.push(`Products/offers: ${offerSummary}`);
+  }
+
+  if (!parts.length) return '';
+
+  return `You are an Instagram DM assistant for this business. Use the details below to answer questions accurately. Always provide the website link when asked and never say you don't have the link.\n\n${parts.join('\n')}`;
+}
+
+function buildAutoKnowledgeText(setup: Record<string, unknown>): string {
+  const lines: string[] = ['# Business Info'];
+  const name = cleanString(setup.businessName, 160);
+  const niche = cleanString(setup.niche, 120);
+  const description = cleanString(setup.description, 800);
+  const websiteUrl = cleanString(setup.websiteUrl, 400);
+  const businessGoal = cleanString(setup.businessGoal, 200);
+  const offers = Array.isArray(setup.offers) ? (setup.offers as Array<Record<string, unknown>>) : [];
+  const missingItems = Array.isArray(setup.missingItems) ? (setup.missingItems as Array<Record<string, unknown>>) : [];
+
+  if (name) lines.push(`Business Name: ${name}`);
+  if (niche) lines.push(`Niche: ${niche}`);
+  if (description) lines.push(`\nDescription:\n${description}`);
+  if (websiteUrl) lines.push(`\nWebsite / Purchase Link: ${websiteUrl}`);
+  if (businessGoal) lines.push(`Business Goal: ${businessGoal}`);
+  if (offers.length) {
+    lines.push('\n## Products / Offers');
+    offers.slice(0, 20).forEach((o) => {
+      const title = cleanString(o.title, 120);
+      if (!title) return;
+      const price = cleanString(o.priceText, 40);
+      const desc = cleanString(o.description, 300);
+      const link = cleanString(o.permalink, 300) || websiteUrl;
+      const offerLine = [`- ${title}`, price && `Price: ${price}`, desc, link && `Link: ${link}`].filter(Boolean).join(' | ');
+      lines.push(offerLine);
+    });
+  }
+
+  if (missingItems.length) {
+    lines.push('\n## Additional Policies & Business Information');
+    missingItems.forEach((item) => {
+      const label = cleanString(item.label, 120);
+      const detail = cleanString(item.detail, 3000);
+      const complete = Boolean(item.complete);
+      if (label && complete && detail && !detail.includes('Add pricing') && !detail.includes('Add your') && !detail.includes('Add shipping') && !detail.includes('Add detailed')) {
+        lines.push(`### ${label}\n${detail}\n`);
+      }
+    });
+  }
+
+  if (websiteUrl) {
+    lines.push(`\n## Common Questions`);
+    lines.push(`Q: What is your website?\nA: ${websiteUrl}`);
+    lines.push(`Q: How can I buy / purchase?\nA: You can buy here: ${websiteUrl}`);
+    lines.push(`Q: Send me the link\nA: Here is the link: ${websiteUrl}`);
+  }
+
+  return lines.join('\n');
+}
+
 async function getAuthenticatedUser() {
   const supabase = await createClient();
   const {
@@ -224,6 +311,44 @@ export async function POST() {
 
     if (!user) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const metadata = compactUserAuthMetadata(user.user_metadata);
+    const existingSetup = isRecord(metadata.onboarding_setup) ? metadata.onboarding_setup as Record<string, unknown> : {};
+
+    // Auto-create a Knowledge Base entry from onboarding data so the AI can answer from day one
+    const kbText = buildAutoKnowledgeText(existingSetup);
+    const businessName = cleanString(existingSetup.businessName, 160) || 'Business';
+    if (kbText.length > 20) {
+      try {
+        const serviceClient = createSupabaseServiceClient();
+        const existingSources = await listKnowledgeSourceIndexes(serviceClient, user.id).catch(() => []);
+        const autoEntry = existingSources.find((s) => s.title === 'Business Info (Auto-generated)');
+        const sourceId = autoEntry?.id ?? globalThis.crypto.randomUUID();
+        const fileName = 'Business-Info.manual.txt';
+        const { indexPath } = createKnowledgeStoragePaths(user.id, sourceId, fileName);
+        const indexedText = `Category: Business Information\nTitle: Business Info (Auto-generated)\n\n${kbText}`;
+        const assignment = existingSources.filter((s) => s.id !== autoEntry?.id).length === 0 ? 'default' : 'auto';
+        const sourceIndex = buildKnowledgeSourceIndex({
+          userId: user.id,
+          sourceId,
+          fileName,
+          mimeType: 'text/x-tractionflo-manual',
+          fileSize: Buffer.byteLength(indexedText, 'utf8'),
+          filePath: '',
+          indexPath,
+          text: indexedText,
+          assignment,
+          categories: [businessName, 'Business Information'],
+          openAiFileId: autoEntry?.openAiFileId,
+        });
+        // Override title to match expected search
+        (sourceIndex as typeof sourceIndex & { title: string }).title = 'Business Info (Auto-generated)';
+        await saveKnowledgeSourceIndex(serviceClient, sourceIndex);
+      } catch (kbError) {
+        // Non-fatal — log but don't fail the completion
+        console.error('Could not auto-create knowledge base entry:', kbError);
+      }
     }
 
     const { error: updateError } = await supabase.auth.updateUser({
@@ -279,6 +404,29 @@ export async function PATCH(request: Request) {
 
     if (Array.isArray(nextSetup.escalationRules)) {
       nextMetadata[escalationRulesMetadataKey] = normalizeEscalationRuleSettings(nextSetup.escalationRules);
+    }
+
+    // Auto-build AI system prompt from collected business info
+    const autoPrompt = buildAiSystemPrompt(nextSetup);
+    if (autoPrompt) {
+      // Only overwrite if user hasn't set a custom prompt, or prepend business facts to any existing custom prompt
+      const existingPrompt = cleanString(metadata.ai_integration_system_prompt, 1800);
+      const hasCustomPrompt = existingPrompt && !existingPrompt.startsWith('You are an Instagram DM assistant for this business.');
+      nextMetadata.ai_integration_system_prompt = hasCustomPrompt
+        ? `${autoPrompt}\n\n${existingPrompt}`.slice(0, 1800)
+        : autoPrompt;
+    }
+
+    // Auto-set CTA from websiteUrl or purchase_product conversion action
+    const websiteUrl = cleanString(nextSetup.websiteUrl, 400);
+    if (websiteUrl) {
+      nextMetadata.ai_integration_cta = websiteUrl;
+    } else if (Array.isArray(nextSetup.conversionActions)) {
+      const purchaseAction = (nextSetup.conversionActions as Array<Record<string, unknown>>)
+        .find((a) => cleanString(a.label) === 'Purchase / Checkout' && cleanString(a.href));
+      if (purchaseAction) {
+        nextMetadata.ai_integration_cta = cleanString(purchaseAction.href, 400);
+      }
     }
 
     const revenueProviderSettings = buildRevenueProviderSettingsFromConversionActions(nextSetup.conversionActions);

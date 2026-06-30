@@ -153,6 +153,14 @@ export async function runAssistantThread({
     additional_instructions: additionalInstructions,
     response_format: responseFormat === "json_object" ? { type: "json_object" } : "auto",
     max_completion_tokens: maxTokens,
+    tools: [
+      {
+        type: "file_search",
+        file_search: {
+          max_num_results: 7, // Limit results to 3 (default is 20) to save tokens
+        },
+      },
+    ],
   });
 
   if (run.status === 'completed') {

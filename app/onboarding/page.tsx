@@ -189,6 +189,7 @@ type OnboardingDraft = {
   businessName?: string;
   niche?: string;
   description?: string;
+  websiteUrl?: string;
   offers?: CatalogItem[];
   businessGoal?: string;
   conversionActions?: ConversionAction[];
@@ -209,6 +210,7 @@ type PersistedOnboardingSetup = {
   businessName?: string;
   niche?: string;
   description?: string;
+  websiteUrl?: string;
   offers?: CatalogItem[];
   businessGoal?: string;
   conversionActions?: Array<Pick<ConversionAction, "label" | "detail" | "configured" | "href">>;
@@ -456,25 +458,25 @@ function normalizeConversations(value: unknown): RawConversation[] {
     const participant = isRecord(conversation.participant) ? conversation.participant : {};
     const messages = Array.isArray(conversation.messages)
       ? conversation.messages.filter(isRecord).map((message) => {
-          const replyTo = isRecord(message.reply_to) ? message.reply_to : {};
-          const story = isRecord(replyTo.story) ? replyTo.story : undefined;
+        const replyTo = isRecord(message.reply_to) ? message.reply_to : {};
+        const story = isRecord(replyTo.story) ? replyTo.story : undefined;
 
-          return {
-            text: getString(message.text),
-            from: message.from === "me" ? "me" : message.from === "note" ? "note" : "user",
-            attachments: Array.isArray(message.attachments) ? message.attachments : [],
-            catalogItems: Array.isArray(message.catalogItems) ? message.catalogItems : [],
-            time: getString(message.time),
-            reply_to: story
-              ? {
-                  story: {
-                    id: getString(story.id),
-                    url: getString(story.url),
-                  },
-                }
-              : undefined,
-          } satisfies RawMessage;
-        })
+        return {
+          text: getString(message.text),
+          from: message.from === "me" ? "me" : message.from === "note" ? "note" : "user",
+          attachments: Array.isArray(message.attachments) ? message.attachments : [],
+          catalogItems: Array.isArray(message.catalogItems) ? message.catalogItems : [],
+          time: getString(message.time),
+          reply_to: story
+            ? {
+              story: {
+                id: getString(story.id),
+                url: getString(story.url),
+              },
+            }
+            : undefined,
+        } satisfies RawMessage;
+      })
       : [];
 
     return {
@@ -896,6 +898,11 @@ function buildOnboardingData({
   });
   const missingItems = [
     {
+      label: "Business Detailed Information",
+      detail: hasKnowledgeMatch(knowledgeSources, /faq|details|about|information|common/i) ? "Information added" : "Add detailed business info for AI context",
+      complete: hasKnowledgeMatch(knowledgeSources, /faq|details|about|information|common/i),
+    },
+    {
       label: "Pricing Information",
       detail: averageValue > 0 ? "Pricing detected" : "Add pricing details",
       complete: averageValue > 0,
@@ -1182,11 +1189,27 @@ function ConnectInstagramCard({
     <Card>
       <StepTitle number={1} title="Connect Instagram" subtitle="Secure and easy connection" />
       <div className="flex items-center gap-4 border-b border-[#eef1f5] pb-5">
-        {data.connected && data.avatarUrl ? <Avatar src={data.avatarUrl} name={data.accountName || data.username} size="h-16 w-16" /> : <InstagramLogoBox />}
-        <div className="min-w-0">
-          <p className="truncate text-[15px] font-extrabold text-black">{data.username ? `@${data.username}` : data.connected ? "Connected account" : "Instagram not connected"}</p>
-          <p className="mt-1 truncate text-[13px] font-extrabold text-[#344054]">{data.accountName || "Connect your business account"}</p>
-          <p className="mt-1 text-[12px] font-semibold text-[#667085]">{data.accountType || (data.connected ? "Instagram business account" : "Required for live data")}</p>
+        {data.isLoading ? (
+          <span className="h-16 w-16 shrink-0 animate-pulse rounded-full bg-[#eef2f7]" />
+        ) : data.connected && data.avatarUrl ? (
+          <Avatar src={data.avatarUrl} name={data.accountName || data.username} size="h-16 w-16" />
+        ) : (
+          <InstagramLogoBox />
+        )}
+        <div className="min-w-0 flex-1">
+          {data.isLoading ? (
+            <>
+              <div className="h-4 w-36 animate-pulse rounded-[6px] bg-[#eef2f7]" />
+              <div className="mt-2 h-3 w-28 animate-pulse rounded-[6px] bg-[#eef2f7]" />
+              <div className="mt-2 h-3 w-20 animate-pulse rounded-[6px] bg-[#eef2f7]" />
+            </>
+          ) : (
+            <>
+              <p className="truncate text-[15px] font-extrabold text-black">{data.username ? `@${data.username}` : data.connected ? "Connected account" : "Instagram not connected"}</p>
+              <p className="mt-1 truncate text-[13px] font-extrabold text-[#344054]">{data.accountName || "Connect your business account"}</p>
+              <p className="mt-1 text-[12px] font-semibold text-[#667085]">{data.accountType || (data.connected ? "Instagram business account" : "Required for live data")}</p>
+            </>
+          )}
         </div>
       </div>
 
@@ -1199,7 +1222,13 @@ function ConnectInstagramCard({
           ["Cancel anytime", true],
         ].map(([label, done]) => (
           <div key={String(label)} className="flex items-center gap-3 text-[13px] font-extrabold text-[#344054]">
-            {done ? <IconCheck /> : <Circle size={18} className="text-[#98a2b3]" />}
+            {data.isLoading && (label === "Business account connected" || label === "Live metrics from Instagram") ? (
+              <span className="h-[18px] w-[18px] shrink-0 animate-pulse rounded-full bg-[#eef2f7]" />
+            ) : done ? (
+              <IconCheck />
+            ) : (
+              <Circle size={18} className="text-[#98a2b3]" />
+            )}
             <span>{label}</span>
           </div>
         ))}
@@ -1227,7 +1256,7 @@ function DiscoveryCard({ data }: { data: OnboardingData }) {
     "Instagram Profile": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
     "Recent Posts & Reels": data.isLoading ? "In Progress" : data.mediaCount > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
     "Comments & DMs": data.isLoading ? "In Progress" : data.conversationCount > 0 || data.totalPostComments > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
-    "Story Replies": data.isLoading ? "In Progress" : data.storyReplyCount > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
+    "Story Replies": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
     "Business Knowledge": data.isLoading ? "In Progress" : data.knowledgeCount > 0 || data.catalogCount > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
     "Analyzing Opportunities": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
   };
@@ -1291,19 +1320,7 @@ function ReportCard({ data }: { data: OnboardingData }) {
         />
       </div>
 
-      <div className="mt-6 rounded-[8px] bg-[#fff8eb] p-4">
-        <div className="flex gap-3">
-          <AlertCircle size={18} className="mt-0.5 shrink-0 text-[#f79009]" strokeWidth={2.4} />
-          <p className="text-[13px] font-extrabold leading-relaxed text-[#344054]">
-            {data.potentialRevenue > 0
-              ? `You could be losing ${formatCurrency(data.potentialRevenue, data.revenueCurrency)} in potential revenue.`
-              : "Add pricing or paid-order data to calculate potential revenue."}
-            <span className="mt-3 block font-semibold">
-              Turn on your AI Sales Agent to capture qualified opportunities from these live conversations.
-            </span>
-          </p>
-        </div>
-      </div>
+
     </Card>
   );
 }
@@ -1324,13 +1341,12 @@ function OpportunitiesCard({ data }: { data: OnboardingData }) {
                   <div className="flex items-center gap-2">
                     <h3 className="truncate text-[14px] font-extrabold text-black">{opportunity.name}</h3>
                     <span
-                      className={`shrink-0 rounded-[8px] px-2 py-1 text-[10px] font-extrabold ${
-                        opportunity.badge === "Hot Lead"
-                          ? "bg-[#fff1ed] text-[#d92d20]"
-                          : opportunity.badge === "Needs Reply"
-                            ? "bg-[#fff8eb] text-[#b54708]"
-                            : "bg-[#f2f4f7] text-[#475467]"
-                      }`}
+                      className={`shrink-0 rounded-[8px] px-2 py-1 text-[10px] font-extrabold ${opportunity.badge === "Hot Lead"
+                        ? "bg-[#fff1ed] text-[#d92d20]"
+                        : opportunity.badge === "Needs Reply"
+                          ? "bg-[#fff8eb] text-[#b54708]"
+                          : "bg-[#f2f4f7] text-[#475467]"
+                        }`}
                     >
                       {opportunity.badge}
                     </span>
@@ -1344,10 +1360,6 @@ function OpportunitiesCard({ data }: { data: OnboardingData }) {
                       </li>
                     ))}
                   </ul>
-                  <p className="mt-4 text-right text-[11px] font-semibold text-[#667085]">Est. Value</p>
-                  <p className="text-right text-[18px] font-extrabold text-[#159947]">
-                    {opportunity.estimatedValue > 0 ? formatCurrency(opportunity.estimatedValue, data.revenueCurrency) : "Needs pricing"}
-                  </p>
                 </div>
               </div>
             </article>
@@ -2095,11 +2107,12 @@ function BusinessEditForm({
   onSave,
 }: {
   data: OnboardingData;
-  onSave: (draft: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "offers">) => void;
+  onSave: (draft: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "websiteUrl" | "offers">) => void;
 }) {
   const [businessName, setBusinessName] = useState(data.businessName);
   const [niche, setNiche] = useState(data.niche);
   const [description, setDescription] = useState(data.description);
+  const [websiteUrl, setWebsiteUrl] = useState((data as OnboardingData & { websiteUrl?: string }).websiteUrl ?? "");
   const [offersText, setOffersText] = useState(data.offers.map((offer) => offer.title).join("\n"));
 
   return (
@@ -2125,7 +2138,7 @@ function BusinessEditForm({
           };
         });
 
-        onSave({ businessName: businessName.trim(), niche: niche.trim(), description: description.trim(), offers });
+        onSave({ businessName: businessName.trim(), niche: niche.trim(), description: description.trim(), websiteUrl: websiteUrl.trim(), offers });
       }}
     >
       <div>
@@ -2139,6 +2152,17 @@ function BusinessEditForm({
       <div>
         <FieldLabel>Description</FieldLabel>
         <textarea className={textAreaClass()} value={description} onChange={(event) => setDescription(event.target.value)} />
+      </div>
+      <div>
+        <FieldLabel>Website / Purchase Link</FieldLabel>
+        <input
+          className={textInputClass()}
+          placeholder="https://yoursite.com"
+          type="url"
+          value={websiteUrl}
+          onChange={(event) => setWebsiteUrl(event.target.value)}
+        />
+        <p className="mt-1 text-[11px] font-semibold text-[#667085]">The AI uses this to answer \"what&apos;s your website?\" and send purchase links.</p>
       </div>
       <div>
         <FieldLabel>Offers, one per line</FieldLabel>
@@ -2190,23 +2214,100 @@ function MissingInfoForm({
   onSave: (detail: string) => void;
 }) {
   const [detail, setDetail] = useState(item.complete ? item.detail : "");
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("category", "Business Information");
+      formData.append("assignment", "auto");
+
+      const response = await fetch("/api/knowledge/sources", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to upload file");
+      }
+
+      onSave(`Uploaded file: ${file.name}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to upload file");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
-    <form
-      className="space-y-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSave(detail.trim() || "Added in onboarding");
-      }}
-    >
-      <div>
-        <FieldLabel>{item.label}</FieldLabel>
-        <textarea className={textAreaClass()} value={detail} onChange={(event) => setDetail(event.target.value)} />
+    <div className="space-y-4">
+      {error && (
+        <div className="rounded-[8px] bg-red-50 p-3 text-[12px] font-semibold text-red-600">
+          {error}
+        </div>
+      )}
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave(detail.trim() || "Added in onboarding");
+        }}
+      >
+        <div>
+          <FieldLabel>{item.label}</FieldLabel>
+          <textarea className={textAreaClass()} placeholder="Type details here..." value={detail} onChange={(event) => setDetail(event.target.value)} disabled={uploading} />
+        </div>
+        <button type="submit" disabled={uploading} className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white disabled:opacity-50">
+          Save Information
+        </button>
+      </form>
+
+      <div className="relative flex py-2 items-center">
+        <div className="flex-grow border-t border-[#e8ebf2]"></div>
+        <span className="flex-shrink mx-4 text-[#667085] text-[12px] font-extrabold">OR</span>
+        <div className="flex-grow border-t border-[#e8ebf2]"></div>
       </div>
-      <button type="submit" className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white">
-        Save Information
-      </button>
-    </form>
+
+      <div className="rounded-[8px] border border-dashed border-[#d0d5dd] p-4 text-center">
+        <input
+          type="file"
+          id="onboarding-file-upload"
+          accept=".pdf,.txt"
+          onChange={handleFileUpload}
+          disabled={uploading}
+          className="hidden"
+        />
+        <label
+          htmlFor="onboarding-file-upload"
+          className="cursor-pointer flex flex-col items-center gap-2"
+        >
+          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f8fafc] text-black">
+            {uploading ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-black border-t-transparent" />
+            ) : (
+              <FileText size={20} />
+            )}
+          </span>
+          <div>
+            <span className="text-[13px] font-extrabold text-[#175cd3]">
+              {uploading ? "Uploading file..." : "Click to upload PDF or TXT"}
+            </span>
+            <p className="mt-1 text-[11px] font-semibold text-[#667085]">
+              Max file size 50MB
+            </p>
+          </div>
+        </label>
+      </div>
+    </div>
   );
 }
 
@@ -2331,6 +2432,23 @@ export default function OnboardingPage() {
   }, [data.connected, data.conversationCount]);
   const visibleData = useMemo(() => {
     const offers = draft.offers ?? data.offers;
+    const conversionActions = draft.conversionActions ?? data.conversionActions;
+    const escalationRules = draft.escalationRules ?? data.escalationRules;
+    const missingItems = draft.missingItems ?? data.missingItems;
+    const configuredActions = conversionActions.filter((action) => action.configured).length;
+    const enabledRules = escalationRules.filter((rule) => rule.enabled).length;
+
+    const completedMissingCount = missingItems.filter((item) => item.complete).length;
+    const knowledgeCount = data.knowledgeCount + completedMissingCount;
+
+    const knowledgeScore = getKnowledgeScore({
+      connected: data.connected,
+      conversationCount: data.conversationCount,
+      catalogCount: offers.length,
+      configuredActions,
+      knowledgeCount,
+      enabledRules,
+    });
 
     return {
       ...data,
@@ -2338,11 +2456,12 @@ export default function OnboardingPage() {
       offers,
       catalogCount: draft.offers ? offers.length : data.catalogCount,
       businessGoal: draft.businessGoal ?? data.businessGoal,
-      conversionActions: draft.conversionActions ?? data.conversionActions,
-      escalationRules: draft.escalationRules ?? data.escalationRules,
+      conversionActions,
+      escalationRules,
       permissions: draft.permissions ?? data.permissions,
-      missingItems: draft.missingItems ?? data.missingItems,
+      missingItems,
       behavior: draft.behavior ?? data.behavior,
+      knowledgeScore,
     } satisfies OnboardingData;
   }, [data, draft]);
 
@@ -2372,7 +2491,7 @@ export default function OnboardingPage() {
     });
   }
 
-  function updateBusinessDraft(partial: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "offers">) {
+  function updateBusinessDraft(partial: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "websiteUrl" | "offers">) {
     updateDraft(partial);
     setActiveModal(null);
   }
@@ -2385,11 +2504,11 @@ export default function OnboardingPage() {
     const actions = visibleData.conversionActions.map((action) =>
       action.label === actionLabel
         ? {
-            ...action,
-            configured: Boolean(url),
-            href: url,
-            detail: url || action.detail,
-          }
+          ...action,
+          configured: Boolean(url),
+          href: url,
+          detail: url || action.detail,
+        }
         : action
     );
 
@@ -2431,10 +2550,10 @@ export default function OnboardingPage() {
       missingItems: visibleData.missingItems.map((item) =>
         item.label === itemLabel
           ? {
-              ...item,
-              complete: true,
-              detail: detail || "Added in onboarding",
-            }
+            ...item,
+            complete: true,
+            detail: detail || "Added in onboarding",
+          }
           : item
       ),
     });
@@ -2604,9 +2723,8 @@ export default function OnboardingPage() {
               {currentScreen.phase}
             </span>
             <div className="flex flex-wrap gap-3 text-[11px] font-extrabold text-black">
-              <span>100% free</span>
-              <span>No commitment</span>
-              <span>{phaseOneSummary}</span>
+
+
             </div>
           </div>
 
@@ -2640,9 +2758,8 @@ export default function OnboardingPage() {
 
                       setStepIndex(index);
                     }}
-                    className={`h-2.5 rounded-full transition ${
-                      index === stepIndex ? "w-9 bg-black" : index < stepIndex ? "w-2.5 bg-[#667085]" : "w-2.5 bg-[#d0d5dd]"
-                    } ${index > 0 && !visibleData.connected ? "cursor-not-allowed opacity-40" : ""}`}
+                    className={`h-2.5 rounded-full transition ${index === stepIndex ? "w-9 bg-black" : index < stepIndex ? "w-2.5 bg-[#667085]" : "w-2.5 bg-[#d0d5dd]"
+                      } ${index > 0 && !visibleData.connected ? "cursor-not-allowed opacity-40" : ""}`}
                   />
                 ))}
               </div>
