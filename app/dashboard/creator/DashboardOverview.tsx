@@ -41,7 +41,7 @@ import type {
 } from "./types";
 
 type DashboardChartRange = "7d" | "30d";
-type ToneName = "orange" | "pink" | "purple" | "green" | "blue" | "amber";
+type ToneName = "orange" | "pink" | "green" | "blue" | "amber";
 
 const dashboardChartRangeOptions = [
   { value: "7d", label: "This week", points: 7 },
@@ -63,12 +63,7 @@ const toneClasses: Record<ToneName, { soft: string; text: string; bar: string; d
     bar: "from-[#ff2f7d] to-[#e81f72]",
     dot: "bg-[#e81f72]",
   },
-  purple: {
-    soft: "bg-[#f3efff] text-[#7548ff]",
-    text: "text-[#7548ff]",
-    bar: "from-[#7548ff] to-[#9b5cff]",
-    dot: "bg-[#7548ff]",
-  },
+
   green: {
     soft: "bg-[#eafaf0] text-[#15a84f]",
     text: "text-[#15a84f]",
@@ -746,7 +741,7 @@ function PipelineOverview({
       label: "Offers Sent",
       value: intent.offersSentCount,
       icon: Send,
-      tone: "purple" as ToneName,
+      tone: "orange" as ToneName,
     },
     {
       label: "Payment Pending",
@@ -810,7 +805,7 @@ function getOpportunitySourceLabel(badge: string) {
 }
 
 function buildRevenueSources(summary: CreatorLiveSummary) {
-  const toneOrder: ToneName[] = ["pink", "orange", "purple", "blue"];
+  const toneOrder: ToneName[] = ["pink", "orange", "blue"];
 
   if (summary.revenueMode === "paid") {
     const orderSources = [
@@ -1042,7 +1037,7 @@ export function DashboardOverview({
       value: isLoading ? "..." : formatCreatorInteger(intent.readyToBuyCount),
       trend: getTrendShare(intent.readyToBuyCount, totalForTrends),
       icon: Users,
-      tone: "purple" as ToneName,
+      tone: "orange" as ToneName,
     },
     {
       label: "Offers Sent",
@@ -1070,7 +1065,7 @@ export function DashboardOverview({
       value: isLoading ? "..." : formatCreatorInteger(intent.buyingSignalCount),
       trend: getTrendShare(intent.buyingSignalCount, Math.max(1, summary.totalMessageCount || totalForTrends)),
       icon: Sparkles,
-      tone: "purple" as ToneName,
+      tone: "orange" as ToneName,
     },
   ];
   const heroStats = [
@@ -1093,7 +1088,7 @@ export function DashboardOverview({
       detail: "Payment pending",
       value: intent.waitingPaymentCount,
       icon: Clock,
-      tone: "purple" as ToneName,
+      tone: "orange" as ToneName,
     },
     {
       label: "New opportunities",

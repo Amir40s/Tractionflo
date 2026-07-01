@@ -134,6 +134,17 @@ type PermissionItem = {
   icon: LucideIcon;
 };
 
+type AILearnedContext = {
+  summary: string;
+  keywords: string[];
+  themes: string[];
+  contentPillars: string[];
+  offerSignals: string[];
+  contentTypes: string[];
+  postsCount: number;
+  lastSynced: string;
+};
+
 type OnboardingData = {
   isLoading: boolean;
   error: string;
@@ -183,6 +194,7 @@ type OnboardingData = {
   knowledgeScore: number;
   reviewActions: string[];
   allowedPages: string[];
+  aiLearnedContext: AILearnedContext | null;
 };
 
 type OnboardingDraft = {
@@ -269,6 +281,7 @@ const emptyData: OnboardingData = {
   knowledgeScore: 0,
   reviewActions: [],
   allowedPages: [],
+  aiLearnedContext: null,
 };
 
 const discoveryRows = [
@@ -1278,6 +1291,46 @@ function DiscoveryCard({ data }: { data: OnboardingData }) {
           );
         })}
       </div>
+
+      {data.aiLearnedContext && (
+        <div className="mt-8 rounded-[12px] border-2 border-[#ff7a00] bg-[#fff4e6] p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Sparkles size={18} className="shrink-0 text-[#ff7a00]" strokeWidth={2.3} />
+            <h3 className="text-[13px] font-extrabold text-[#ff7a00]">What Your AI Learned About Your Business</h3>
+          </div>
+
+          <p className="text-[12px] font-semibold text-[#7a3d00] leading-5">
+            {data.aiLearnedContext.summary}
+          </p>
+
+          {data.aiLearnedContext.contentPillars.length > 0 && (
+            <div>
+            
+            </div>
+          )}
+
+          {data.aiLearnedContext.offerSignals.length > 0 && (
+            <div>
+              <p className="mt-4 text-[11px] font-semibold text-[#ff7a00] mb-2 uppercase opacity-80">Offer Signals</p>
+              <div className="flex flex-wrap gap-2">
+                {data.aiLearnedContext.offerSignals.slice(0, 4).map((signal, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-block rounded-full bg-[#ff7a00] px-3 py-1 text-[11px] font-semibold text-white"
+                  >
+                    {signal}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="text-[10px] text-[#ff7a00] opacity-70 mt-3">
+            Based on {data.aiLearnedContext.postsCount} posts • Last updated {formatLastUpdated(data.aiLearnedContext.lastSynced || "")}
+          </p>
+        </div>
+      )}
+
       <div className="mt-8 rounded-[8px] bg-[#f8fafc] px-4 py-4 text-center text-[12px] font-semibold text-[#667085]">
         {data.isLoading ? "Usually takes 30-60 seconds" : formatLastUpdated(data.lastUpdated)}
       </div>
@@ -2359,6 +2412,7 @@ export default function OnboardingPage() {
         outcomeProvidersResult,
         knowledgeResult,
         onboardingSetupResult,
+        businessContextResult,
       ] = await Promise.allSettled([
         fetchJson("/api/auth/instagram/status"),
         fetchJson(`/api/instagram/content?${scanParams.toString()}`),
@@ -2370,6 +2424,7 @@ export default function OnboardingPage() {
         fetchJson("/api/revenue/outcome-providers"),
         fetchJson("/api/knowledge/sources"),
         fetchJson("/api/auth/onboarding"),
+        fetchJson("/api/instagram/profile/business-context/view"),
       ]);
 
       const nextData = buildOnboardingData({
@@ -2383,11 +2438,19 @@ export default function OnboardingPage() {
         outcomeProvidersPayload: outcomeProvidersResult.status === "fulfilled" ? outcomeProvidersResult.value : {},
         knowledgePayload: knowledgeResult.status === "fulfilled" ? knowledgeResult.value : {},
       });
+      
+      const businessContextData = businessContextResult.status === "fulfilled" && businessContextResult.value?.context
+        ? businessContextResult.value.context
+        : null;
+
       const persistedSetup = getPersistedOnboardingSetup(
         onboardingSetupResult.status === "fulfilled" ? onboardingSetupResult.value : {}
       );
 
-      setData(nextData);
+      setData({
+        ...nextData,
+        aiLearnedContext: businessContextData,
+      });
       setDraft((current) => ({
         ...buildDraftFromPersistedSetup(persistedSetup, nextData),
         ...current,

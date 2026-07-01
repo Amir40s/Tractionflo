@@ -139,6 +139,36 @@ function normalizeLeadInsight(value: unknown): any {
   };
 }
 
+function normalizeQuestionText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isFollowUpQuestion(text: string) {
+  const normalized = normalizeQuestionText(text);
+  if (!normalized) return false;
+
+  return /\?$/.test(text.trim()) || /what are you interested in|which one|want more details|ready to start|need help with|tell me more|can i share|want details|interested in/.test(normalized);
+}
+
+function detectRepeatedQuestionLoop(messages: Array<{ from?: 'me' | 'user' | 'note'; text?: string }>, reply: string) {
+  const recentAssistantQuestions = messages
+    .filter((message) => message.from === 'me' && typeof message.text === 'string')
+    .map((message) => message.text || '')
+    .filter(isFollowUpQuestion)
+    .map(normalizeQuestionText);
+
+  if (!recentAssistantQuestions.length || !isFollowUpQuestion(reply)) {
+    return false;
+  }
+
+  const normalizedReply = normalizeQuestionText(reply);
+  return recentAssistantQuestions.some((question) => question && question === normalizedReply);
+}
+
 export async function runRosPipeline(input: RosPipelineInput): Promise<RosPipelineResult> {
   const {
     supabase,
@@ -619,6 +649,10 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
   }
 
   const isHandoff = finalRos.tacticIntelligence?.tactics?.includes('human_handoff') || false;
+  const decisionConfidence = Number(finalRos.decision?.confidence || 0);
+  const lowConfidenceHandoff = Number.isFinite(decisionConfidence) && decisionConfidence > 0 && decisionConfidence < 75;
+  const repeatedQuestionLoop = detectRepeatedQuestionLoop(messages, reply);
+  const shouldForceHumanHandoff = isHandoff || lowConfidenceHandoff || repeatedQuestionLoop;
   const pipelineEscalation = isHandoff ? {
     intent: 'human_handoff' as const,
     label: 'Human handoff requests',
@@ -626,6 +660,16 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
     summary: 'AI requested human handoff during conversation.',
     recommendedAction: 'Switch this conversation to human takeover and respond personally.',
     signals: ['human_handoff'],
+    reply: '',
+  } : shouldForceHumanHandoff ? {
+    intent: 'human_handoff' as const,
+    label: lowConfidenceHandoff ? 'Low confidence handoff' : 'Repeated question loop',
+    urgency: 'High' as const,
+    summary: lowConfidenceHandoff
+      ? `AI confidence is only ${Math.round(decisionConfidence)}%, so this conversation should be handled by a human.`
+      : 'AI appears to be asking the same follow-up question again.',
+    recommendedAction: 'Pause auto-replies and let a human take over this conversation.',
+    signals: lowConfidenceHandoff ? ['low_confidence'] : ['repeated_question_loop'],
     reply: '',
   } : null;
 
@@ -652,7 +696,7 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
     reply,
     starter,
     cta,
-    handoff: isHandoff,
+    handoff: shouldForceHumanHandoff,
     escalation: pipelineEscalation,
     lead,
     ros: finalRos,

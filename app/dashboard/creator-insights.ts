@@ -72,7 +72,7 @@ type Opportunity = {
   body: string[];
   value?: string;
   action: string;
-  tone: "purple" | "blue" | "orange" | "red";
+  tone: "blue" | "orange" | "red";
   icon: LucideIcon;
 };
 
@@ -92,7 +92,7 @@ type OpportunityPageCard = {
   detail: string;
   badge: string;
   time: string;
-  tone: "purple" | "green" | "blue" | "orange" | "red";
+  tone: "green" | "blue" | "orange" | "red";
   icon: LucideIcon;
   value?: string;
   scoreLabel?: string;
@@ -118,7 +118,7 @@ type AudienceMetric = {
   label: string;
   value: string;
   change: string;
-  tone: "purple" | "green" | "blue" | "violet" | "orange";
+  tone: "green" | "blue" | "orange";
   icon: LucideIcon;
 };
 
@@ -943,7 +943,7 @@ export function classifyCreatorOpportunity(conversation: InstagramSettingsConver
     return {
       badge,
       subtitle,
-      tone: "purple" as const,
+      tone: "orange" as const,
       icon: Handshake,
       value: 5000 + partnershipHits * 250,
       ...getCreatorLeadQualification({ text, badge, subtitle, buyerHits, partnershipHits, communityHits, inboundCount }),
@@ -1243,7 +1243,7 @@ export function buildCreatorLiveSummary(
     body: [card.name, card.detail],
     value: card.value,
     action: card.action,
-    tone: card.tone === "green" ? "blue" : card.tone === "blue" ? "purple" : card.tone,
+    tone: card.tone === "green" ? "blue" : card.tone === "blue" ? "orange" : card.tone,
     icon: card.icon,
   }));
 
@@ -1371,10 +1371,10 @@ export function buildCreatorLiveSummary(
   const recentActivity = [...orderActivity, ...conversationActivity].slice(0, 4);
 
   const audienceMetrics: AudienceMetric[] = [
-    { label: "Total Audience", value: formatCreatorInteger(totalCount), change: "from Instagram", tone: "purple", icon: Users },
+    { label: "Total Audience", value: formatCreatorInteger(totalCount), change: "from Instagram", tone: "orange", icon: Users },
     { label: "Engaged Audience", value: formatCreatorInteger(engagedConversations.length), change: "messaged you", tone: "green", icon: Sparkles },
     { label: "Leads", value: formatCreatorInteger(opportunityRecords.length), change: "intent detected", tone: "blue", icon: User },
-    { label: "Customers", value: formatCreatorInteger(buyerCount), change: "buying keywords", tone: "violet", icon: ShoppingCart },
+    { label: "Customers", value: formatCreatorInteger(buyerCount), change: "buying keywords", tone: "orange", icon: ShoppingCart },
     { label: "Partners", value: formatCreatorInteger(partnershipCount), change: "partnership keywords", tone: "orange", icon: Handshake },
   ];
 

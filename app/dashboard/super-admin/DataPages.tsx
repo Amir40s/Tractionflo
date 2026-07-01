@@ -339,7 +339,7 @@ function getChurnStatus(row: SuperAdminConnectedAccountApiRow) {
     return { label: "Watch", tone: "amber" as const };
   }
 
-  return { label: "Monitor", tone: "purple" as const };
+  return { label: "Monitor", tone: "orange" as const };
 }
 
 function buildCreatorLifecycleConfig(
@@ -495,7 +495,7 @@ function getPaymentTone(row: SuperAdminConnectedAccountApiRow): SuperAdminTableR
     return "green";
   }
 
-  return "purple";
+  return "orange";
 }
 
 function getPaymentStatus(row: SuperAdminConnectedAccountApiRow) {
@@ -635,7 +635,7 @@ function buildRevenueConfig(
             group.trial ? "Pending" : formatAdminPercent(group.active, group.count),
           ],
           status: group.trial ? "Pipeline" : group.mrr > 0 ? "Strong" : "Monitor",
-          statusTone: group.trial ? "purple" as const : group.mrr > 0 ? "green" as const : "amber" as const,
+          statusTone: group.trial ? "amber" as const : group.mrr > 0 ? "green" as const : "amber" as const,
         })),
         insightTitle: "Revenue mix",
         insightItems: (paidInsightItems.length > 0

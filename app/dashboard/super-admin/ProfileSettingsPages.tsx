@@ -349,7 +349,7 @@ export function SuperAdminSettingsPage({ profile, refreshKey = 0 }: { profile: A
                   <p className="mt-1 text-[12px] font-semibold leading-relaxed text-[#596175]">{item.detail}</p>
                 </div>
               </div>
-              <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-[10px] font-extrabold ${item.connected ? statusToneClasses.green : isLoading && !metrics ? statusToneClasses.purple : statusToneClasses.amber}`}>
+              <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-[10px] font-extrabold ${item.connected ? statusToneClasses.green : isLoading && !metrics ? statusToneClasses.amber : statusToneClasses.amber}`}>
                 {status}
               </span>
             </article>

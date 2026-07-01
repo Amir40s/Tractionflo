@@ -37,7 +37,7 @@ type AdminConnectedAccountRow = {
   opportunities: string;
   revenue: string;
   status: string;
-  statusTone: "green" | "amber" | "red" | "purple";
+  statusTone: "green" | "amber" | "red";
   createdAt?: string | null;
   lastActiveAt?: string | null;
   accountStatus?: "active" | "trial" | "inactive" | "cancelled";

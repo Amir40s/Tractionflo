@@ -1407,11 +1407,19 @@ async function processInstagramAutomations(
       const escalation = detectConversationEscalation([{ from: 'user', text: event.text }], {
         rules: metadata[escalationRulesMetadataKey],
       });
-      const pauseForEscalation = shouldPauseAiForEscalation(escalation);
+      
+      // If payment is requested but Stripe is not configured, force escalation to human
+      const hasStripeConfigured = Boolean(process.env.STRIPE_SECRET_KEY?.trim() && process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim());
+      const isPaymentRequestEscalation = escalation?.intent === 'payment_request';
+      const shouldForcePauseForUnconfiguredPayment = isPaymentRequestEscalation && !hasStripeConfigured;
+      
+      const pauseForEscalation = shouldPauseAiForEscalation(escalation) || shouldForcePauseForUnconfiguredPayment;
 
       if (escalation && pauseForEscalation) {
         const notificationTitle = `${escalation.label} detected`;
-        const notificationBody = escalation.summary;
+        const notificationBody = shouldForcePauseForUnconfiguredPayment 
+          ? "Customer requested payment but Stripe is not configured. Team member needed to process manually."
+          : escalation.summary;
         const notificationMetadata = {
           source: 'instagram-webhook',
           userId: user.id,
@@ -1421,6 +1429,7 @@ async function processInstagramAutomations(
           category: escalation.intent,
           urgency: escalation.urgency,
           urgent: escalation.urgency === 'High',
+          stripeMissing: shouldForcePauseForUnconfiguredPayment,
         };
         const notificationId = `escalation:${user.id}:${event.senderId}:${escalation.intent}`;
 
@@ -1441,6 +1450,7 @@ async function processInstagramAutomations(
           userId: user.id,
           intent: escalation.intent,
           senderId: event.senderId,
+          stripeMissing: shouldForcePauseForUnconfiguredPayment,
         });
         continue;
       }

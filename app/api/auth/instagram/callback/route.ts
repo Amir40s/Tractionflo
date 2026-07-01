@@ -4,10 +4,19 @@ import {
   exchangeInstagramTokenForLongLivedToken,
   saveInstagramAccountToken,
 } from '@/lib/instagram-token';
+import {
+  fetchInstagramBusinessProfile,
+  fetchInstagramBusinessPosts,
+  analyzeInstagramBusinessContextWithVision,
+  generateBusinessContextPrompt,
+  saveBusinessContextToDatabase,
+} from '@/lib/instagram-business-context';
+import { getOrCreateAssistant } from '@/lib/openai-assistants';
 import { getInstagramAppCredentials, getNormalizedAppBaseUrl } from '@/lib/instagram-oauth';
 import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
+import logger from '@/lib/logger';
 
 function getAppBaseUrl(request: Request) {
   return getNormalizedAppBaseUrl(new URL(request.url).origin);
@@ -274,6 +283,83 @@ export async function GET(request: Request) {
       ig_user_id: igPageId,
       access_token: accessToken,
     });
+
+    // Fetch and train AI with business context (top 6 posts)
+    try {
+      logger.info('Starting business context fetch after Instagram connection', { userId: ownerUserId });
+      
+      const profile = await fetchInstagramBusinessProfile(accessToken);
+      const posts = await fetchInstagramBusinessPosts(accessToken, 6);
+
+      if (posts.length > 0) {
+        const analysis = await analyzeInstagramBusinessContextWithVision({
+          apiKey: process.env.OPENAI_API_KEY,
+          profile,
+          posts,
+          maxPosts: 5,
+        });
+        
+        // Save to database
+        await saveBusinessContextToDatabase(
+          supabase,
+          ownerUserId,
+          profile,
+          posts,
+          analysis.keywords,
+          analysis.contentPillars,
+          analysis.summary
+        );
+
+        // Train AI assistant if API key is available
+        const openaiApiKey = process.env.OPENAI_API_KEY;
+        if (openaiApiKey) {
+          try {
+            const businessContextPrompt = generateBusinessContextPrompt(
+              profile,
+              posts,
+              analysis.keywords,
+              analysis.contentPillars
+            );
+
+            const baseInstructions = `You are an AI customer service assistant for ${profile.name}'s Instagram business. 
+
+Be helpful, professional, and knowledgeable about the business. Use the business context provided to give accurate and relevant responses.
+
+The account appears to sell or promote: ${analysis.sellingWhat}
+
+The AI learned this from the profile bio, post captions, and post images.
+
+${businessContextPrompt}`;
+
+            const assistant = await getOrCreateAssistant({
+              apiKey: openaiApiKey,
+              name: `${profile.name} AI Assistant`,
+              instructions: baseInstructions,
+              model: 'gpt-4o-mini',
+            });
+
+            logger.info('AI assistant trained with business context', {
+              userId: ownerUserId,
+              assistantId: assistant.id,
+              postsCount: posts.length,
+            });
+          } catch (aiError) {
+            logger.warn('Failed to train AI assistant with business context', {
+              userId: ownerUserId,
+              error: aiError instanceof Error ? aiError.message : String(aiError),
+            });
+          }
+        }
+      } else {
+        logger.info('No posts found for business context', { userId: ownerUserId });
+      }
+    } catch (businessContextError) {
+      logger.error('Error fetching business context after Instagram connection', {
+        userId: ownerUserId,
+        error: businessContextError instanceof Error ? businessContextError.message : String(businessContextError),
+      });
+      // Don't fail the OAuth flow if business context fails
+    }
 
     await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
       type: 'instagram',

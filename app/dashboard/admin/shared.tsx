@@ -18,7 +18,7 @@ export type SuperAdminTableRow = {
   detail: string;
   values: string[];
   status: string;
-  statusTone: "green" | "amber" | "red" | "purple";
+  statusTone: "green" | "amber" | "red";
 };
 
 export type SuperAdminDetailConfig = {
@@ -63,7 +63,7 @@ export const statusToneClasses = {
   green: "bg-[#e8f8ed] text-[#0a9b3f]",
   amber: "bg-[#fff4df] text-[#c07800]",
   red: "bg-[#fff0f3] text-[#df405b]",
-  purple: "bg-[#f0edff] text-[#4b3cff]",
+
 };
 
 export function CreatorDateRangeSelect({
@@ -291,17 +291,13 @@ export function formatAdminPercent(value: number, total: number) {
   return `${((value / total) * 100).toFixed(1)}%`;
 }
 
-export function getPlatformHealthToneClass(tone: "green" | "amber" | "red" | "purple") {
+export function getPlatformHealthToneClass(tone: "green" | "amber" | "red") {
   if (tone === "green") {
     return "text-[#13a84f]";
   }
 
   if (tone === "red") {
     return "text-[#df405b]";
-  }
-
-  if (tone === "purple") {
-    return "text-[#4b3cff]";
   }
 
   return "text-[#c07800]";

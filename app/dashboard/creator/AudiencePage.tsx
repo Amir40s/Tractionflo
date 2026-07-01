@@ -24,10 +24,9 @@ import type {
 } from "./types";
 
 const audienceMetricToneClasses = {
-  purple: "bg-[#f0edff] text-[#4b3cff]",
+
   green: "bg-[#eafaf0] text-[#13a84f]",
   blue: "bg-[#eef4ff] text-[#246bff]",
-  violet: "bg-[#f0edff] text-[#6d3cff]",
   orange: "bg-[#fff3e6] text-[#ff850d]",
 };
 
