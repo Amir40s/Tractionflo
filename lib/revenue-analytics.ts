@@ -353,7 +353,7 @@ async function upsertBusinessProfile(
   profile: RosBusinessProfile,
   warnings: string[]
 ) {
-  const { error } = await supabase.from("ros_business_profiles").upsert(
+  const { error } = await (supabase.from("ros_business_profiles") as any).upsert(
     {
       user_id: userId,
       products: profile.products,
@@ -514,7 +514,7 @@ async function upsertLearningSummary(
   summary: RevenueOperatingSummary["learningSummary"],
   warnings: string[]
 ) {
-  const { error } = await supabase.from("ros_learning_summaries").upsert(
+  const { error } = await (supabase.from("ros_learning_summaries") as any).upsert(
     {
       user_id: userId,
       summary: summary.summary,
