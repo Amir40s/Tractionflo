@@ -322,7 +322,7 @@ export async function POST(request: Request) {
         ? await query.or(filters.join(',')).order('created_at', { ascending: false }).limit(1)
         : { data: null };
 
-      const latestDecision = cachedDecisions?.[0];
+      const latestDecision = cachedDecisions?.[0] as any;
       if (latestDecision && typeof latestDecision.payload === 'object' && latestDecision.payload !== null) {
         const cachedPayload = latestDecision.payload as any;
 

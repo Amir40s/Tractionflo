@@ -216,6 +216,7 @@ type ActiveModal =
   | { type: "conversion"; actionLabel: string }
   | { type: "missing"; itemLabel: string }
   | { type: "customRule" }
+  | { type: "connect" }
   | null;
 
 type PersistedOnboardingSetup = {
@@ -989,6 +990,7 @@ function buildOnboardingData({
     knowledgeScore,
     reviewActions: buildReviewActions(conversionActions, escalationRules, permissions),
     allowedPages,
+    aiLearnedContext: null,
   };
 }
 
@@ -2143,6 +2145,41 @@ function OnboardingModal({
   );
 }
 
+const instagramConsentBaseUrl =
+  "http://instagram.com/consent/?flow=ig_biz_login_oauth&params_json=%7B%22client_id%22%3A%221961355111188168%22%2C%22redirect_uri%22%3A%22https%3A%5C%2F%5C%2Ftractionflo.vercel.app%5C%2Fapi%5C%2Fauth%5C%2Finstagram%5C%2Fcallback%22%2C%22response_type%22%3A%22code%22%2C%22state%22%3A%22%7B%5C%22next%5C%22%3A%5C%22%5C%2Fconversations%5C%22%2C%5C%22returnTo%5C%22%3A%5C%22http%3A%5C%2F%5C%2Flocalhost%3A3000%5C%22%2C%5C%22userId%22%3A%5C%2272affb57-ceca-4ab2-8038-b523cf35fcc1%5C%22%2C%5C%22expectedUsername%5C%22%3A%5C%22%5C%22%2C%5C%22signature%5C%22%3A%5C%22ba214a5efaea1d0ffeab4f4b3be9dc3316679b210f929a6af4b5ec40338073be%5C%22%7D%22%2C%22scope%22%3A%22instagram_business_basic-instagram_business_manage_comments-instagram_business_manage_messages-instagram_business_content_publish-instagram_business_manage_insights%22%2C%22logger_id%22%3A%2296a62d7f-5624-4fd7-a0fb-409f24321b78%22%2C%22app_id%22%3A%221961355111188168%22%2C%22platform_app_id%22%3A%221961355111188168%22%7D&source=oauth_permissions_page_www";
+
+function buildInstagramConsentUrl(expectedUsername: string) {
+  const cleanUsername = expectedUsername.trim().replace(/^@/, "");
+
+  if (!cleanUsername) {
+    return instagramConsentBaseUrl;
+  }
+
+  try {
+    const url = new URL(instagramConsentBaseUrl);
+    const paramsJson = url.searchParams.get("params_json");
+
+    if (!paramsJson) {
+      return instagramConsentBaseUrl;
+    }
+
+    const decodedParams = JSON.parse(paramsJson) as { state?: string };
+
+    if (typeof decodedParams.state !== "string") {
+      return instagramConsentBaseUrl;
+    }
+
+    const decodedState = JSON.parse(decodedParams.state) as { expectedUsername?: string };
+    decodedState.expectedUsername = cleanUsername;
+    decodedParams.state = JSON.stringify(decodedState);
+    url.searchParams.set("params_json", JSON.stringify(decodedParams));
+
+    return url.toString();
+  } catch {
+    return instagramConsentBaseUrl;
+  }
+}
+
 function FieldLabel({ children }: { children: ReactNode }) {
   return <label className="block text-[12px] font-extrabold text-[#344054]">{children}</label>;
 }
@@ -2396,6 +2433,7 @@ export default function OnboardingPage() {
   const [data, setData] = useState<OnboardingData>(emptyData);
   const [draft, setDraft] = useState<OnboardingDraft>({});
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
+  const [connectUsername, setConnectUsername] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
 
   const loadOnboardingData = useCallback(async () => {
@@ -2439,9 +2477,10 @@ export default function OnboardingPage() {
         knowledgePayload: knowledgeResult.status === "fulfilled" ? knowledgeResult.value : {},
       });
       
-      const businessContextData = businessContextResult.status === "fulfilled" && businessContextResult.value?.context
-        ? businessContextResult.value.context
-        : null;
+      const businessContextValue = businessContextResult.status === "fulfilled"
+        ? (businessContextResult.value as { context?: AILearnedContext } | undefined)
+        : undefined;
+      const businessContextData = businessContextValue?.context ?? null;
 
       const persistedSetup = getPersistedOnboardingSetup(
         onboardingSetupResult.status === "fulfilled" ? onboardingSetupResult.value : {}
@@ -2543,8 +2582,16 @@ export default function OnboardingPage() {
     router.push("/dashboard");
   }
 
-  function connectInstagram() {
-    window.location.href = "/api/auth/instagram?next=/onboarding";
+  function connectInstagram(expectedUsername?: string) {
+    window.location.href = buildInstagramConsentUrl(expectedUsername || connectUsername);
+  }
+
+  function openConnectModal() {
+    setActiveModal({ type: "connect" });
+  }
+
+  function closeConnectModal() {
+    setActiveModal(null);
   }
 
   function updateDraft(partial: OnboardingDraft) {
@@ -2648,7 +2695,7 @@ export default function OnboardingPage() {
       phase: "Phase 1: Discovery",
       label: "Connect Instagram",
       width: "max-w-[430px]",
-      content: <ConnectInstagramCard data={visibleData} onConnect={connectInstagram} />,
+      content: <ConnectInstagramCard data={visibleData} onConnect={openConnectModal} />,
     },
     {
       id: "discovery",
@@ -2874,6 +2921,50 @@ export default function OnboardingPage() {
         {activeModal?.type === "customRule" ? (
           <OnboardingModal title="Add Custom Escalation Rule" onClose={() => setActiveModal(null)}>
             <CustomRuleForm onSave={addCustomRule} />
+          </OnboardingModal>
+        ) : null}
+        {activeModal?.type === "connect" ? (
+          <OnboardingModal title="Connect Instagram" onClose={closeConnectModal}>
+            <form
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                connectInstagram(connectUsername);
+              }}
+            >
+              <div>
+                <FieldLabel>Instagram username</FieldLabel>
+                <input
+                  autoFocus
+                  value={connectUsername}
+                  onChange={(event) => setConnectUsername(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      connectInstagram(connectUsername);
+                    }
+                  }}
+                  placeholder="@username"
+                  className={textInputClass()}
+                />
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeConnectModal}
+                  className="rounded-[8px] border border-[#d0d5dd] px-4 py-2 text-[12px] font-extrabold text-black"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!connectUsername.trim()}
+                  className="rounded-[8px] bg-black px-4 py-2 text-[12px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </form>
           </OnboardingModal>
         ) : null}
       </div>

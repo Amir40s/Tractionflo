@@ -867,7 +867,7 @@ export async function GET(request: Request) {
             .in('mid', mids);
 
           if (!dbError && dbMessages) {
-            for (const dbMsg of dbMessages) {
+            for (const dbMsg of dbMessages as any[]) {
               dbMessagesMap[dbMsg.mid] = {
                 text: dbMsg.text || '',
                 metadata: dbMsg.metadata && typeof dbMsg.metadata === 'object' ? dbMsg.metadata : null,

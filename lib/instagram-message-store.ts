@@ -82,7 +82,7 @@ async function hasNearbyStoredDuplicate({
     .eq("conversation_id", conversationId)
     .eq("sender_id", senderId)
     .eq("recipient_id", recipientId)
-    .eq("direction", direction)
+    .eq("direction", direction as string)
     .gte("timestamp", timestamp - 120_000)
     .lte("timestamp", timestamp + 120_000)
     .limit(20);
@@ -95,7 +95,7 @@ async function hasNearbyStoredDuplicate({
     return false;
   }
 
-  return (data || []).some((row) => normalizeMessageText(String(row.text || "")) === normalizedText);
+  return ((data || []) as any[]).some((row) => normalizeMessageText(String(row.text || "")) === normalizedText);
 }
 
 export async function storeInstagramMessage({
@@ -143,7 +143,7 @@ export async function storeInstagramMessage({
     }
   }
 
-  const { error } = await supabase.from("messages").insert(payload);
+  const { error } = await (supabase.from("messages") as any).insert(payload);
 
   if (!error || ("code" in error && error.code === "23505")) {
     return;
@@ -159,7 +159,7 @@ export async function storeInstagramMessage({
     text: text || "",
     timestamp: normalizedTimestamp,
   };
-  const { error: fallbackError } = await supabase.from("messages").insert(fallbackPayload);
+  const { error: fallbackError } = await (supabase.from("messages") as any).insert(fallbackPayload);
 
   if (fallbackError && (!("code" in fallbackError) || fallbackError.code !== "23505")) {
     throw fallbackError;

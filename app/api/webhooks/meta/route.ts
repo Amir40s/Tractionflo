@@ -341,7 +341,7 @@ async function hasAutomatedReplyAfterInbound({
     return false;
   }
 
-  return (data || []).some((row) => {
+  return ((data || []) as any[]).some((row) => {
     const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : {};
     const source = typeof metadata.source === 'string' ? metadata.source : '';
 
@@ -432,7 +432,7 @@ async function claimWebhookAutomationSend({
   }
 
   const lockMid = getWebhookAutomationLockMid(idempotencyKey);
-  const { error } = await supabase.from('messages').insert({
+  const { error } = await (supabase.from('messages') as any).insert({
     mid: lockMid,
     user_id: userId,
     conversation_id: conversationId,
@@ -487,8 +487,7 @@ async function completeWebhookAutomationSendLock({
     return false;
   }
 
-  const { error } = await supabase
-    .from('messages')
+  const { error } = await (supabase.from('messages') as any)
     .update({
       mid: sentMid || lockMid,
       text,
@@ -842,7 +841,7 @@ async function generateWebhookAiReply({
     .order('timestamp', { ascending: false })
     .limit(16);
 
-  const parsedMessages = (dbMessages || [])
+  const parsedMessages = ((dbMessages || []) as any[])
     .reverse()
     .map((msg) => ({
       from: msg.direction === 'outbound' ? 'me' as const : 'user' as const,
@@ -929,7 +928,7 @@ async function getRecentWebhookConversationLines({
     return '';
   }
 
-  return (data || [])
+  return ((data || []) as any[])
     .reverse()
     .map((row) => {
       const direction = typeof row.direction === 'string' ? row.direction : '';
@@ -972,7 +971,7 @@ async function hasRecentCatalogDeclineForSender({
     return false;
   }
 
-  return (data || []).some((row) => isCatalogDeclineRequest(String(row.text || '')));
+  return ((data || []) as any[]).some((row) => isCatalogDeclineRequest(String(row.text || '')));
 }
 
 async function recoverPendingCommerceOrderFromCatalog({

@@ -890,6 +890,48 @@ function clearInstagramOAuthErrorFromLocation() {
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
+const instagramConsentBaseUrl =
+  "https://www.instagram.com/consent/?flow=ig_biz_login_oauth&params_json=%7B%22client_id%22%3A%221961355111188168%22%2C%22redirect_uri%22%3A%22https%3A%5C%2F%5C%2Ftractionflo.vercel.app%5C%2Fapi%5C%2Fauth%5C%2Finstagram%5C%2Fcallback%22%2C%22response_type%22%3A%22code%22%2C%22state%22%3A%22%7B%5C%22next%5C%22%3A%5C%22%5C%2Fconversations%5C%22%2C%5C%22returnTo%5C%22%3A%5C%22http%3A%5C%2F%5C%2Flocalhost%3A3000%5C%22%2C%5C%22userId%5C%22%3A%5C%2272affb57-ceca-4ab2-8038-b523cf35fcc1%5C%22%2C%5C%22expectedUsername%5C%22%3A%5C%22%5C%22%2C%5C%22signature%5C%22%3A%5C%22ba214a5efaea1d0ffeab4f4b3be9dc3316679b210f929a6af4b5ec40338073be%5C%22%7D%22%2C%22scope%22%3A%22instagram_business_basic-instagram_business_manage_comments-instagram_business_manage_messages-instagram_business_content_publish-instagram_business_manage_insights%22%2C%22logger_id%22%3A%22a0a424ca-0b0a-4bcc-9f42-dc73941b2206%22%2C%22app_id%22%3A%221961355111188168%22%2C%22platform_app_id%22%3A%221961355111188168%22%7D&source=oauth_permissions_page_www";
+
+function buildInstagramConsentUrl(expectedUsername: string) {
+  const cleanUsername = expectedUsername.trim().replace(/^@/, "");
+
+  if (!cleanUsername) {
+    return instagramConsentBaseUrl;
+  }
+
+  try {
+    const url = new URL(instagramConsentBaseUrl);
+    const paramsJson = url.searchParams.get("params_json");
+
+    if (!paramsJson) {
+      return instagramConsentBaseUrl;
+    }
+
+    const decodedParams = JSON.parse(paramsJson) as {
+      state?: string;
+      [key: string]: unknown;
+    };
+
+    if (typeof decodedParams.state !== "string") {
+      return instagramConsentBaseUrl;
+    }
+
+    const decodedState = JSON.parse(decodedParams.state) as {
+      expectedUsername?: string;
+      [key: string]: unknown;
+    };
+
+    decodedState.expectedUsername = cleanUsername;
+    decodedParams.state = JSON.stringify(decodedState);
+    url.searchParams.set("params_json", JSON.stringify(decodedParams));
+
+    return url.toString();
+  } catch {
+    return instagramConsentBaseUrl;
+  }
+}
+
 function getConversationAiMessages(conv: IGConversation) {
   return [...conv.messages]
     .reverse()
@@ -914,6 +956,7 @@ const inboxEscalationIntentCategories: Record<ConversationEscalationIntent, stri
   urgent_order: "urgent_order",
   human_handoff: "human",
   complex_question: "complex",
+  payment_request: "payment",
 };
 
 const knownConversationEscalationIntents = new Set<ConversationEscalationIntent>(
@@ -1192,12 +1235,13 @@ function ConvList({
                 Connect an Instagram Business account to load conversations.
               </p>
             )}
-            <a
-              href="/api/auth/instagram?next=/conversations"
+            <button
+              type="button"
+              onClick={onConnectNew}
               className="mt-1 flex h-8 items-center justify-center rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-semibold text-white"
             >
               Connect Instagram
-            </a>
+            </button>
           </div>
         ) : error ? (
           <div className="mx-3 mt-6 rounded-[10px] border border-[#ffd5dd] bg-[#fff7f9] p-4 text-center">
@@ -3005,6 +3049,8 @@ export default function Inbox() {
   const [canManageAgents, setCanManageAgents] = useState(false);
   const [assignmentSavingAgentId, setAssignmentSavingAgentId] = useState("");
   const [assignmentStatus, setAssignmentStatus] = useState("");
+  const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [connectUsername, setConnectUsername] = useState("");
   const [takeoverModes, setTakeoverModes] = useState<Record<string, ConversationTakeoverMode>>(() => {
     if (typeof window === "undefined") return {};
     try {
@@ -3182,8 +3228,24 @@ export default function Inbox() {
     setOauthError(null);
     clearInstagramOAuthErrorFromLocation();
 
-    window.location.href = "/api/auth/instagram?next=/conversations";
-  }, []);
+    window.location.href = buildInstagramConsentUrl(connectUsername);
+  }, [connectUsername]);
+
+  const openConnectModal = useCallback(() => {
+    if (disconnecting || connectingNew) {
+      return;
+    }
+
+    setConnectModalOpen(true);
+  }, [connectingNew, disconnecting]);
+
+  const closeConnectModal = useCallback(() => {
+    if (connectingNew) {
+      return;
+    }
+
+    setConnectModalOpen(false);
+  }, [connectingNew]);
 
   const loadAgents = useCallback(async () => {
     setLoadingAgents(true);
@@ -3418,7 +3480,6 @@ export default function Inbox() {
               : conv
           )
         );
-
         let postSendNotice = payload.automated ? "AI sent automatically" : "Sent";
         let postSendError: string | null = null;
 
@@ -3756,7 +3817,7 @@ export default function Inbox() {
           void fetchConvs({ showLoader: false });
         }}
         onDisconnect={disconnectInstagram}
-        onConnectNew={connectNewInstagram}
+        onConnectNew={openConnectModal}
         disconnecting={disconnecting}
         connectingNew={connectingNew}
       />
@@ -3796,6 +3857,63 @@ export default function Inbox() {
         onConfirmPendingOrder={confirmPendingOrder}
         onConfirmLatestInboundOrder={confirmLatestInboundOrder}
       />
+
+      {connectModalOpen && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 px-4 py-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="connect-instagram-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeConnectModal();
+            }
+          }}
+        >
+          <div className="w-full max-w-[460px] rounded-[18px] border border-[#dde3ee] bg-white p-5 shadow-[0_24px_80px_rgba(10,16,32,0.28)]">
+            <h2 id="connect-instagram-title" className="text-[18px] font-bold text-black">
+              Connect Instagram account
+            </h2>
+            <p className="mt-2 text-[13px] leading-[1.55] text-[#596175]">
+              Enter the account username first. Next will open the Instagram consent page with that username filled in.
+            </p>
+            <label className="mt-4 block">
+              <span className="mb-2 block text-[12px] font-semibold text-[#1f2638]">Instagram username</span>
+              <input
+                autoFocus
+                value={connectUsername}
+                onChange={(event) => setConnectUsername(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && connectUsername.trim()) {
+                    event.preventDefault();
+                    void connectNewInstagram();
+                  }
+                }}
+                placeholder="@username"
+                className="h-11 w-full rounded-[10px] border border-[#dde3ee] bg-white px-3 text-[13px] font-medium text-[#20273b] outline-none placeholder:text-[#9aa1b5] focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+              />
+            </label>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeConnectModal}
+                disabled={connectingNew}
+                className="flex h-9 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white px-4 text-[12px] font-semibold text-[#1f2638] transition hover:bg-[#f6f7fb] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void connectNewInstagram()}
+                disabled={connectingNew || !connectUsername.trim()}
+                className="flex h-9 items-center justify-center rounded-[9px] bg-[#3044ff] px-4 text-[12px] font-semibold text-white transition hover:bg-[#2638f0] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {connectingNew ? "Opening Instagram" : "Next"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

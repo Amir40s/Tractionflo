@@ -26,6 +26,7 @@ type InstagramOAuthState = {
   next: string;
   returnTo?: string;
   userId?: string;
+  expectedUsername?: string;
   signature?: string;
 };
 
@@ -61,15 +62,17 @@ function getStateSignature({
   nextPath,
   returnTo,
   userId,
+  expectedUsername = '',
   secret,
 }: {
   nextPath: string;
   returnTo: string;
   userId: string;
+  expectedUsername?: string;
   secret: string;
 }) {
   return createHmac('sha256', secret)
-    .update(`${userId}:${nextPath}:${returnTo}`)
+    .update(`${userId}:${nextPath}:${returnTo}:${expectedUsername}`)
     .digest('hex');
 }
 
@@ -77,16 +80,18 @@ function isValidStateSignature({
   nextPath,
   returnTo,
   userId,
+  expectedUsername,
   signature,
   secret,
 }: {
   nextPath: string;
   returnTo: string;
   userId: string;
+  expectedUsername?: string;
   signature: string;
   secret: string;
 }) {
-  const expected = getStateSignature({ nextPath, returnTo, userId, secret });
+  const expected = getStateSignature({ nextPath, returnTo, userId, expectedUsername, secret });
 
   try {
     const expectedBuffer = Buffer.from(expected, 'hex');
@@ -120,19 +125,21 @@ function getOAuthState(
         ? parsed.returnTo
         : undefined;
     const userId = typeof parsed.userId === 'string' ? parsed.userId : '';
+    const expectedUsername = typeof parsed.expectedUsername === 'string' ? parsed.expectedUsername : '';
     const signature = typeof parsed.signature === 'string' ? parsed.signature : '';
-    const verifiedUserId =
+    const verifiedData =
       userId && signature && stateSecret && isValidStateSignature({
         nextPath: next,
         returnTo: returnTo || '',
         userId,
+        expectedUsername,
         signature,
         secret: stateSecret,
       })
-        ? userId
-        : undefined;
+        ? { userId, expectedUsername }
+        : { userId: undefined, expectedUsername: undefined };
 
-    return { next, returnTo, userId: verifiedUserId };
+    return { next, returnTo, userId: verifiedData.userId, expectedUsername: verifiedData.expectedUsername };
   } catch {
     return { next: '/dashboard' };
   }
@@ -267,7 +274,7 @@ export async function GET(request: Request) {
       console.error('Error checking existing Instagram connection:', connectionCheckError);
     }
 
-    if (existingConnection && existingConnection.user_id !== ownerUserId) {
+    if (existingConnection && (existingConnection as any).user_id !== ownerUserId) {
       throw new Error('This Instagram account is already connected to another TractionFlo user.');
     }
 

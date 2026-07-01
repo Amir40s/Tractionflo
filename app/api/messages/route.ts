@@ -16,7 +16,7 @@ export async function GET() {
       return NextResponse.json([]);
     }
 
-    const cleanedData = (data || []).map((m) => {
+    const cleanedData = ((data || []) as any[]).map((m) => {
       let text = m.text || '';
       if (text.startsWith('__STORY_REPLY__:') && text.includes('__TEXT__:')) {
         const parts = text.split('__TEXT__:', 2);

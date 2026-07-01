@@ -339,7 +339,7 @@ function getChurnStatus(row: SuperAdminConnectedAccountApiRow) {
     return { label: "Watch", tone: "amber" as const };
   }
 
-  return { label: "Monitor", tone: "orange" as const };
+  return { label: "Monitor", tone: "amber" as const };
 }
 
 function buildCreatorLifecycleConfig(
@@ -495,7 +495,7 @@ function getPaymentTone(row: SuperAdminConnectedAccountApiRow): SuperAdminTableR
     return "green";
   }
 
-  return "orange";
+  return "amber";
 }
 
 function getPaymentStatus(row: SuperAdminConnectedAccountApiRow) {

@@ -221,7 +221,7 @@ export default function KnowledgeUploader() {
               <div className="border-b border-white/10 bg-[#111] px-4.5 py-3.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
-                    <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-orange-400 via-pink-500 to-orange-600 p-[1px]"></div>
+                    <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-orange-400 via-pink-500 to-orange-600 p-[1px]">
                       <div className="h-full w-full rounded-full bg-black flex items-center justify-center border-2 border-black overflow-hidden font-black text-white text-[10px]">
                         TF
                       </div>

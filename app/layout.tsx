@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
-import { Caveat, Plus_Jakarta_Sans } from "next/font/google";
+import { Caveat, Plus_Jakarta_Sans, Geist } from "next/font/google";
 import RealtimeNotifications from "./components/RealtimeNotifications";
 import "./globals.css";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
   title: "TractionFlo",
@@ -27,7 +30,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${plusJakartaSans.variable} ${caveat.variable} h-full antialiased`}>
+    <html lang="en" className={cn("h-full", "antialiased", plusJakartaSans.variable, caveat.variable, "font-sans", geist.variable)}>
       <body className="min-h-full flex flex-col">
         {children}
         <RealtimeNotifications />

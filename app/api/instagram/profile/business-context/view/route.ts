@@ -78,7 +78,7 @@ export async function GET() {
         username: profile.username,
         name: profile.name,
         followers: profile.followers_count,
-        bio: profile.bio,
+        bio: profile.biography,
         website: profile.website,
         keywords: learning.keywords,
         themes: learning.contentPillars,

@@ -112,8 +112,8 @@ export async function GET() {
         const businessContextPrompt = generateBusinessContextPrompt(
           profile,
           posts,
-          keywords,
-          themes
+          learnedContext.keywords,
+          learnedContext.contentPillars
         );
 
         const baseInstructions = `You are an AI customer service assistant for ${profile.name}'s Instagram business. 
@@ -152,8 +152,8 @@ ${businessContextPrompt}`;
         followers: profile.followers_count,
       },
       postsCount: posts.length,
-      keywords: keywords.slice(0, 8),
-      themes: themes.slice(0, 6),
+      keywords: learnedContext.keywords.slice(0, 8),
+      themes: learnedContext.contentPillars.slice(0, 6),
       summary: learnedContext.summary,
       contentPillars: learnedContext.contentPillars,
       offerSignals: learnedContext.offerSignals,

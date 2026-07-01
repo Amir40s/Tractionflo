@@ -177,7 +177,11 @@ export async function runAssistantThread({
 
     return cleanedReply;
   } else {
-    throw new Error(`Run failed with status: ${run.status}`);
+    logger.error('OpenAI Assistant run failed', {
+      status: run.status,
+      lastError: run.last_error,
+    });
+    throw new Error(`Run failed with status: ${run.status}${run.last_error ? ` - ${run.last_error.message}` : ''}`);
   }
 }
 
