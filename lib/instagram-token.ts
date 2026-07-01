@@ -202,8 +202,8 @@ export async function saveInstagramAccountToken(
     existingForInstagram?.id ||
     existingForUser?.id;
   const { error } = rowId
-    ? await supabase.from("instagram_accounts").update(payload).eq("id", rowId)
-    : await supabase.from("instagram_accounts").insert(payload);
+    ? await (supabase.from("instagram_accounts") as any).update(payload).eq("id", rowId)
+    : await (supabase.from("instagram_accounts") as any).insert(payload);
 
   if (error) {
     throw new Error(`Could not save Instagram token: ${error.message}`);
@@ -219,7 +219,7 @@ async function updateInstagramAccountAccessToken(
     access_token: normalizeInstagramAccessToken(accessToken),
     created_at: new Date().toISOString(),
   };
-  const query = supabase.from("instagram_accounts").update(payload);
+  const query = (supabase.from("instagram_accounts") as any).update(payload);
 
   if (account.id) {
     return query.eq("id", account.id);
