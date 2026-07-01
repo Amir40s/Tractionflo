@@ -382,7 +382,7 @@ ${businessContextPrompt}`;
     });
 
     const response = NextResponse.redirect(
-      getSoftwareRedirect(redirectBaseUrl, '/onboarding', {
+      getSoftwareRedirect(redirectBaseUrl, nextPath, {
         ig_connected: 'true',
         ig_scan: 'true',
         from: nextPath.replace(/^\//, '') || 'instagram',

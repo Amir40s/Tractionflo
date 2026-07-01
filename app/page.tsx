@@ -1273,8 +1273,7 @@ export default function LandingPage() {
                 <X className="h-3.5 w-3.5 shrink-0 rounded-full border border-red-500 p-[1.5px]" strokeWidth={3.5} />
                 <span>THE REAL PROBLEM</span>
               </motion.div>
-
-              {/* Title */}
+ 
               <motion.h2
                 initial={{ opacity: 0, y: 15 }}
                 whileInView={{ opacity: 1, y: 0 }}
@@ -1289,8 +1288,7 @@ export default function LandingPage() {
                   <span className="absolute left-0 right-0 bottom-1 h-[4px] bg-red-500/20 -z-10 rounded-full" />
                 </span> problem.
               </motion.h2>
-
-              {/* Subtitle */}
+ 
               <motion.p
                 initial={{ opacity: 0 }}
                 whileInView={{ opacity: 1 }}
@@ -1301,8 +1299,7 @@ export default function LandingPage() {
                 Most tools make creators think like engineers. <br />
                 Too many steps. Too much logic. Too easy to break.
               </motion.p>
-
-              {/* 5 Frustration Points */}
+ 
               <div className="mt-5 space-y-2 w-full">
                 {[
                   { title: "Complicated builders", desc: "Drag blocks. Add rules. Connect everything.", icon: Network },
@@ -1339,8 +1336,7 @@ export default function LandingPage() {
                 })}
               </div>
 
-              {/* Warning Banner Callout */}
-              <motion.div
+               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
@@ -1357,11 +1353,9 @@ export default function LandingPage() {
                   </p>
                 </div>
               </motion.div>
-
             </div>
 
-            {/* Right Column: Visual Flowbuilder headache canvas */}
-            <div className="lg:col-span-7 w-full flex flex-col items-center">
+             <div className="lg:col-span-7 w-full flex flex-col items-center">
               <motion.div
                 initial={{ opacity: 0, y: 30 }}
                 whileInView={{ opacity: 1, y: 0 }}
@@ -1510,8 +1504,7 @@ export default function LandingPage() {
                   </div>
                 </div>
 
-                {/* Bottom Red tags frustration indicators */}
-                <div className="mt-6 pt-5 border-t border-black/5 flex flex-wrap gap-2.5 justify-center">
+                 <div className="mt-6 pt-5 border-t border-black/5 flex flex-wrap gap-2.5 justify-center">
                   {[
                     "Too many steps",
                     "Hard to maintain",
@@ -1541,12 +1534,10 @@ export default function LandingPage() {
         </div>
       </section>
  
-      {/* 5. Chat-First Automation Section */}
-      <section aria-hidden="true" className="hidden">
+       <section aria-hidden="true" className="hidden">
         <div className="mx-auto max-w-7xl px-5 lg:px-8">
           
-          {/* Section Header */}
-          <div className="mx-auto mb-14 max-w-4xl text-center">
+           <div className="mx-auto mb-14 max-w-4xl text-center">
             <div className="mb-4 inline-flex items-center gap-2 border border-black bg-[#d4ff00] px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] rounded-full text-black shadow-sm">
               <Zap className="h-3.5 w-3.5 text-black" />
               <span>THE NEW WAY</span>
@@ -1563,13 +1554,11 @@ export default function LandingPage() {
             </p>
           </div>
 
-          {/* Grid Layout */}
-          <div className="grid gap-8 lg:grid-cols-12 lg:items-stretch mt-10 max-w-6xl mx-auto">
+           <div className="grid gap-8 lg:grid-cols-12 lg:items-stretch mt-10 max-w-6xl mx-auto">
             
-            {/* Left Card: THE OLD WAY */}
-            <div className="lg:col-span-5 flex flex-col justify-between border border-black/10 bg-white p-6 rounded-2xl shadow-sm hover:border-black/20 hover:shadow transition-all duration-300">
+             <div className="lg:col-span-5 flex flex-col justify-between border border-black/10 bg-white p-6 rounded-2xl shadow-sm hover:border-black/20 hover:shadow transition-all duration-300">
               <div>
-                {/* Badge */}
+                
                 <div className="inline-flex items-center gap-1.5 border border-red-500/25 bg-red-500/5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider text-red-500">
                   <X className="h-3 w-3 shrink-0 rounded-full border border-red-500 p-[1px]" strokeWidth={3.5} />
                   <span>THE OLD WAY</span>
@@ -1577,7 +1566,6 @@ export default function LandingPage() {
                 
                 <h3 className="text-sm font-black text-black/45 mt-3 mb-6 uppercase tracking-wider">Complex. Manual. Time-consuming.</h3>
                 
-                {/* Steps */}
                 <div className="space-y-2 flex flex-col items-center w-full">
                   {[
                     { id: 1, title: "Build trigger", icon: Zap },
@@ -1616,9 +1604,7 @@ export default function LandingPage() {
                   })}
                 </div>
               </div>
-
-              {/* Bottom Tags */}
-              <div className="mt-8">
+               <div className="mt-8">
                 <div className="flex gap-2 justify-center border-t border-black/5 pt-5 flex-wrap">
                   {[
                     "Too many steps",
@@ -1648,15 +1634,10 @@ export default function LandingPage() {
                   </span>
                 </div>
               </div>
-
             </div>
-
-            {/* Center Separation Column */}
-            <div className="lg:col-span-2 flex flex-col items-center justify-center py-6 lg:py-0 select-none">
-              {/* Arrow and Text */}
-              <div className="flex flex-col items-center gap-2.5 text-center">
-                {/* Horizontal Arrow on Desktop, Vertical on Mobile */}
-                <svg className="w-12 h-10 text-black hidden lg:block" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 40 24">
+             <div className="lg:col-span-2 flex flex-col items-center justify-center py-6 lg:py-0 select-none">
+               <div className="flex flex-col items-center gap-2.5 text-center">
+                 <svg className="w-12 h-10 text-black hidden lg:block" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 40 24">
                   <path d="M5,12 L35,12" strokeLinecap="round" />
                   <polygon points="35,12 28,7 28,17" fill="currentColor" stroke="none" />
                 </svg>
