@@ -1249,14 +1249,7 @@ function ConnectInstagramCard({
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={onConnect}
-        className="mt-8 flex h-12 w-full items-center justify-center gap-2 rounded-[8px] bg-black px-4 text-[14px] font-extrabold text-white shadow-[0_16px_34px_rgba(0,0,0,0.16)] transition hover:bg-[#1f2937]"
-      >
-        <Camera size={18} strokeWidth={2.4} />
-        {data.connected ? "Connect Another Instagram" : "Connect Instagram"}
-      </button>
+    
 
       <p className="mt-7 flex items-center justify-center gap-2 text-[12px] font-semibold text-[#667085]">
         <Clock size={16} strokeWidth={2.3} />
