@@ -1920,14 +1920,18 @@ export async function POST(request: Request) {
             if (story) {
               dbText = `__STORY_REPLY__:${JSON.stringify(story)}__TEXT__:${displayText}`;
             }
-            const connectedAccount = await getFreshInstagramAccountByIgUserId(supabase, recipientId).catch((accountError) => {
-              logger.warn('Could not resolve connected Instagram account while storing inbound webhook message.', {
+            const isOutbound = senderId === entry.id || msg.message?.is_echo;
+            const conversationId = isOutbound ? recipientId : senderId;
+            const direction = (isOutbound ? 'outbound' : 'inbound') as 'inbound' | 'outbound';
+            
+            const connectedAccount = await getFreshInstagramAccountByIgUserId(supabase, isOutbound ? senderId : recipientId).catch((accountError) => {
+              logger.warn('Could not resolve connected Instagram account while storing webhook message.', {
                 error: accountError,
-                recipientId,
+                igUserId: isOutbound ? senderId : recipientId,
               });
               return null;
             });
-            const participant = connectedAccount?.access_token
+            const participant = connectedAccount?.access_token && !isOutbound
               ? await fetchParticipantProfile(connectedAccount.access_token, senderId).catch((participantError) => {
                   logger.warn('Could not resolve Instagram participant while storing inbound webhook message.', {
                     error: participantError,
@@ -1940,23 +1944,26 @@ export async function POST(request: Request) {
             messagesToInsert.push({
               mid,
               userId: connectedAccount?.user_id || null,
-              conversationId: senderId,
+              conversationId,
               senderId,
               recipientId,
               text: dbText,
               timestamp: msg.timestamp,
               rawEvent: msg as Record<string, unknown>,
               participant,
+              direction,
             });
 
-            automationEvents.push({
-              mid,
-              senderId,
-              recipientId,
-              text: automationText,
-              timestamp: msg.timestamp,
-              previousSenderMessageCount,
-            });
+            if (!isOutbound) {
+              automationEvents.push({
+                mid,
+                senderId,
+                recipientId,
+                text: automationText,
+                timestamp: msg.timestamp,
+                previousSenderMessageCount,
+              });
+            }
           }
         }
       }
@@ -1972,7 +1979,7 @@ export async function POST(request: Request) {
               conversationId: msgToInsert.conversationId,
               senderId: msgToInsert.senderId,
               recipientId: msgToInsert.recipientId,
-              direction: 'inbound',
+              direction: msgToInsert.direction,
               text: msgToInsert.text,
               timestamp: msgToInsert.timestamp,
               rawEvent: msgToInsert.rawEvent,
