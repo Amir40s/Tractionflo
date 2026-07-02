@@ -3200,7 +3200,7 @@ export default function Inbox() {
     setOauthError(null);
     clearInstagramOAuthErrorFromLocation();
 
-    window.location.href = buildInstagramConsentUrl("/conversations", connectUsername);
+    window.location.href = buildInstagramConsentUrl("/onboarding", connectUsername);
   }, [connectUsername]);
 
   const openConnectModal = useCallback(() => {
