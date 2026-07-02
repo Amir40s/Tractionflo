@@ -30,6 +30,14 @@ import {
   getCreatorLastMessage,
   getCreatorParticipantName,
   truncateCreatorText,
+  creatorBuyerKeywords,
+  getCreatorLatestInboundText,
+  getCreatorConversationText,
+  countCreatorKeywordHits,
+  hasCreatorGoalSignal,
+  hasCreatorBudgetSignal,
+  hasCreatorTimelineSignal,
+  hasCreatorSalesLeadSignal,
 } from "../creator-insights";
 import NotificationBell from "../../components/NotificationBell";
 import { BrandMark } from "./BrandMark";
@@ -453,9 +461,41 @@ function buildIntentSnapshot(summary: CreatorLiveSummary) {
     summary.conversations,
     /\b(pay|payment|checkout|invoice|paid|card|deposit|transfer)\b/i
   ) + waitingPaymentOrderCount;
-  const offersSentCount = countConversationsMatching(summary.conversations, /\b(proposal|offer|pricing|price|package|plan|link|book|call)\b/i, "me");
+
+  const offersSentCount = summary.conversations.filter((conversation) => {
+    const ordered = [...conversation.messages].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    const recent = ordered.slice(-3);
+    return recent.some((message) => {
+      if (message.from !== "me") return false;
+      const text = message.text || "";
+      const hasUrl = /https?:\/\/[^\s]+/.test(text);
+      const hasOfferKeyword = /\b(proposal|pricing|package|plan|payment link|checkout|invoice)\b/i.test(text);
+      const hasCatalog = Boolean((message as any).catalogItems && (message as any).catalogItems.length > 0);
+      return hasUrl || hasOfferKeyword || hasCatalog;
+    });
+  }).length;
+
   const activeContacts = summary.conversations.filter((conversation) => conversation.messages.some((message) => message.from === "user")).length;
-  const buyingSignalCount = summary.opportunityCards.reduce((total, card) => total + (card.signals?.length || 0), 0);
+
+  let buyingSignalCount = 0;
+  summary.conversations.forEach((conversation) => {
+    const latestText = getCreatorLatestInboundText(conversation);
+    const text = latestText || getCreatorConversationText(conversation);
+    
+    const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
+    const buyerHits = countCreatorKeywordHits(text, creatorBuyerKeywords);
+    
+    const hasGoal = hasCreatorGoalSignal(text);
+    const hasBudget = hasCreatorBudgetSignal(text);
+    const hasTimeline = hasCreatorTimelineSignal(text);
+    const hasBuyingIntent = hasCreatorSalesLeadSignal(text, buyerHits, inboundCount);
+
+    if (buyerHits > 0) buyingSignalCount++;
+    if (hasBuyingIntent && buyerHits === 0) buyingSignalCount++;
+    if (hasGoal) buyingSignalCount++;
+    if (hasBudget) buyingSignalCount++;
+    if (hasTimeline) buyingSignalCount++;
+  });
 
   return {
     activeContacts,
@@ -722,9 +762,11 @@ function ActivityList({
 function PipelineOverview({
   intent,
   summary,
+  onNavigate,
 }: {
   intent: ReturnType<typeof buildIntentSnapshot>;
   summary: CreatorLiveSummary;
+  onNavigate?: (tab: DashboardTab) => void;
 }) {
   const steps = [
     {
@@ -759,6 +801,14 @@ function PipelineOverview({
     },
   ];
 
+  const getTabForPipeline = (label: string): DashboardTab => {
+    if (label.toLowerCase().includes("opportunity")) return "opportunities";
+    if (label.toLowerCase().includes("offer")) return "ros";
+    if (label.toLowerCase().includes("payment") || label.toLowerCase().includes("pending")) return "ros";
+    if (label.toLowerCase().includes("buyer")) return "opportunities";
+    return "dashboard";
+  };
+
   return (
     <article className={`${panelClass} p-5`}>
       <div className="mb-5">
@@ -770,11 +820,15 @@ function PipelineOverview({
 
           return (
             <div key={step.label} className="relative min-w-0">
-              <div className="flex h-full flex-col items-center rounded-[8px] px-2 py-3 text-center">
+              <button
+                type="button"
+                onClick={() => onNavigate?.(getTabForPipeline(step.label))}
+                className="flex h-full flex-col items-center rounded-[8px] px-2 py-3 text-center w-full hover:bg-[#fafbfe] transition focus:outline-none"
+              >
                 <IconBubble icon={Icon} tone={step.tone} />
                 <p className="mt-3 text-[24px] font-extrabold leading-none text-black">{formatCreatorInteger(step.value)}</p>
                 <p className="mt-2 text-[11px] font-bold leading-snug text-[#111827]">{step.label}</p>
-              </div>
+              </button>
               {index < steps.length - 1 ? (
                 <ArrowRight
                   size={19}
@@ -850,8 +904,10 @@ function buildRevenueSources(summary: CreatorLiveSummary) {
 
 function RevenueSources({
   summary,
+  onNavigate,
 }: {
   summary: CreatorLiveSummary;
+  onNavigate?: (tab: DashboardTab) => void;
 }) {
   const [page, setPage] = useState(1);
   const sources = buildRevenueSources(summary);
@@ -859,12 +915,16 @@ function RevenueSources({
 
   return (
     <article className={`${panelClass} p-5`}>
-      <div className="mb-5">
+      <button
+        type="button"
+        onClick={() => onNavigate?.("ros")}
+        className="w-full text-left focus:outline-none hover:opacity-85 transition mb-5 block"
+      >
         <div>
           <h2 className="text-[15px] font-extrabold text-black">Top Revenue Sources</h2>
           <p className="mt-1 text-[11px] font-bold text-[#687083]">Grouped from completed Stripe payments</p>
         </div>
-      </div>
+      </button>
       {sources.length > 0 ? (
         <div className="space-y-4">
           {paginatedSources.items.map((source) => (
@@ -928,6 +988,7 @@ function HeroMetricCard({
   icon: Icon,
   item,
   isLoading,
+  onClick,
 }: {
   icon: LucideIcon;
   item: {
@@ -937,9 +998,14 @@ function HeroMetricCard({
     tone: ToneName;
   };
   isLoading: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <div className="min-w-0 overflow-hidden rounded-[8px] border border-white/10 bg-white/[0.055] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+    <button
+      type="button"
+      onClick={onClick}
+      className="min-w-0 text-left overflow-hidden rounded-[8px] border border-white/10 bg-white/[0.055] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:bg-white/15 transition focus:outline-none w-full"
+    >
       <Icon size={24} strokeWidth={2.35} className={toneClasses[item.tone].text} />
       <p className="mt-5 text-[28px] font-extrabold leading-none text-white">{isLoading ? "..." : formatCreatorInteger(item.value)}</p>
       <p className="mt-4 max-w-full break-words text-[11px] font-extrabold leading-snug text-white/80 [overflow-wrap:anywhere]">
@@ -948,7 +1014,7 @@ function HeroMetricCard({
       <p className={`mt-3 max-w-full break-words text-[11px] font-extrabold leading-snug [overflow-wrap:anywhere] ${toneClasses[item.tone].text}`}>
         {item.detail}
       </p>
-    </div>
+    </button>
   );
 }
 
@@ -957,6 +1023,7 @@ function RevenueHero({
   revenueTotal,
   summary,
   heroStats,
+  onNavigate,
 }: {
   isLoading: boolean;
   revenueTotal: number;
@@ -968,15 +1035,28 @@ function RevenueHero({
     icon: LucideIcon;
     tone: ToneName;
   }[];
+  onNavigate?: (tab: DashboardTab) => void;
 }) {
   const revenueTitle = "Revenue Collected";
   const revenueDetail = `${formatCreatorInteger(summary.paidOrderCount)} paid order${summary.paidOrderCount === 1 ? "" : "s"} from Instagram checkout.`;
+
+  const getTabForMetric = (label: string): DashboardTab => {
+    if (label.toLowerCase().includes("buy")) return "opportunities";
+    if (label.toLowerCase().includes("follow")) return "inbox" as DashboardTab;
+    if (label.toLowerCase().includes("payment")) return "ros";
+    if (label.toLowerCase().includes("opportunity")) return "opportunities";
+    return "dashboard";
+  };
 
   return (
     <article className="relative overflow-hidden rounded-[8px] bg-black p-5 text-white shadow-[0_24px_70px_rgba(0,0,0,0.16)] sm:p-7">
       <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-[#ff6b00] via-[#e81f72] to-[#7548ff]" />
       <div className="relative grid gap-6 lg:grid-cols-[minmax(240px,0.78fr)_minmax(0,1.22fr)] lg:items-center">
-        <div>
+        <button
+          type="button"
+          onClick={() => onNavigate?.("ros")}
+          className="text-left w-full hover:opacity-90 transition focus:outline-none"
+        >
           <h2 className="text-[15px] font-extrabold text-white">{revenueTitle}</h2>
           <p className="mt-6 max-w-full break-words bg-gradient-to-r from-[#ff6b00] via-[#e81f72] to-[#8b35ff] bg-clip-text text-[44px] font-extrabold leading-none text-transparent sm:text-[56px]">
             {isLoading ? "..." : formatCreatorMoney(revenueTotal)}
@@ -985,10 +1065,16 @@ function RevenueHero({
             {revenueDetail}
           </p>
           <RealDataNote summary={summary} />
-        </div>
+        </button>
         <div className="grid gap-3 sm:grid-cols-2">
           {heroStats.map((item) => (
-            <HeroMetricCard key={item.label} icon={item.icon} item={item} isLoading={isLoading} />
+            <HeroMetricCard
+              key={item.label}
+              icon={item.icon}
+              item={item}
+              isLoading={isLoading}
+              onClick={() => onNavigate?.(getTabForMetric(item.label))}
+            />
           ))}
         </div>
       </div>
@@ -1179,14 +1265,31 @@ export function DashboardOverview({
               <h2 className="text-[15px] font-extrabold text-black">TractionFlo Live Summary</h2>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {statItems.map((item) => (
-                <div key={item.label} className="min-w-0 border-[#edf0f6] py-2 sm:border-l sm:pl-5 first:sm:border-l-0 first:sm:pl-0">
-                  <IconBubble icon={item.icon} tone={item.tone} />
-                  <p className="mt-5 truncate text-[27px] font-extrabold leading-none text-black">{item.value}</p>
-                  <p className="mt-3 text-[12px] font-bold text-[#30384d]">{item.label}</p>
-                  <TrendText>{item.trend}</TrendText>
-                </div>
-              ))}
+              {statItems.map((item) => {
+                const getTabForLiveSummary = (label: string): DashboardTab => {
+                  if (label.toLowerCase().includes("revenue")) return "ros";
+                  if (label.toLowerCase().includes("buyer")) return "opportunities";
+                  if (label.toLowerCase().includes("offer")) return "ros";
+                  if (label.toLowerCase().includes("opportunity")) return "opportunities";
+                  if (label.toLowerCase().includes("contact") || label.toLowerCase().includes("conversation")) return "inbox" as DashboardTab;
+                  if (label.toLowerCase().includes("signal")) return "opportunities";
+                  return "dashboard";
+                };
+
+                return (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => onNavigate?.(getTabForLiveSummary(item.label))}
+                    className="min-w-0 text-left border-[#edf0f6] py-2 sm:border-l sm:pl-5 first:sm:border-l-0 first:sm:pl-0 hover:bg-[#fafbfe] transition focus:outline-none rounded-[6px]"
+                  >
+                    <IconBubble icon={item.icon} tone={item.tone} />
+                    <p className="mt-5 truncate text-[27px] font-extrabold leading-none text-black">{item.value}</p>
+                    <p className="mt-3 text-[12px] font-bold text-[#30384d]">{item.label}</p>
+                    <TrendText>{item.trend}</TrendText>
+                  </button>
+                );
+              })}
             </div>
           </article>
         </section>

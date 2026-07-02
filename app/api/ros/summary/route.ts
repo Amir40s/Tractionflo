@@ -3,6 +3,8 @@ import { canAccessPage, getUserPermissionProfile } from "@/lib/agent-permissions
 import { buildRevenueOperatingSummary } from "@/lib/revenue-analytics";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
+import { loadRevenueOutcomeProviderSettings } from "@/lib/revenue-provider-execution";
+import { revenueOutcomeProvidersMetadataKey } from "@/lib/revenue-outcome-providers";
 
 export const dynamic = "force-dynamic";
 
@@ -22,14 +24,21 @@ export async function GET() {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const permissions = getUserPermissionProfile((user.user_metadata || {}) as Record<string, unknown>);
+    const metadata = (user.user_metadata || {}) as Record<string, unknown>;
+    const permissions = getUserPermissionProfile(metadata);
 
     if (!canAccessPage(permissions, "ros")) {
       return NextResponse.json({ error: "ROS is not enabled for this account." }, { status: 403 });
     }
 
     const supabase = createSupabaseServiceClient();
-    const summary = await buildRevenueOperatingSummary({ supabase, userId: user.id });
+    const outcomeProviders = await loadRevenueOutcomeProviderSettings({
+      supabase,
+      userId: user.id,
+      metadataValue: metadata[revenueOutcomeProvidersMetadataKey],
+    });
+    
+    const summary = await buildRevenueOperatingSummary({ supabase, userId: user.id, outcomeProviders });
 
     return NextResponse.json(summary);
   } catch (error) {

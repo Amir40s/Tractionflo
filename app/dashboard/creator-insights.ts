@@ -450,7 +450,7 @@ function getInstagramProfileUrl(username?: string) {
   return username ? "https://www.instagram.com/" + username + "/" : "";
 }
 
-const creatorBuyerKeywords = ["price", "pricing", "cost", "package", "payment", "pay", "buy", "purchase", "order", "book", "call", "program", "course", "coaching", "subscription"];
+export const creatorBuyerKeywords = ["payment", "pay", "buy", "purchase", "order", "book", "checkout", "subscribe"];
 const creatorPartnershipKeywords = ["partner", "partnership", "collab", "collaboration", "sponsor", "sponsored", "brand", "affiliate"];
 const creatorCommunityKeywords = ["community", "share", "recommend", "refer", "follower", "audience"];
 const creatorRefundEscalationKeywords = ["refund", "return", "chargeback", "cancel", "cancellation", "money back", "give my money", "reverse payment"];
@@ -472,10 +472,10 @@ const creatorEscalationKeywords = [
   ...creatorUrgentOrderEscalationKeywords,
   ...creatorPartnershipKeywords,
 ];
-const creatorGoalKeywords = ["need", "required", "require", "want", "looking", "looking for", "looking to", "suggest", "recommend", "help", "fit", "size", "wide", "comfortable", "wedding", "birthday", "event", "service", "coaching", "course", "outfit", "campaign", "collaboration", "partnership", "bulk order", "custom order"];
-const creatorBudgetKeywords = ["budget", "price", "pricing", "cost", "rate", "package", "payment", "pay", "fee", "quote", "charges", "how much", "expensive", "cheap"];
+const creatorGoalKeywords = ["wedding", "birthday", "event", "campaign", "collaboration", "partnership", "bulk order", "custom order"];
+const creatorBudgetKeywords = ["budget", "payment", "pay", "fee", "charges", "payment link"];
 const creatorTimelineKeywords = ["today", "tomorrow", "tonight", "urgent", "asap", "soon", "this week", "next week", "weekend", "deadline", "timeline", "date", "delivery date", "deliver by", "need by", "event date", "appointment", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-const creatorBuyingIntentKeywords = ["buy", "purchase", "order", "book", "checkout", "available", "availability", "confirm", "reserve", "payment link", "ready to buy", "ready to book", "send link", "send payment", "send checkout"];
+const creatorBuyingIntentKeywords = ["buy", "purchase", "order", "book", "checkout", "confirm", "payment link", "ready to buy", "ready to book", "send payment", "send checkout"];
 
 export function formatCreatorInteger(value: number) {
   return new Intl.NumberFormat("en-US").format(Math.max(0, value || 0));
@@ -511,19 +511,19 @@ function getCreatorMessageText(message: InstagramSettingsMessage) {
   return `${message.text || ""} ${message.attachments?.map((attachment) => attachment.name || attachment.type).join(" ") || ""}`.toLowerCase();
 }
 
-function getCreatorConversationText(conversation: InstagramSettingsConversation) {
+export function getCreatorConversationText(conversation: InstagramSettingsConversation) {
   return conversation.messages
     .filter((message) => message.from === "user")
     .map((message) => getCreatorMessageText(message))
     .join(" ");
 }
 
-function getCreatorLatestInboundText(conversation: InstagramSettingsConversation) {
+export function getCreatorLatestInboundText(conversation: InstagramSettingsConversation) {
   const latestMessage = getCreatorLastInboundMessage(conversation);
   return latestMessage ? getCreatorMessageText(latestMessage) : "";
 }
 
-function countCreatorKeywordHits(text: string, keywords: string[]) {
+export function countCreatorKeywordHits(text: string, keywords: string[]) {
   return keywords.reduce((total, keyword) => total + (text.includes(keyword) ? 1 : 0), 0);
 }
 
@@ -547,7 +547,7 @@ function countCreatorPhraseHits(text: string, phrases: string[]) {
   return phrases.reduce((total, phrase) => total + (hasCreatorPhrase(text, [phrase]) ? 1 : 0), 0);
 }
 
-function hasCreatorBudgetSignal(text: string) {
+export function hasCreatorBudgetSignal(text: string) {
   return (
     hasCreatorPhrase(text, creatorBudgetKeywords) ||
     /\b(?:\$|rs\.?|pkr|usd|eur|gbp|aed)\s?[1-9]\d*(?:[,.]\d{3})*(?:\.\d{1,2})?\b/i.test(text) ||
@@ -555,7 +555,7 @@ function hasCreatorBudgetSignal(text: string) {
   );
 }
 
-function hasCreatorGoalSignal(text: string) {
+export function hasCreatorGoalSignal(text: string) {
   return hasCreatorPhrase(text, creatorGoalKeywords);
 }
 
@@ -586,7 +586,7 @@ function hasCreatorVipLeadEscalationSignal(text: string, buyerHits: number, inbo
   );
 }
 
-function hasCreatorSalesLeadSignal(text: string, buyerHits: number, inboundCount: number) {
+export function hasCreatorSalesLeadSignal(text: string, buyerHits: number, inboundCount: number) {
   return (
     hasCreatorBuyingIntentSignal(text, buyerHits) ||
     hasCreatorQuantityEscalationSignal(text) ||
@@ -607,7 +607,7 @@ function hasCreatorPauseEscalationSignal(text: string, rules: EscalationRuleSett
   );
 }
 
-function hasCreatorTimelineSignal(text: string) {
+export function hasCreatorTimelineSignal(text: string) {
   return (
     hasCreatorPhrase(text, creatorTimelineKeywords) ||
     /\b\d{1,2}(?::\d{2})\s?(?:am|pm)?\b/i.test(text) ||
@@ -1168,7 +1168,16 @@ export function buildCreatorLiveSummary(
   commerceTableReady = true,
 ): CreatorLiveSummary {
   const escalationRules = normalizeEscalationRuleSettings(rules);
-  const dateRangeConversations = getCreatorConversationsForDateRange(conversations, dateRangePreset);
+  const dateRangeConversations = getCreatorConversationsForDateRange(conversations, dateRangePreset).filter((conversation) => {
+    const messages = conversation.messages;
+    const hasExchange = messages.some((m) => m.from === "user") && messages.some((m) => m.from === "me");
+    if (messages.length >= 2 && hasExchange) {
+      return true;
+    }
+    const opportunity = classifyCreatorOpportunity(conversation, escalationRules);
+    const escalation = classifyCreatorEscalation(conversation, escalationRules);
+    return Boolean(opportunity || escalation);
+  });
   const dateRangeOrders = getCommerceOrdersForDateRange(commerceOrders, dateRangePreset);
   const totalCount = dateRangeConversations.length;
   const sortedConversations = [...dateRangeConversations].sort((a, b) => getCreatorConversationTime(b) - getCreatorConversationTime(a));

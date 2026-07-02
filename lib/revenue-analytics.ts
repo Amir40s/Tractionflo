@@ -1,6 +1,7 @@
 import type { createSupabaseServiceClient } from "@/lib/supabase";
 import { listKnowledgeSourceIndexes, type KnowledgeSourceIndex } from "@/lib/knowledge-base";
 import { refreshRevenueLearningModel } from "@/lib/revenue-learning";
+import type { RevenueOutcomeProviderSettings } from "@/lib/revenue-outcome-providers";
 
 type SupabaseServiceClient = ReturnType<typeof createSupabaseServiceClient>;
 
@@ -381,7 +382,11 @@ async function upsertBusinessProfile(
   }
 }
 
-function buildConversionPaths(decisions: RosRow[], outcomes: RosRow[]): RosConversionPath[] {
+function buildConversionPaths(
+  decisions: RosRow[],
+  outcomes: RosRow[],
+  outcomeProviders: RevenueOutcomeProviderSettings | undefined
+): RosConversionPath[] {
   const probabilities: Record<string, number[]> = {};
 
   for (const decision of decisions) {
@@ -392,26 +397,42 @@ function buildConversionPaths(decisions: RosRow[], outcomes: RosRow[]): RosConve
     }
   }
 
-  return Object.entries(outcomeLabels).map(([id, label]) => {
-    const relatedOutcomes = outcomes.filter((outcome) => asString(outcome.outcome_type) === id);
-    const completed = relatedOutcomes.filter((outcome) => ["won", "completed"].includes(asString(outcome.status))).length;
-    const pending = relatedOutcomes.filter((outcome) => asString(outcome.status) === "pending").length;
-    const value = relatedOutcomes.reduce((total, outcome) => total + asNumber(outcome.value), 0);
-    const probabilityScores = probabilities[id] || [];
-    const probability =
-      probabilityScores.length > 0
-        ? Math.round(probabilityScores.reduce((total, score) => total + score, 0) / probabilityScores.length)
-        : 0;
+  const activeKeys = new Set<string>([
+    ...Object.keys(probabilities),
+    ...outcomes.map((o) => asString(o.outcome_type)).filter(Boolean),
+  ]);
 
-    return {
-      id,
-      label,
-      probability,
-      pending,
-      completed,
-      value,
-    };
-  });
+  return Array.from(activeKeys)
+    .filter((id) => {
+      // Always exclude unknown dummy paths if they aren't part of the default outcome labels
+      if (!outcomeLabels[id]) return false;
+
+      // Ensure this provider is actually enabled by the user in settings
+      const provider = outcomeProviders?.providers?.find((p) => p.outcomeType === id);
+      return provider ? provider.enabled : false;
+    })
+    .map((id) => {
+      const label = outcomeLabels[id] || id.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+      const relatedOutcomes = outcomes.filter((outcome) => asString(outcome.outcome_type) === id);
+      const completed = relatedOutcomes.filter((outcome) => ["won", "completed"].includes(asString(outcome.status))).length;
+      const pending = relatedOutcomes.filter((outcome) => asString(outcome.status) === "pending").length;
+      const value = relatedOutcomes.reduce((total, outcome) => total + asNumber(outcome.value), 0);
+      const probabilityScores = probabilities[id] || [];
+      const probability =
+        probabilityScores.length > 0
+          ? Math.round(probabilityScores.reduce((total, score) => total + score, 0) / probabilityScores.length)
+          : 0;
+
+      return {
+        id,
+        label,
+        probability,
+        pending,
+        completed,
+        value,
+      };
+    })
+    .sort((a, b) => b.probability - a.probability);
 }
 
 function countByValue(rows: RosRow[], key: string) {
@@ -540,9 +561,11 @@ async function upsertLearningSummary(
 export async function buildRevenueOperatingSummary({
   supabase,
   userId,
+  outcomeProviders,
 }: {
   supabase: SupabaseServiceClient;
   userId: string;
+  outcomeProviders?: RevenueOutcomeProviderSettings;
 }): Promise<RevenueOperatingSummary> {
   const warnings: string[] = [];
   const [prospects, decisions, outcomes, events] = await Promise.all([
@@ -575,7 +598,7 @@ export async function buildRevenueOperatingSummary({
     await upsertBusinessProfile(supabase, userId, businessProfile, warnings);
   }
 
-  const conversionPaths = buildConversionPaths(decisions, outcomes);
+  const conversionPaths = buildConversionPaths(decisions, outcomes, outcomeProviders);
   const averageConfidence =
     decisions.length > 0
       ? Math.round(decisions.reduce((total, decision) => total + asNumber(decision.confidence), 0) / decisions.length)
