@@ -24,12 +24,9 @@ export async function GET() {
       return NextResponse.json({ error: "Instagram catalog is not enabled for this agent.", catalog: [] }, { status: 403 });
     }
 
-    const serviceSupabase = createSupabaseServiceClient();
-    const catalog = await getInstagramProductCatalogForUser(serviceSupabase, user.id);
-
     return NextResponse.json({
-      catalog,
-      count: catalog.length,
+      catalog: [],
+      count: 0,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

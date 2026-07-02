@@ -232,15 +232,21 @@ export async function syncVectorStoreWithStorage({
       if (shouldUpload) {
         logger.info('Uploading file to vector store during sync', { fileName: source.fileName });
         try {
-          const { data: fileData, error: downloadError } = await supabase.storage
-            .from(knowledgeBucketName)
-            .download(source.filePath);
+          let fileBuffer: Buffer;
+          if (source.mimeType === "text/x-tractionflo-manual") {
+            const manualText = (source.chunks || []).map((c) => c.text).join("\n\n");
+            fileBuffer = Buffer.from(manualText, "utf8");
+          } else {
+            const { data: fileData, error: downloadError } = await supabase.storage
+              .from(knowledgeBucketName)
+              .download(source.filePath);
 
-          if (downloadError || !fileData) {
-            throw new Error(`Download from Supabase failed: ${downloadError?.message}`);
+            if (downloadError || !fileData) {
+              throw new Error(`Download from Supabase failed: ${downloadError?.message}`);
+            }
+
+            fileBuffer = Buffer.from(await fileData.arrayBuffer());
           }
-
-          const fileBuffer = Buffer.from(await fileData.arrayBuffer());
           const uploadedFile = await uploadFileToVectorStore({
             apiKey,
             vectorStoreId,

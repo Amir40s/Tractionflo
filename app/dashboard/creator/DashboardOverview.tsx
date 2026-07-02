@@ -373,9 +373,11 @@ function countConversationsMatching(
   pattern: RegExp,
   from?: "me" | "user" | "note"
 ) {
-  return conversations.filter((conversation) =>
-    conversation.messages.some((message) => (!from || message.from === from) && pattern.test(message.text || ""))
-  ).length;
+  return conversations.filter((conversation) => {
+    const ordered = [...conversation.messages].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    const recent = ordered.slice(-3);
+    return recent.some((message) => (!from || message.from === from) && pattern.test(message.text || ""));
+  }).length;
 }
 
 function countNeedsFollowUp(conversations: InstagramSettingsConversation[]) {

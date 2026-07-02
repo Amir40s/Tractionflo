@@ -11,12 +11,23 @@ import {
   generateBusinessContextPrompt,
   saveBusinessContextToDatabase,
 } from '@/lib/instagram-business-context';
-import { getOrCreateAssistant } from '@/lib/openai-assistants';
+import {
+  getOrCreateAssistant,
+  getOrCreateVectorStore,
+  attachVectorStoreToAssistant,
+  uploadFileToVectorStore,
+} from '@/lib/openai-assistants';
 import { getInstagramAppCredentials, getNormalizedAppBaseUrl } from '@/lib/instagram-oauth';
 import { getGlobalChannel, getSuperAdminChannel, triggerRealtimeNotification } from '@/lib/pusher';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 import logger from '@/lib/logger';
+import {
+  buildKnowledgeSourceIndex,
+  createKnowledgeStoragePaths,
+  listKnowledgeSourceIndexes,
+  saveKnowledgeSourceIndex,
+} from '@/lib/knowledge-base';
 
 function getAppBaseUrl(request: NextRequest) {
   return getNormalizedAppBaseUrl(request.nextUrl.origin);
@@ -129,7 +140,7 @@ function getOAuthState(
     const userId = typeof parsed.userId === 'string' ? parsed.userId : '';
     const expectedUsername = typeof parsed.expectedUsername === 'string' ? parsed.expectedUsername : '';
     const signature = typeof parsed.signature === 'string' ? parsed.signature : '';
-    
+
     console.log('getOAuthState parsed values:', { next, returnTo, userId, expectedUsername, signature, stateSecret: !!stateSecret, originalReturnTo: parsed.returnTo, callbackOrigin, appBaseUrl });
 
     const isValid = userId && signature && stateSecret && isValidStateSignature({
@@ -140,12 +151,12 @@ function getOAuthState(
       signature,
       secret: stateSecret,
     });
-    
+
     console.log('getOAuthState signature validation:', { isValid });
 
     const verifiedData = isValid
-        ? { userId, expectedUsername }
-        : { userId: undefined, expectedUsername: undefined };
+      ? { userId, expectedUsername }
+      : { userId: undefined, expectedUsername: undefined };
 
     return { next, returnTo, userId: verifiedData.userId, expectedUsername: verifiedData.expectedUsername };
   } catch (error) {
@@ -210,7 +221,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-     const formData = new URLSearchParams();
+    const formData = new URLSearchParams();
     formData.append('client_id', appId);
     formData.append('client_secret', appSecret);
     formData.append('grant_type', 'authorization_code');
@@ -224,7 +235,7 @@ export async function GET(request: NextRequest) {
         'Content-Type': 'application/x-www-form-urlencoded'
       }
     });
-    
+
     const tokenData = (await tokenResponse.json()) as InstagramCodeTokenResponse;
 
     if (!tokenResponse.ok || tokenData.error || !tokenData.access_token || !tokenData.user_id) {
@@ -303,7 +314,7 @@ export async function GET(request: NextRequest) {
     // Fetch and train AI with business context (top 6 posts)
     try {
       logger.info('Starting business context fetch after Instagram connection', { userId: ownerUserId });
-      
+
       const profile = await fetchInstagramBusinessProfile(accessToken);
       const posts = await fetchInstagramBusinessPosts(accessToken, 6);
 
@@ -314,7 +325,7 @@ export async function GET(request: NextRequest) {
           posts,
           maxPosts: 5,
         });
-        
+
         // Save to database
         await saveBusinessContextToDatabase(
           supabase,
@@ -326,8 +337,81 @@ export async function GET(request: NextRequest) {
           analysis.summary
         );
 
-        // Train AI assistant if API key is available
+        // Auto-create a Knowledge Base entry from the Instagram business context analysis
+        let uploadedOpenAiFileId: string | undefined = undefined;
+        let finalVectorStoreId: string | undefined = undefined;
+
         const openaiApiKey = process.env.OPENAI_API_KEY;
+        let userMetadata: Record<string, any> = {};
+
+        try {
+          const { data: userData } = await supabase.auth.admin.getUserById(ownerUserId);
+          if (userData?.user) {
+            userMetadata = userData.user.user_metadata || {};
+          }
+        } catch (e) {
+          logger.warn('Failed to retrieve user metadata for vector store resolution', { userId: ownerUserId });
+        }
+
+        if (openaiApiKey) {
+          try {
+            let vectorStoreId = userMetadata.openai_vector_store_id as string | undefined;
+            const vectorStore = await getOrCreateVectorStore({ apiKey: openaiApiKey, vectorStoreId });
+            finalVectorStoreId = vectorStore.id;
+          } catch (vsError) {
+            logger.warn('Failed resolving OpenAI vector store during Instagram connection', { error: vsError });
+          }
+        }
+
+        try {
+          const existingSources = await listKnowledgeSourceIndexes(supabase, ownerUserId).catch(() => []);
+          const autoEntry = existingSources.find((s) => s.title === 'Instagram Info (Auto-generated)');
+          const sourceId = autoEntry?.id ?? globalThis.crypto.randomUUID();
+          const fileName = 'Instagram-Info.manual.txt';
+          const { indexPath } = createKnowledgeStoragePaths(ownerUserId, sourceId, fileName);
+          const kbText = `Instagram Profile: ${profile.name} (@${profile.username})\nNiche / Selling: ${analysis.sellingWhat}\n\nSummary:\n${analysis.summary}\n\nKeywords:\n${analysis.keywords.join(', ')}\n\nContent Pillars:\n${analysis.contentPillars.join('\n')}`;
+          const indexedText = `Category: Business Information\nTitle: Instagram Info (Auto-generated)\n\n${kbText}`;
+          const assignment = existingSources.filter((s) => s.id !== autoEntry?.id).length === 0 ? 'default' : 'auto';
+
+          if (openaiApiKey && finalVectorStoreId) {
+            try {
+              const fileBuffer = Buffer.from(indexedText, "utf8");
+              const uploadedOpenAiFile = await uploadFileToVectorStore({
+                apiKey: openaiApiKey,
+                vectorStoreId: finalVectorStoreId,
+                fileBuffer,
+                fileName,
+                mimeType: "text/plain",
+              });
+              uploadedOpenAiFileId = uploadedOpenAiFile.id;
+            } catch (uploadError) {
+              logger.warn('Failed uploading Instagram context file to OpenAI vector store', { error: uploadError });
+            }
+          }
+
+          const sourceIndex = buildKnowledgeSourceIndex({
+            userId: ownerUserId,
+            sourceId,
+            fileName,
+            mimeType: 'text/x-tractionflo-manual',
+            fileSize: Buffer.byteLength(indexedText, 'utf8'),
+            filePath: '',
+            indexPath,
+            text: indexedText,
+            assignment,
+            categories: [profile.name || 'Instagram Business', 'Business Information'],
+            openAiFileId: uploadedOpenAiFileId || autoEntry?.openAiFileId,
+          });
+          (sourceIndex as any).title = 'Instagram Info (Auto-generated)';
+          await saveKnowledgeSourceIndex(supabase, sourceIndex);
+          logger.info('Auto-created Instagram Knowledge Base source', { userId: ownerUserId });
+        } catch (kbError) {
+          logger.error('Failed to auto-create Instagram Knowledge Base source', {
+            userId: ownerUserId,
+            error: kbError instanceof Error ? kbError.message : String(kbError),
+          });
+        }
+
         if (openaiApiKey) {
           try {
             const businessContextPrompt = generateBusinessContextPrompt(
@@ -360,6 +444,36 @@ ${businessContextPrompt}`;
               assistantId: assistant.id,
               postsCount: posts.length,
             });
+
+            // Attach vector store to assistant if needed
+            if (finalVectorStoreId) {
+              try {
+                await attachVectorStoreToAssistant({
+                  apiKey: openaiApiKey,
+                  assistantId: assistant.id,
+                  vectorStoreId: finalVectorStoreId,
+                });
+              } catch (attachError) {
+                logger.warn('Failed attaching vector store to assistant during Instagram connection', { error: attachError });
+              }
+            }
+
+            // Save the assistant ID and vector store ID to the user's metadata in the database
+            try {
+              await supabase.auth.admin.updateUserById(ownerUserId, {
+                user_metadata: {
+                  ...userMetadata,
+                  openai_assistant_id: assistant.id,
+                  openai_vector_store_id: finalVectorStoreId || userMetadata.openai_vector_store_id,
+                },
+              });
+              logger.info('Saved AI assistant ID and vector store ID to user metadata in DB', { userId: ownerUserId, assistantId: assistant.id, vectorStoreId: finalVectorStoreId });
+            } catch (saveMetaError) {
+              logger.error('Failed to save assistant and vector store IDs to user metadata in DB', {
+                userId: ownerUserId,
+                error: saveMetaError instanceof Error ? saveMetaError.message : String(saveMetaError),
+              });
+            }
           } catch (aiError) {
             logger.warn('Failed to train AI assistant with business context', {
               userId: ownerUserId,
@@ -398,7 +512,7 @@ ${businessContextPrompt}`;
         from: nextPath.replace(/^\//, '') || 'instagram',
       })
     );
-    
+
     // Keeping cookie as fallback for frontend state
     response.cookies.set('ig_access_token', accessToken, {
       httpOnly: true,

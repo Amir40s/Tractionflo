@@ -692,7 +692,7 @@ function hasKnowledgeMatch(sources: KnowledgeSource[], pattern: RegExp) {
 }
 
 function isProviderConfigured(provider?: OutcomeProvider) {
-  return Boolean(provider?.enabled && (provider.actionUrl || provider.webhookUrl || provider.apiEndpoint || provider.outcomeType === "purchase_product"));
+  return Boolean(provider?.enabled && (provider.actionUrl || provider.webhookUrl || provider.apiEndpoint));
 }
 
 function getProvider(providers: OutcomeProvider[], outcomeType: string) {
@@ -715,8 +715,8 @@ function buildConversionActions(providers: OutcomeProvider[], catalog: CatalogIt
     },
     {
       label: "Purchase / Checkout",
-      detail: catalog.length > 0 ? `${catalog.length} catalog offer${catalog.length === 1 ? "" : "s"} detected` : "No priced catalog offer detected",
-      configured: Boolean(isProviderConfigured(purchase) && catalog.length > 0),
+      detail: purchase?.actionUrl || "No purchase link connected",
+      configured: isProviderConfigured(purchase),
       href: purchase?.actionUrl || "",
       icon: ShoppingCart,
     },
@@ -1271,7 +1271,7 @@ function DiscoveryCard({ data }: { data: OnboardingData }) {
     "Recent Posts & Reels": data.isLoading ? "In Progress" : data.mediaCount > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
     "Comments & DMs": data.isLoading ? "In Progress" : data.conversationCount > 0 || data.totalPostComments > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
     "Story Replies": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
-    "Business Knowledge": data.isLoading ? "In Progress" : data.knowledgeCount > 0 || data.catalogCount > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
+    "Business Knowledge": data.isLoading ? "In Progress" : data.knowledgeCount > 0 || data.catalogCount > 0 || Boolean(data.aiLearnedContext) ? "Completed" : data.connected ? "Limited" : "Waiting",
     "Analyzing Opportunities": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
   };
 
@@ -2222,12 +2222,14 @@ function BusinessEditForm({
 
 function ConversionActionForm({
   action,
+  offers,
   onSave,
 }: {
   action: ConversionAction;
+  offers: CatalogItem[];
   onSave: (url: string) => void;
 }) {
-  const [url, setUrl] = useState(action.href || (action.configured ? action.detail : ""));
+  const [url, setUrl] = useState(action.href || (action.configured && action.label !== "Purchase / Checkout" ? action.detail : ""));
 
   return (
     <form
@@ -2237,6 +2239,19 @@ function ConversionActionForm({
         onSave(url.trim());
       }}
     >
+      {action.label === "Purchase / Checkout" && offers.length > 0 && (
+        <div className="mb-4 space-y-2 rounded-[8px] border border-[#e5e8f0] bg-[#f8f9fc] p-3">
+          <p className="text-[12px] font-bold text-black">Detected Catalog Products:</p>
+          <div className="max-h-[150px] overflow-y-auto space-y-2 pr-1">
+            {offers.map((offer, idx) => (
+              <div key={idx} className="flex items-center justify-between text-[11px] font-semibold text-[#46506a]">
+                <span className="truncate max-w-[200px]" title={offer.title}>{offer.title}</span>
+                <span className="text-[#3044ff]">{offer.priceText || "Priced"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div>
         <FieldLabel>{action.label} link</FieldLabel>
         <input className={textInputClass()} placeholder="https://..." value={url} onChange={(event) => setUrl(event.target.value)} />
@@ -2865,7 +2880,7 @@ export default function OnboardingPage() {
         ) : null}
         {activeConversionAction ? (
           <OnboardingModal title={`Update ${activeConversionAction.label}`} onClose={() => setActiveModal(null)}>
-            <ConversionActionForm action={activeConversionAction} onSave={(url) => editConversionAction(activeConversionAction.label, url)} />
+            <ConversionActionForm action={activeConversionAction} offers={visibleData.offers} onSave={(url) => editConversionAction(activeConversionAction.label, url)} />
           </OnboardingModal>
         ) : null}
         {activeMissingItem ? (

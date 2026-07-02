@@ -30,8 +30,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={cn("h-full", "antialiased", plusJakartaSans.variable, caveat.variable, "font-sans", geist.variable)}>
-      <body className="min-h-full flex flex-col">
+    <html lang="en" className={cn("h-full", "antialiased", plusJakartaSans.variable, caveat.variable, "font-sans", geist.variable)} suppressHydrationWarning>
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         {children}
         <RealtimeNotifications />
       </body>

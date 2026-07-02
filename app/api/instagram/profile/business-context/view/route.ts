@@ -6,6 +6,7 @@ import {
   analyzeInstagramBusinessContextWithVision,
   fetchInstagramBusinessPosts,
   fetchInstagramBusinessProfile,
+  saveBusinessContextToDatabase,
 } from "@/lib/instagram-business-context";
 import { getFreshInstagramAccount } from "@/lib/instagram-token";
 import logger from "@/lib/logger";
@@ -70,6 +71,19 @@ export async function GET() {
       profile,
       posts,
       maxPosts: 5,
+    });
+
+    // Save live analyzed context to database
+    await saveBusinessContextToDatabase(
+      supabase,
+      user.id,
+      profile,
+      posts,
+      learning.keywords,
+      learning.contentPillars,
+      learning.summary
+    ).catch((err) => {
+      logger.error("Failed to auto-save business context from view endpoint to database", { error: err });
     });
 
     return NextResponse.json({

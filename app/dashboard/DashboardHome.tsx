@@ -69,6 +69,7 @@ import {
 } from "@/lib/live-escalation-snapshots";
 import { emptyEscalationWorkflowState } from "@/lib/escalation-workflow-state";
 import { emptyOpportunityWorkflowState } from "@/lib/opportunity-workflow-state";
+import { realtimeNotificationEventName } from "@/lib/realtime-notification-history";
 
 const accountProfileStorageKey = "tractionflo_account_profile";
 
@@ -793,10 +794,14 @@ function DashboardContent() {
         void loadCreatorConversations();
       }
     };
+    const handleRealtimeNotification = () => {
+      void loadCreatorConversations();
+    };
     const timeout = window.setTimeout(() => void loadCreatorConversations(), 0);
     const interval = creatorAutoRefreshOn ? window.setInterval(() => void loadCreatorConversations(), 30000) : undefined;
 
     window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener(realtimeNotificationEventName, handleRealtimeNotification);
 
     return () => {
       isMounted = false;
@@ -805,6 +810,7 @@ function DashboardContent() {
         window.clearInterval(interval);
       }
       window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener(realtimeNotificationEventName, handleRealtimeNotification);
     };
   }, [activeTab, creatorAutoRefreshOn]);
 

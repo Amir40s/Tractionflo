@@ -523,6 +523,7 @@ export async function POST(request: Request) {
       catalogOffers: result.catalogOffers,
       enabledWorkflows,
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
+      knowledgeConfidence: result.knowledgeConfidence,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not run AI workflow';

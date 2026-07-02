@@ -450,7 +450,7 @@ function getInstagramProfileUrl(username?: string) {
   return username ? "https://www.instagram.com/" + username + "/" : "";
 }
 
-const creatorBuyerKeywords = ["price", "pricing", "cost", "package", "payment", "pay", "buy", "purchase", "order", "book", "call", "interested", "program", "course", "coaching", "subscription"];
+const creatorBuyerKeywords = ["price", "pricing", "cost", "package", "payment", "pay", "buy", "purchase", "order", "book", "call", "program", "course", "coaching", "subscription"];
 const creatorPartnershipKeywords = ["partner", "partnership", "collab", "collaboration", "sponsor", "sponsored", "brand", "affiliate"];
 const creatorCommunityKeywords = ["community", "share", "recommend", "refer", "follower", "audience"];
 const creatorRefundEscalationKeywords = ["refund", "return", "chargeback", "cancel", "cancellation", "money back", "give my money", "reverse payment"];
@@ -475,7 +475,7 @@ const creatorEscalationKeywords = [
 const creatorGoalKeywords = ["need", "required", "require", "want", "looking", "looking for", "looking to", "suggest", "recommend", "help", "fit", "size", "wide", "comfortable", "wedding", "birthday", "event", "service", "coaching", "course", "outfit", "campaign", "collaboration", "partnership", "bulk order", "custom order"];
 const creatorBudgetKeywords = ["budget", "price", "pricing", "cost", "rate", "package", "payment", "pay", "fee", "quote", "charges", "how much", "expensive", "cheap"];
 const creatorTimelineKeywords = ["today", "tomorrow", "tonight", "urgent", "asap", "soon", "this week", "next week", "weekend", "deadline", "timeline", "date", "delivery date", "deliver by", "need by", "event date", "appointment", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-const creatorBuyingIntentKeywords = ["buy", "purchase", "order", "book", "checkout", "available", "availability", "interested", "send", "confirm", "reserve", "payment link", "ready to buy", "ready to book"];
+const creatorBuyingIntentKeywords = ["buy", "purchase", "order", "book", "checkout", "available", "availability", "confirm", "reserve", "payment link", "ready to buy", "ready to book", "send link", "send payment", "send checkout"];
 
 export function formatCreatorInteger(value: number) {
   return new Intl.NumberFormat("en-US").format(Math.max(0, value || 0));
@@ -953,16 +953,17 @@ export function classifyCreatorOpportunity(conversation: InstagramSettingsConver
   if (hasSalesLead) {
     const urgentSignal = hasCreatorUrgentOrderSignal(text);
     const quantitySignal = hasCreatorQuantityEscalationSignal(text);
-    const badge = urgentSignal ? "URGENT LEAD" : quantitySignal ? "BULK LEAD" : "HIGH INTENT";
+    const qual = getCreatorLeadQualification({ text, badge: "", subtitle: "Buying intent", buyerHits, partnershipHits, communityHits, inboundCount });
+    const badge = urgentSignal ? "URGENT LEAD" : quantitySignal ? "BULK LEAD" : qual.classification === "Hot" ? "HIGH INTENT" : qual.classification === "Warm" ? "WARM LEAD" : "COLD LEAD";
     const subtitle = urgentSignal ? "Urgent buying intent" : quantitySignal ? "Large order interest" : "Buying intent";
 
     return {
-      badge,
       subtitle,
       tone: "green" as const,
       icon: ShoppingCart,
       value: 1800 + buyerHits * 300,
-      ...getCreatorLeadQualification({ text, badge, subtitle, buyerHits, partnershipHits, communityHits, inboundCount }),
+      ...qual,
+      badge,
     };
   }
 

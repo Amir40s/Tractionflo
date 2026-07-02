@@ -418,6 +418,7 @@ async function claimWebhookAutomationSend({
   recipientId,
   text,
   idempotencyKey,
+  knowledgeConfidence,
 }: {
   supabase: SupabaseServiceClient;
   userId: string;
@@ -426,6 +427,7 @@ async function claimWebhookAutomationSend({
   recipientId: string;
   text: string;
   idempotencyKey: string;
+  knowledgeConfidence?: number;
 }) {
   if (await hasWebhookAutomationSendForKey({ supabase, userId, conversationId, idempotencyKey })) {
     return { claimed: false, lockMid: '' };
@@ -449,6 +451,7 @@ async function claimWebhookAutomationSend({
       source: 'instagram_webhook_ai_lock',
       idempotencyKey,
       idempotencyStatus: 'sending',
+      knowledgeConfidence,
     },
   });
 
@@ -877,6 +880,7 @@ async function generateWebhookAiReply({
     ros: result.ros,
     handoff: result.handoff,
     escalation: result.escalation,
+    knowledgeConfidence: result.knowledgeConfidence,
   };
 }
 
@@ -1125,7 +1129,6 @@ async function processInstagramAutomations(
         continue;
       }
 
-      // Fetch user to check settings and metadata
       const { data: { user }, error: userError } = await supabase.auth.admin.getUserById(account.user_id);
       if (userError || !user) {
         logger.error("processInstagramAutomations: Failed to load user metadata by user_id", { userId: account.user_id, error: userError });
@@ -1478,6 +1481,7 @@ async function processInstagramAutomations(
       let catalogOffer: InstagramCatalogOffer | null = null;
       let catalogOffers: InstagramCatalogOffer[] = [];
       let catalogCheckoutReady = false;
+      let knowledgeConfidence = 0;
       let aiResult: any = null;
       if (isFirstInboundDm && welcome.enabled) {
         logger.info("processInstagramAutomations: Generating Welcome Message.");
@@ -1499,6 +1503,7 @@ async function processInstagramAutomations(
         catalogOffer = aiResult.catalogOffer;
         catalogOffers = aiResult.catalogOffers;
         catalogCheckoutReady = aiResult.catalogCheckoutReady;
+        knowledgeConfidence = aiResult.knowledgeConfidence || 0;
 
         // Human handoff: AI detected it can't answer — notify human and skip auto-send
         if (aiResult.handoff) {
@@ -1568,6 +1573,7 @@ async function processInstagramAutomations(
         recipientId: event.senderId,
         text: reply.trim(),
         idempotencyKey,
+        knowledgeConfidence,
       });
 
       if (!sendClaim.claimed) {
@@ -1660,6 +1666,7 @@ async function processInstagramAutomations(
         catalogCarouselCount: catalogCarouselCards.length,
         orderId,
         idempotencyKey,
+        knowledgeConfidence,
       };
       const lockMidToComplete = activeWebhookAutomationLockMid;
       const lockCompleted = await completeWebhookAutomationSendLock({

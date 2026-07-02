@@ -107,6 +107,7 @@ type IGMessage = {
       url?: string;
     };
   };
+  metadata?: Record<string, any>;
 };
 
 type IGConversation = {
@@ -852,6 +853,7 @@ function getConversationsSignature(conversations: IGConversation[]) {
               message.time,
               message.text,
               message.status || "",
+              String(message.metadata?.knowledgeConfidence ?? ""),
               message.attachments
                 ?.map((attachment) => `${attachment.type}:${attachment.name || ""}:${attachment.mime_type || ""}`)
                 .join(",") || "",
@@ -1459,9 +1461,16 @@ function ChatBubble({
             </div>
           </div>
         ) : null}
-        <div className={`mt-1 text-[10px] font-medium text-[#596175] ${isMe ? "text-right" : ""}`}>
-          {msg.status === "sending" ? "Sending..." : msg.status === "failed" ? "Not sent" : msgTime(msg.time)}
-          {isMe && msg.status !== "failed" && <span className="ml-1 text-[#246bff]">✓✓</span>}
+        <div className="mt-1 flex items-center justify-between gap-3 text-[10px] font-medium text-[#596175]">
+          <div className="flex items-center gap-1">
+            {msg.status === "sending" ? "Sending..." : msg.status === "failed" ? "Not sent" : msgTime(msg.time)}
+            {isMe && msg.status !== "failed" && <span className="text-[#246bff]">✓✓</span>}
+          </div>
+          {isMe && msg.status !== "sending" && msg.status !== "failed" && msg.metadata?.knowledgeConfidence !== undefined && msg.metadata?.knowledgeConfidence !== null && String(msg.metadata.knowledgeConfidence) !== "" && (
+            <span className="inline-flex shrink-0 items-center rounded bg-[#eef2ff] px-1 py-0.5 text-[8.5px] font-bold text-[#4f46e5]">
+              KB Match: {msg.metadata.knowledgeConfidence}%
+            </span>
+          )}
         </div>
       </div>
       {isMe && (

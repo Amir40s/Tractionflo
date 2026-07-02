@@ -683,6 +683,7 @@ async function buildStoredConversations({
             sender_id: message.sender_id || (isMe ? ownIgUserId : conversationId),
             time: getMessageTimeIso(message),
             reply_to: parsed.reply_to,
+            metadata: message.metadata,
           };
         })),
       } satisfies StoredConversation;
