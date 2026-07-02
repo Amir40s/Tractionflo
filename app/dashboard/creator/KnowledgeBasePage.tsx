@@ -30,6 +30,7 @@ import NotificationBell from "../../components/NotificationBell";
 import type { KnowledgeQaPair, KnowledgeSourceSummary } from "@/lib/knowledge-base";
 import { SettingsToggle } from "../SettingsPage";
 import { BrandMark } from "./BrandMark";
+import { KnowledgeAssistantChat } from "./KnowledgeAssistantChat";
 import type {
   CreatorLiveSummary,
   KnowledgeAssignmentValue,
@@ -1116,6 +1117,9 @@ function KnowledgeSourceRows({
   deletingSourceId,
   isUploading,
   uploadMessage,
+  onScrapeUrl,
+  isScrapingUrl,
+  onSourcesSaved,
 }: {
   sources: KnowledgeSource[];
   totalSourceCount: number;
@@ -1132,7 +1136,12 @@ function KnowledgeSourceRows({
   deletingSourceId: string;
   isUploading: boolean;
   uploadMessage: string;
+  onScrapeUrl: (url: string) => void;
+  isScrapingUrl: boolean;
+  onSourcesSaved: () => void;
 }) {
+  const [scrapeUrlInput, setScrapeUrlInput] = useState("");
+
   function handleDrop(event: DragEvent<HTMLButtonElement>) {
     event.preventDefault();
     onDropFiles(event.dataTransfer.files);
@@ -1325,33 +1334,9 @@ function KnowledgeSourceRows({
         )}
       </div>
 
-      <div className="mt-6 rounded-[10px] border border-[#e7eaf2] bg-white p-3 shadow-[0_18px_45px_rgba(20,28,53,0.025)]">
-        <div>
-          <div>
-            <h3 className="text-[13px] font-extrabold text-black">Auto scan upload</h3>
-            <p className="mt-1 text-[11px] font-medium leading-relaxed text-[#596175]">
-              Upload a PDF or TXT file and TractionFlo will scan it into searchable chunks and direct answers.
-            </p>
-          </div>
-        </div>
+      <div className="mt-6 flex flex-col gap-4">
+        <KnowledgeAssistantChat onSourcesSaved={onSourcesSaved} />
       </div>
-
-      <button
-        type="button"
-        onClick={onUploadClick}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={handleDrop}
-        disabled={isUploading}
-        className="mt-3 flex h-[78px] w-full items-center justify-center gap-3 rounded-[10px] border border-dashed border-[#d7deeb] bg-white text-center shadow-[0_18px_45px_rgba(20,28,53,0.025)] transition hover:border-[#3044ff] hover:bg-[#fbfcff] disabled:cursor-not-allowed disabled:opacity-70"
-      >
-        {isUploading ? <RefreshCw size={18} className="animate-spin text-[#3044ff]" strokeWidth={2.2} /> : <UploadCloud size={18} className="text-[#31394f]" strokeWidth={2.2} />}
-        <span>
-          <span className="block text-[14px] font-semibold text-black">
-            {isUploading ? "Indexing knowledge..." : <>Drag and drop PDFs/TXT here&nbsp; or&nbsp; <span className="font-extrabold text-[#3044ff]">browse</span></>}
-          </span>
-          <span className="mt-1 block text-[11px] font-medium text-[#46506a]">{uploadMessage || "PDF or TXT up to 50MB"}</span>
-        </span>
-      </button>
     </section>
   );
 }
@@ -1488,39 +1473,28 @@ export function KnowledgeBasePage({ summary, isLoading, error }: { summary: Crea
   const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<KnowledgeTabLabel>("All Sources");
   const [selectedKnowledgePdfId, setSelectedKnowledgePdfId] = useState("all");
   const [manualKnowledgeDraft, setManualKnowledgeDraft] = useState<ManualKnowledgeDraft>(() => createManualKnowledgeDraft());
+  const [isScrapingUrl, setIsScrapingUrl] = useState(false);
+
+  const loadKnowledgeSources = async () => {
+    try {
+      const response = await fetch("/api/knowledge/sources", { cache: "no-store" });
+      const payload = (await response.json()) as KnowledgeSourcesResponse;
+
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Could not load knowledge sources");
+      }
+
+      setKnowledgeSources(payload.sources || []);
+      setKnowledgeError("");
+    } catch (loadError) {
+      setKnowledgeError(loadError instanceof Error ? loadError.message : "Could not load knowledge sources");
+    } finally {
+      setIsKnowledgeLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let isMounted = true;
-
-    async function loadKnowledgeSources() {
-      try {
-        const response = await fetch("/api/knowledge/sources", { cache: "no-store" });
-        const payload = (await response.json()) as KnowledgeSourcesResponse;
-
-        if (!response.ok || payload.error) {
-          throw new Error(payload.error || "Could not load knowledge sources");
-        }
-
-        if (isMounted) {
-          setKnowledgeSources(payload.sources || []);
-          setKnowledgeError("");
-        }
-      } catch (loadError) {
-        if (isMounted) {
-          setKnowledgeError(loadError instanceof Error ? loadError.message : "Could not load knowledge sources");
-        }
-      } finally {
-        if (isMounted) {
-          setIsKnowledgeLoading(false);
-        }
-      }
-    }
-
     void loadKnowledgeSources();
-
-    return () => {
-      isMounted = false;
-    };
   }, []);
 
   function resetManualKnowledgeDraft(source?: KnowledgeSource | null) {
@@ -1644,6 +1618,39 @@ export function KnowledgeBasePage({ summary, isLoading, error }: { summary: Crea
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+    }
+  }
+
+  async function handleScrapeUrl(url: string) {
+    if (!url || isScrapingUrl) return;
+
+    setIsScrapingUrl(true);
+    setUploadMessage(`Scraping ${url}...`);
+    try {
+      const response = await fetch("/api/knowledge/sources/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Could not scrape URL");
+      }
+      
+      const newDraft = createManualKnowledgeDraft();
+      newDraft.title = `Website: ${url.replace(/^https?:\/\//, "")}`;
+      newDraft.category = "Business Information";
+      const finalDraft = switchManualKnowledgeDraftCategory(newDraft, "Business Information");
+      const updatedDraft = setManualDraftCategoryContent(finalDraft, "Business Information", data.text || "");
+      
+      setManualKnowledgeDraft(updatedDraft);
+      setIsManualKnowledgeModalOpen(true);
+      setUploadMessage("");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Scraping failed";
+      setUploadMessage(message);
+    } finally {
+      setIsScrapingUrl(false);
     }
   }
 
@@ -1891,15 +1898,7 @@ export function KnowledgeBasePage({ summary, isLoading, error }: { summary: Crea
               <span className="min-w-0 flex-1 truncate text-[12px] font-medium">Search knowledge...</span>
               <span className="hidden rounded bg-[#eff1f6] px-1.5 py-0.5 text-[11px] font-extrabold text-[#8b92a6] sm:inline">⌘K</span>
             </div>
-            <button
-              type="button"
-              onClick={() => void openManualKnowledgeModal()}
-              disabled={isUploadingKnowledge || isSavingManualKnowledge}
-              className="flex h-10 items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-extrabold text-white shadow-[0_18px_36px_rgba(48,68,255,0.2)] sm:w-[124px]"
-            >
-              {isUploadingKnowledge || isSavingManualKnowledge ? <RefreshCw size={16} className="animate-spin" strokeWidth={2.4} /> : <Plus size={16} strokeWidth={2.4} />}
-              <span className="hidden sm:inline">{isUploadingKnowledge || isSavingManualKnowledge ? "Adding" : "Add source"}</span>
-            </button>
+
             <NotificationBell />
           </div>
         </header>
@@ -1938,6 +1937,9 @@ export function KnowledgeBasePage({ summary, isLoading, error }: { summary: Crea
               deletingSourceId={deletingKnowledgeSourceId}
               isUploading={isUploadingKnowledge}
               uploadMessage={uploadMessage}
+              onScrapeUrl={handleScrapeUrl}
+              isScrapingUrl={isScrapingUrl}
+              onSourcesSaved={loadKnowledgeSources}
             />
           </div>
 

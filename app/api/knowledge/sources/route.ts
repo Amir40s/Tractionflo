@@ -208,9 +208,9 @@ export async function POST(request: Request) {
 
       const nextSources = [sourceIndex, ...existingSources].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 
-      console.info("Knowledge manual source saved with assistant id:", {
-        assistantId: user.id,
-        assistant_id: user.id,
+      console.info("Knowledge manual source saved to vector store for OpenAI assistant:", {
+        openaiAssistantId: assistantId,
+        userId: user.id,
         sourceId,
         title,
         category,
@@ -218,8 +218,7 @@ export async function POST(request: Request) {
       });
 
       return NextResponse.json({
-        assistantId: user.id,
-        assistant_id: user.id,
+        assistantId,
         source: summarizeKnowledgeSource(sourceIndex),
         sources: nextSources.map(summarizeKnowledgeSource),
       });

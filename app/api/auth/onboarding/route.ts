@@ -221,7 +221,7 @@ function buildAiSystemPrompt(setup: Record<string, unknown>): string {
   return `You are an Instagram DM assistant for this business. Use the details below to answer questions accurately. Always provide the website link when asked and never say you don't have the link.\n\n${parts.join('\n')}`;
 }
 
-function buildAutoKnowledgeText(setup: Record<string, unknown>): string {
+async function buildAutoKnowledgeText(setup: Record<string, unknown>): Promise<string> {
   const lines: string[] = ['# Business Info'];
   const name = cleanString(setup.businessName, 160);
   const niche = cleanString(setup.niche, 120);
@@ -266,6 +266,82 @@ function buildAutoKnowledgeText(setup: Record<string, unknown>): string {
     lines.push(`Q: What is your website?\nA: ${websiteUrl}`);
     lines.push(`Q: How can I buy / purchase?\nA: You can buy here: ${websiteUrl}`);
     lines.push(`Q: Send me the link\nA: Here is the link: ${websiteUrl}`);
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
+      let html = "";
+      
+      try {
+        const rawResponse = await fetch(websiteUrl, {
+          signal: controller.signal,
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; TractionFloBot/1.0)" }
+        });
+        if (rawResponse.ok) {
+          const rawHtml = await rawResponse.text();
+          if (rawHtml.length > 2000 && !rawHtml.includes('<noscript>You need to enable JavaScript')) {
+            html = rawHtml;
+          }
+        }
+      } catch (e) {
+        console.warn("Raw fetch failed, falling back to Jina AI", e);
+      }
+
+      if (!html) {
+        const response = await fetch(`https://r.jina.ai/${websiteUrl}`, {
+          signal: controller.signal,
+          headers: {
+            'Accept': 'text/plain',
+            'X-Return-Format': 'html',
+            'X-Target-Selector': 'body'
+          }
+        });
+        if (response.ok) {
+          html = await response.text();
+        } else {
+          console.warn(`Jina AI returned status ${response.status} for ${websiteUrl}`);
+        }
+      }
+      
+      clearTimeout(timeoutId);
+
+      if (html) {
+        const cheerio = await import("cheerio");
+        const $ = cheerio.load(html);
+
+        // Extract JSON-LD FAQs which are often used by SPAs for SEO when content is hidden behind accordions
+        let hiddenFaqContent = "";
+        $('script[type="application/ld+json"]').each((_, el) => {
+          try {
+            const data = JSON.parse($(el).html() || "{}");
+            if (data['@type'] === 'FAQPage' && Array.isArray(data.mainEntity)) {
+              hiddenFaqContent += "\n\n## Frequently Asked Questions\n";
+              data.mainEntity.forEach((item: any) => {
+                if (item['@type'] === 'Question' && item.name && item.acceptedAnswer?.text) {
+                  hiddenFaqContent += `**Q: ${item.name}**\nA: ${item.acceptedAnswer.text}\n\n`;
+                }
+              });
+            }
+          } catch (e) {}
+        });
+
+        $('script, style, svg, noscript, iframe, nav, footer, header').remove();
+        
+        const rawText = $('body').text();
+        let markdown = rawText.replace(/[ \t]+/g, ' ').replace(/\n\s*\n/g, '\n\n').trim();
+
+        if (hiddenFaqContent) {
+          markdown += hiddenFaqContent;
+        }
+
+        if (markdown && markdown.length > 50) {
+           lines.push(`\n## Website Content\nThe following is the scraped content of the business website:\n\n${markdown}`);
+        }
+      }
+    } catch (scrapeError) {
+      console.warn("Failed to scrape website url:", scrapeError);
+    }
   }
 
   return lines.join('\n');
@@ -317,7 +393,7 @@ export async function POST() {
     const existingSetup = isRecord(metadata.onboarding_setup) ? metadata.onboarding_setup as Record<string, unknown> : {};
 
     // Auto-create a Knowledge Base entry from onboarding data so the AI can answer from day one
-    const kbText = buildAutoKnowledgeText(existingSetup);
+    const kbText = await buildAutoKnowledgeText(existingSetup);
     const businessName = cleanString(existingSetup.businessName, 160) || 'Business';
     if (kbText.length > 20) {
       try {
