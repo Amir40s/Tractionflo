@@ -345,6 +345,50 @@ export async function analyzeInstagramBusinessContextWithVision({
     ].join("\n");
   }).join("\n\n");
 
+  const postMessages = (await Promise.all(
+    selectedPosts.map(async (post, index) => {
+      const imageUrl = getPostImageUrl(post);
+      let base64Url: string | null = null;
+      
+      if (imageUrl) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const imgRes = await fetch(imageUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (imgRes.ok) {
+            const arrayBuffer = await imgRes.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const mimeType = imgRes.headers.get("content-type") || "image/jpeg";
+            base64Url = `data:${mimeType};base64,${buffer.toString("base64")}`;
+          }
+        } catch (err) {
+          logger.warn("Failed to download image for analysis", { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      const contentArray: any[] = [
+        {
+          type: "text" as const,
+          text: `Analyze this post image for @${profile.username}. Caption: ${post.caption || "No caption"}`,
+        }
+      ];
+
+      if (base64Url) {
+        contentArray.push({
+          type: "image_url" as const,
+          image_url: {
+            url: base64Url,
+            detail: "low" as const,
+          },
+        });
+      }
+
+      return contentArray;
+    })
+  )).flat();
+
   const openAiMessages = [
     {
       role: "system" as const,
@@ -367,31 +411,19 @@ export async function analyzeInstagramBusinessContextWithVision({
             `Followers: ${profile.followers_count || 0}`,
             `\nPosts to inspect:\n${postTextBlocks}`,
             `\nReturn JSON with keys: summary, businessType, sellingWhat, contentPillars, offerSignals, keywords, contentTypes, confidence.`,
-            `\nBusiness classification priority: if the account sells products online, uses shop/store/cart/checkout/Shopify/ecommerce wording, classify it as Ecommerce & product sales. If it sells a course or digital product, say that explicitly. Do not default to AI automation unless the content clearly says so.`,
+            `\nCRITICAL INSTRUCTIONS:`,
+            `1. For 'summary', write a detailed and comprehensive 6-7 line paragraph explaining exactly what the business is doing, based strictly on the images and captions. Make it descriptive and long.`,
+            `2. Business classification: Do not assume it is an e-commerce store or digital marketing course unless the posts or images explicitly confirm it. If it sells a course or digital product, say that explicitly. Do not default to AI automation unless the content clearly says so.`,
           ].join("\n"),
         },
-        ...selectedPosts.flatMap((post) => {
-          const imageUrl = getPostImageUrl(post);
-          if (!imageUrl) return [];
-          return [
-            {
-              type: "text" as const,
-              text: `Analyze this post image for @${profile.username}. Caption: ${post.caption || "No caption"}`,
-            },
-            {
-              type: "image_url" as const,
-              image_url: {
-                url: imageUrl,
-                detail: "low" as const,
-              },
-            },
-          ];
-        }),
+        ...postMessages,
       ],
     },
   ];
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -405,7 +437,9 @@ export async function analyzeInstagramBusinessContextWithVision({
         temperature: 0.2,
         max_tokens: 1200,
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const data = await response.json();
 
@@ -421,44 +455,17 @@ export async function analyzeInstagramBusinessContextWithVision({
     const parsed = JSON.parse(content) as Partial<InstagramBusinessAnalysis>;
     const fallbackAnalysis = fallback();
 
-    const ecommerceHint = [
-      profile.biography || "",
-      ...posts.map((post) => post.caption || ""),
-      ...posts.map((post) => `${post.media_url || ""} ${post.thumbnail_url || ""}`),
-      ...fallbackAnalysis.keywords,
-      ...fallbackAnalysis.contentPillars,
-    ].join(" ").toLowerCase();
-
-    const ecommerceOverride = /ecommerce|e-commerce|shopify|shop|store|cart|checkout|order|shipping|buy now|add to cart|product|products/.test(ecommerceHint);
-    const courseOverride = /course|training|masterclass|tutorial|lesson|coaching|education|workshop/.test(ecommerceHint) && /sell|selling|offer|product|digital/.test(ecommerceHint);
-
     return {
-      summary: ecommerceOverride
-        ? `${profile.username} appears to be selling ecommerce products online.`
-        : courseOverride
-          ? `${profile.username} appears to be selling a course or digital product.`
-          : parsed.summary || fallbackAnalysis.summary,
-      businessType: ecommerceOverride
-        ? "Ecommerce & product sales"
-        : courseOverride
-          ? "Courses & digital products"
-          : parsed.businessType || fallbackAnalysis.businessType,
-      sellingWhat: ecommerceOverride
-        ? "Ecommerce products"
-        : courseOverride
-          ? "Course or digital product"
-          : parsed.sellingWhat || fallbackAnalysis.sellingWhat,
-      contentPillars: ecommerceOverride
-        ? ["Ecommerce & product sales"]
-        : courseOverride
-          ? ["Courses & education"]
-          : Array.isArray(parsed.contentPillars) && parsed.contentPillars.length > 0
-            ? parsed.contentPillars.slice(0, 2)
-            : fallbackAnalysis.contentPillars.slice(0, 2),
+      summary: parsed.summary || fallbackAnalysis.summary,
+      businessType: parsed.businessType || fallbackAnalysis.businessType,
+      sellingWhat: parsed.sellingWhat || fallbackAnalysis.sellingWhat,
+      contentPillars: Array.isArray(parsed.contentPillars) && parsed.contentPillars.length > 0
+        ? parsed.contentPillars.slice(0, 2)
+        : fallbackAnalysis.contentPillars.slice(0, 2),
       offerSignals: Array.isArray(parsed.offerSignals) && parsed.offerSignals.length > 0 ? parsed.offerSignals : fallbackAnalysis.offerSignals,
       keywords: Array.isArray(parsed.keywords) && parsed.keywords.length > 0 ? parsed.keywords : fallbackAnalysis.keywords,
       contentTypes: Array.isArray(parsed.contentTypes) && parsed.contentTypes.length > 0 ? parsed.contentTypes : fallbackAnalysis.contentTypes,
-      confidence: ecommerceOverride ? 0.95 : courseOverride ? 0.9 : typeof parsed.confidence === "number" ? parsed.confidence : 0.7,
+      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.7,
     };
   } catch (error) {
     logger.warn("Vision analysis failed, using fallback analysis", {
@@ -541,7 +548,8 @@ export function generateBusinessContextPrompt(
   profile: InstagramBusinessProfile,
   posts: InstagramBusinessPost[],
   keywords: string[],
-  themes: string[]
+  themes: string[],
+  summary?: string
 ): string {
   const topPosts = posts
     .slice(0, 5)
@@ -561,6 +569,7 @@ export function generateBusinessContextPrompt(
 - **Website**: ${profile.website || "No website"}
 - **Followers**: ${profile.followers_count || 0}
 
+${summary ? `## AI Business Analysis\n${summary}\n` : ""}
 ## Business Keywords & Topics
 ${keywords.slice(0, 8).length > 0 ? keywords.slice(0, 8).map((k) => `- ${k}`).join("\n") : "- No keywords detected"}
 

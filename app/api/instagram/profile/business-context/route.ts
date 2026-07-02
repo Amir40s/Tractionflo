@@ -100,7 +100,8 @@ export async function GET() {
       profile,
       posts,
       analysis.keywords,
-      analysis.contentPillars
+      analysis.contentPillars,
+      analysis.summary
     );
 
     // Get OpenAI API key from environment

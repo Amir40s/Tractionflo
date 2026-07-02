@@ -890,46 +890,9 @@ function clearInstagramOAuthErrorFromLocation() {
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-const instagramConsentBaseUrl =
-  "https://www.instagram.com/consent/?flow=ig_biz_login_oauth&params_json=%7B%22client_id%22%3A%221961355111188168%22%2C%22redirect_uri%22%3A%22https%3A%5C%2F%5C%2Ftractionflo.vercel.app%5C%2Fapi%5C%2Fauth%5C%2Finstagram%5C%2Fcallback%22%2C%22response_type%22%3A%22code%22%2C%22state%22%3A%22%7B%5C%22next%5C%22%3A%5C%22%5C%2Fconversations%5C%22%2C%5C%22returnTo%5C%22%3A%5C%22http%3A%5C%2F%5C%2Flocalhost%3A3000%5C%22%2C%5C%22userId%5C%22%3A%5C%2272affb57-ceca-4ab2-8038-b523cf35fcc1%5C%22%2C%5C%22expectedUsername%5C%22%3A%5C%22%5C%22%2C%5C%22signature%5C%22%3A%5C%22ba214a5efaea1d0ffeab4f4b3be9dc3316679b210f929a6af4b5ec40338073be%5C%22%7D%22%2C%22scope%22%3A%22instagram_business_basic-instagram_business_manage_comments-instagram_business_manage_messages-instagram_business_content_publish-instagram_business_manage_insights%22%2C%22logger_id%22%3A%22a0a424ca-0b0a-4bcc-9f42-dc73941b2206%22%2C%22app_id%22%3A%221961355111188168%22%2C%22platform_app_id%22%3A%221961355111188168%22%7D&source=oauth_permissions_page_www";
-
-function buildInstagramConsentUrl(expectedUsername: string) {
-  const cleanUsername = expectedUsername.trim().replace(/^@/, "");
-
-  if (!cleanUsername) {
-    return instagramConsentBaseUrl;
-  }
-
-  try {
-    const url = new URL(instagramConsentBaseUrl);
-    const paramsJson = url.searchParams.get("params_json");
-
-    if (!paramsJson) {
-      return instagramConsentBaseUrl;
-    }
-
-    const decodedParams = JSON.parse(paramsJson) as {
-      state?: string;
-      [key: string]: unknown;
-    };
-
-    if (typeof decodedParams.state !== "string") {
-      return instagramConsentBaseUrl;
-    }
-
-    const decodedState = JSON.parse(decodedParams.state) as {
-      expectedUsername?: string;
-      [key: string]: unknown;
-    };
-
-    decodedState.expectedUsername = cleanUsername;
-    decodedParams.state = JSON.stringify(decodedState);
-    url.searchParams.set("params_json", JSON.stringify(decodedParams));
-
-    return url.toString();
-  } catch {
-    return instagramConsentBaseUrl;
-  }
+function buildInstagramConsentUrl(nextPath: string, expectedUsername: string) {
+  const cleanUsername = expectedUsername.trim().toLowerCase().replace(/^@/, "");
+  return `/api/auth/instagram?next=${encodeURIComponent(nextPath)}&username=${encodeURIComponent(cleanUsername)}`;
 }
 
 function getConversationAiMessages(conv: IGConversation) {
@@ -3228,7 +3191,7 @@ export default function Inbox() {
     setOauthError(null);
     clearInstagramOAuthErrorFromLocation();
 
-    window.location.href = buildInstagramConsentUrl(connectUsername);
+    window.location.href = buildInstagramConsentUrl("/conversations", connectUsername);
   }, [connectUsername]);
 
   const openConnectModal = useCallback(() => {

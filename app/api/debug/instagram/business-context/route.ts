@@ -100,8 +100,6 @@ export async function GET() {
       learnedContext.summary
     );
     debugLog.push(`✅ Saved to database`);
-
-    // Train AI
     debugLog.push('🤖 Training AI assistant...');
     const openaiApiKey = process.env.OPENAI_API_KEY;
     
@@ -113,7 +111,8 @@ export async function GET() {
           profile,
           posts,
           learnedContext.keywords,
-          learnedContext.contentPillars
+          learnedContext.contentPillars,
+          learnedContext.summary
         );
 
         const baseInstructions = `You are an AI customer service assistant for ${profile.name}'s Instagram business. 

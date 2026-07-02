@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { createHmac, timingSafeEqual } from 'crypto';
 import {
   exchangeInstagramTokenForLongLivedToken,
@@ -18,8 +18,8 @@ import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
 import logger from '@/lib/logger';
 
-function getAppBaseUrl(request: Request) {
-  return getNormalizedAppBaseUrl(new URL(request.url).origin);
+function getAppBaseUrl(request: NextRequest) {
+  return getNormalizedAppBaseUrl(request.nextUrl.origin);
 }
 
 type InstagramOAuthState = {
@@ -110,10 +110,12 @@ function getOAuthState(
   stateSecret?: string
 ): InstagramOAuthState {
   if (!value) {
+    console.error('getOAuthState: no value provided');
     return { next: '/dashboard' };
   }
 
   if (isSafeNextPath(value)) {
+    console.error('getOAuthState: value is just a next path', value);
     return { next: value };
   }
 
@@ -127,20 +129,27 @@ function getOAuthState(
     const userId = typeof parsed.userId === 'string' ? parsed.userId : '';
     const expectedUsername = typeof parsed.expectedUsername === 'string' ? parsed.expectedUsername : '';
     const signature = typeof parsed.signature === 'string' ? parsed.signature : '';
-    const verifiedData =
-      userId && signature && stateSecret && isValidStateSignature({
-        nextPath: next,
-        returnTo: returnTo || '',
-        userId,
-        expectedUsername,
-        signature,
-        secret: stateSecret,
-      })
+    
+    console.log('getOAuthState parsed values:', { next, returnTo, userId, expectedUsername, signature, stateSecret: !!stateSecret, originalReturnTo: parsed.returnTo, callbackOrigin, appBaseUrl });
+
+    const isValid = userId && signature && stateSecret && isValidStateSignature({
+      nextPath: next,
+      returnTo: returnTo || '',
+      userId,
+      expectedUsername,
+      signature,
+      secret: stateSecret,
+    });
+    
+    console.log('getOAuthState signature validation:', { isValid });
+
+    const verifiedData = isValid
         ? { userId, expectedUsername }
         : { userId: undefined, expectedUsername: undefined };
 
     return { next, returnTo, userId: verifiedData.userId, expectedUsername: verifiedData.expectedUsername };
-  } catch {
+  } catch (error) {
+    console.error('getOAuthState JSON parse error:', error);
     return { next: '/dashboard' };
   }
 }
@@ -163,12 +172,12 @@ function getSoftwareRedirect(baseUrl: string, nextPath: string, params: Record<s
   return redirectUrl;
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
   const error = searchParams.get('error');
   const baseUrl = getAppBaseUrl(request);
-  const callbackOrigin = new URL(request.url).origin;
+  const callbackOrigin = request.nextUrl.origin;
   const { appId, appSecret } = getInstagramAppCredentials();
   const oauthState = getOAuthState(searchParams.get('state'), callbackOrigin, baseUrl, appSecret);
   const redirectBaseUrl = oauthState.returnTo || baseUrl;
@@ -325,7 +334,8 @@ export async function GET(request: Request) {
               profile,
               posts,
               analysis.keywords,
-              analysis.contentPillars
+              analysis.contentPillars,
+              analysis.summary
             );
 
             const baseInstructions = `You are an AI customer service assistant for ${profile.name}'s Instagram business. 

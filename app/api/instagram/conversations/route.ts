@@ -773,65 +773,16 @@ export async function GET(request: Request) {
       assistantId,
     };
 
-    // 3. Fetch conversations from Instagram Graph API
-    const convsUrl = new URL(`https://graph.instagram.com/v21.0/me/conversations`);
-    convsUrl.searchParams.set('platform', 'instagram');
-    convsUrl.searchParams.set('fields', 'id,participants,updated_time,message_count');
-    convsUrl.searchParams.set('limit', scanMode ? '50' : '25');
-    convsUrl.searchParams.set('access_token', access_token);
-
-    const convsRes = await fetch(convsUrl.toString());
-    const convsData = await convsRes.json();
-
-    if (convsData.error) {
-      console.error('Instagram Graph API error (conversations):', convsData.error);
-      const storedConversations = await buildStoredConversations({
-        supabase,
-        userId: user.id,
-        ownIgUserId: real_ig_user_id,
-        permissions,
-        limit: conversationLimit,
-      });
-
-      return NextResponse.json(
-        {
-          error: storedConversations.length > 0 ? undefined : convsData.error.message,
-          conversations: countOnly ? [] : storedConversations,
-          conversation_count: storedConversations.length,
-          ig_user_id: real_ig_user_id,
-          account,
-          assistant_id: assistantId,
-          assistantId,
-        },
-        { status: 200 }
-      );
-    }
-
-    const rawConversations: InstagramConversation[] = convsData.data || [];
-    const visibleConversations = filterAssignedConversations(rawConversations, permissions);
-    const storedConversations = visibleConversations.length === 0
-      ? await buildStoredConversations({
-          supabase,
-          userId: user.id,
-          ownIgUserId: real_ig_user_id,
-          permissions,
-          limit: conversationLimit,
-        })
-      : [];
+     const storedConversations = await buildStoredConversations({
+      supabase,
+      userId: user.id,
+      ownIgUserId: real_ig_user_id,
+      permissions,
+      limit: conversationLimit,
+    });
 
     if (countOnly) {
       return NextResponse.json({
-        conversation_count: visibleConversations.length || storedConversations.length,
-        ig_user_id: real_ig_user_id,
-        account,
-        assistant_id: assistantId,
-        assistantId,
-      });
-    }
-
-    if (visibleConversations.length === 0 && storedConversations.length > 0) {
-      return NextResponse.json({
-        conversations: storedConversations,
         conversation_count: storedConversations.length,
         ig_user_id: real_ig_user_id,
         account,
@@ -840,160 +791,9 @@ export async function GET(request: Request) {
       });
     }
 
-    // 4. Fetch messages for the recent conversations shown in onboarding/inbox.
-    const conversations = await Promise.all(
-      visibleConversations.slice(0, conversationLimit).map(async (conv) => {
-        const participants = conv.participants?.data || [];
-        const ownParticipant = participants.find(
-          (p) => p.username && meData.username && p.username === meData.username
-        );
-        const ownParticipantId = ownParticipant?.id || real_ig_user_id;
-        const msgsUrl = new URL(`https://graph.instagram.com/v21.0/${conv.id}`);
-        msgsUrl.searchParams.set('fields', messageField);
-        msgsUrl.searchParams.set('access_token', access_token);
-
-        const msgsRes = await fetch(msgsUrl.toString());
-        const msgsData = await msgsRes.json();
-
-        const messages: InstagramMessage[] = msgsData.messages?.data || [];
-
-        // Fetch matching stored messages from Supabase to parse story reply metadata
-        const mids = messages.map((m) => m.id).filter(Boolean);
-        const dbMessagesMap: Record<string, { text: string; metadata?: Record<string, unknown> | null }> = {};
-        if (mids.length > 0) {
-          const { data: dbMessages, error: dbError } = await supabase
-            .from('messages')
-            .select('mid, text, metadata')
-            .in('mid', mids);
-
-          if (!dbError && dbMessages) {
-            for (const dbMsg of dbMessages as any[]) {
-              dbMessagesMap[dbMsg.mid] = {
-                text: dbMsg.text || '',
-                metadata: dbMsg.metadata && typeof dbMsg.metadata === 'object' ? dbMsg.metadata : null,
-              };
-            }
-          }
-        }
-
-        // Find the other participant (not the page/ig user)
-        const otherParticipant = participants.find(
-          (p) => p.id !== ownParticipantId && p.username !== meData.username
-        );
-        const otherParticipantProfile = await getParticipantProfile(otherParticipant, access_token);
-        const otherParticipantProfileId = otherParticipantProfile?.id || otherParticipant?.id || conv.id;
-        const otherParticipantProfilePic = otherParticipantProfile?.profile_pic;
-        const participantFallbackName = getFallbackParticipantName(otherParticipantProfileId);
-        const participantProfile = otherParticipantProfile
-          ? {
-              ...otherParticipantProfile,
-              name: otherParticipantProfile.name || otherParticipantProfile.username || participantFallbackName,
-            }
-          : { id: otherParticipantProfileId, name: participantFallbackName };
-        const participantUsername = 'username' in participantProfile ? participantProfile.username : '';
-        const storedConversationIds = [...new Set([otherParticipantProfileId, conv.id].filter(Boolean))];
-        const { data: storedConversationRows } =
-          storedConversationIds.length > 0
-            ? await supabase
-                .from('messages')
-                .select('mid,user_id,conversation_id,sender_id,recipient_id,direction,text,timestamp,raw_event,metadata,created_at')
-                .eq('user_id', user.id)
-                .in('conversation_id', storedConversationIds)
-                .order('timestamp', { ascending: false })
-                .limit(80)
-            : { data: [] };
-        const storedRows = (storedConversationRows || []) as StoredMessageRow[];
-        const storedCatalogRows = storedRows.filter(
-          (row) => getStoredCatalogCarouselItems(row.metadata).length > 0
-        );
-        const usedStoredCatalogKeys = new Set<string>();
-
-        const graphMessages = messages.map((m) => {
-          let text = m.message || '';
-          let reply_to = m.reply_to;
-          const normalizedAttachments = normalizeAttachments(m.attachments);
-
-          let dbMessage = dbMessagesMap[m.id];
-          if (!dbMessage && !text && normalizedAttachments.length === 0) {
-            const storedCatalogRow = getClosestStoredCatalogRow(storedCatalogRows, m.created_time, usedStoredCatalogKeys);
-
-            if (storedCatalogRow) {
-              usedStoredCatalogKeys.add(getStoredMessageKey(storedCatalogRow));
-              dbMessage = {
-                text: storedCatalogRow.text || '',
-                metadata: storedCatalogRow.metadata || null,
-              };
-            }
-          }
-          const dbText = dbMessage?.text || '';
-          const parsedStored = dbMessage ? parseStoredMessageContent(dbText, dbMessage.metadata) : null;
-          if (dbText && dbText.startsWith('__STORY_REPLY__:')) {
-            try {
-              const parts = dbText.split('__TEXT__:', 2);
-              if (parts.length === 2) {
-                const storyStr = parts[0].substring('__STORY_REPLY__:'.length);
-                const story = JSON.parse(storyStr);
-                text = parts[1];
-                reply_to = {
-                  ...reply_to,
-                  story
-                };
-              }
-            } catch (e) {
-              console.error('Failed to parse serialized story reply from DB:', e);
-            }
-          }
-          if (parsedStored?.catalogItems?.length) {
-            text = parsedStored.text;
-          }
-
-          const isMe = m.from?.id === ownParticipantId || m.from?.username === meData.username;
-
-          return {
-            id: m.id,
-            text,
-            attachments: parsedStored?.catalogItems?.length ? [] : normalizedAttachments,
-            catalogItems: parsedStored?.catalogItems || [],
-            from: isMe ? 'me' as const : 'user' as const,
-            sender_name: m.from?.name || m.from?.username || (isMe ? 'You' : participantProfile.name),
-            sender_profile_pic: m.from?.id === otherParticipantProfileId ? otherParticipantProfilePic : undefined,
-            sender_id: m.from?.id || (isMe ? ownParticipantId : otherParticipantProfileId),
-            time: m.created_time,
-            reply_to,
-          };
-        });
-        const storedSupplementMessages = storedRows.map((message, index) => {
-          const parsed = parseStoredMessageContent(message.text || '', message.metadata);
-          const isMe =
-            message.direction === 'outbound' ||
-            (real_ig_user_id && message.sender_id === real_ig_user_id && message.direction !== 'inbound');
-
-          return {
-            id: message.mid || `${conv.id}-${message.timestamp || index}`,
-            text: parsed.text,
-            attachments: parsed.attachments,
-            catalogItems: parsed.catalogItems,
-            from: isMe ? 'me' as const : 'user' as const,
-            sender_name: isMe ? 'You' : participantProfile.name || participantUsername || 'Instagram user',
-            sender_profile_pic: isMe ? undefined : otherParticipantProfilePic,
-            sender_id: message.sender_id || (isMe ? real_ig_user_id : otherParticipantProfileId),
-            time: getMessageTimeIso(message),
-            reply_to: parsed.reply_to,
-          };
-        });
-
-        return {
-          id: conv.id,
-          participant: participantProfile,
-          updated_time: conv.updated_time,
-          messages: dedupeConversationMessages([...graphMessages, ...storedSupplementMessages]),
-        };
-      })
-    );
-
     return NextResponse.json({
-      conversations,
-      conversation_count: visibleConversations.length,
+      conversations: storedConversations,
+      conversation_count: storedConversations.length,
       ig_user_id: real_ig_user_id,
       account,
       assistant_id: assistantId,
