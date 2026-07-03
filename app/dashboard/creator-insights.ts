@@ -957,11 +957,42 @@ export function classifyCreatorOpportunity(conversation: InstagramSettingsConver
     const badge = urgentSignal ? "URGENT LEAD" : quantitySignal ? "BULK LEAD" : qual.classification === "Hot" ? "HIGH INTENT" : qual.classification === "Warm" ? "WARM LEAD" : "COLD LEAD";
     const subtitle = urgentSignal ? "Urgent buying intent" : quantitySignal ? "Large order interest" : "Buying intent";
 
+    // Find catalog item price amount if available in any message
+    let extractedPrice: number | null = null;
+    for (const msg of conversation.messages) {
+      const items = (msg as any).catalogItems;
+      if (Array.isArray(items) && items.length > 0) {
+        for (const item of items) {
+          if (typeof item.priceAmount === "number" && item.priceAmount > 0) {
+            extractedPrice = item.priceAmount;
+            break;
+          }
+        }
+      }
+      if (extractedPrice !== null) break;
+    }
+
+    // Fallback logic to parse price from text (e.g. $100 or 100 usd)
+    if (extractedPrice === null) {
+      const priceRegex = /(?:\$|rs\.?|pkr|usd|eur|gbp|aed)\s*([1-9]\d*(?:[,.]\d{3})*(?:\.\d{1,2})?)\b|\b([1-9]\d*(?:[,.]\d{3})*(?:\.\d{1,2})?)\s*(?:usd|pkr|rs|rupees?|dollars?|aed)\b/i;
+      const match = text.match(priceRegex);
+      if (match) {
+        const valStr = (match[1] || match[2]).replace(/,/g, "");
+        const parsed = parseFloat(valStr);
+        if (!isNaN(parsed) && parsed > 0) {
+          extractedPrice = parsed;
+        }
+      }
+    }
+
+    const isWilling = qual.classification === "Hot" || qual.classification === "Warm";
+    const leadValue = (isWilling && extractedPrice !== null) ? extractedPrice : null;
+
     return {
       subtitle,
       tone: "green" as const,
       icon: ShoppingCart,
-      value: 1800 + buyerHits * 300,
+      value: leadValue ? leadValue : undefined,
       ...qual,
       badge,
     };
@@ -1197,7 +1228,7 @@ export function buildCreatorLiveSummary(
     }))
   );
   const escalatedConversationCount = new Set(escalationRecords.map((record) => record.conversation.id)).size;
-  const estimatedPipelineRevenue = opportunityRecords.reduce((total, record) => total + record.opportunity.value, 0);
+  const estimatedPipelineRevenue = opportunityRecords.reduce((total, record) => total + (record.opportunity.value || 0), 0);
   const { confirmedRevenue, paidRevenue, pendingRevenue } = getCommerceRevenueTotals(sortedOrders);
   const revenueMode: CreatorLiveSummary["revenueMode"] = "paid";
   const estimatedRevenue = paidRevenue;
@@ -1226,7 +1257,7 @@ export function buildCreatorLiveSummary(
       time: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
       tone: opportunity.tone,
       icon: opportunity.icon,
-      value: `${formatCreatorMoney(opportunity.value)} est.`,
+      value: `${formatCreatorMoney(opportunity.value || 0)} est.`,
       scoreLabel: opportunity.scoreLabel || "Lead Score",
       score: `${score}/100`,
       progress: `${score}%`,
@@ -1375,7 +1406,7 @@ export function buildCreatorLiveSummary(
       time: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
       icon: escalation ? TriangleAlert : opportunity ? opportunity.icon : MessageSquare,
       tone: escalation ? "text-[#df405b] bg-[#fff0f3]" : opportunity ? "text-[#4b3cff] bg-[#f0edff]" : "text-[#246bff] bg-[#eef4ff]",
-      meta: opportunity ? `${formatCreatorMoney(opportunity.value)} est.` : undefined,
+      meta: opportunity ? `${formatCreatorMoney(opportunity.value || 0)} est.` : undefined,
     };
   });
   const recentActivity = [...orderActivity, ...conversationActivity].slice(0, 4);
@@ -1654,7 +1685,7 @@ export function buildAnalyticsSummary(
     .filter((record): record is { conversation: InstagramSettingsConversation; escalation: NonNullable<ReturnType<typeof classifyCreatorEscalation>> } => Boolean(record.escalation));
   const convertedFollowers = conversations.filter(hasAnalyticsConversionSignal);
   const salesRecords = opportunityRecords.filter(({ conversation, opportunity }) => opportunity.badge === "HIGH INTENT" || hasAnalyticsSalesSignal(conversation));
-  const salesGenerated = salesRecords.reduce((total, record) => total + record.opportunity.value, 0);
+  const salesGenerated = salesRecords.reduce((total, record) => total + (record.opportunity.value || 0), 0);
   const responseTimes: number[] = [];
   let questionsAsked = 0;
   let questionsAnswered = 0;

@@ -555,7 +555,7 @@ function buildRevenueTrendSeries(summary: CreatorLiveSummary, points: number) {
     const dayOffset = Math.floor((now - timestamp) / dayMs);
 
     if (dayOffset >= 0 && dayOffset < points) {
-      buckets[points - 1 - dayOffset] += opportunity.value;
+      buckets[points - 1 - dayOffset] += opportunity.value || 0;
     }
   });
 
@@ -823,7 +823,7 @@ function PipelineOverview({
               <button
                 type="button"
                 onClick={() => onNavigate?.(getTabForPipeline(step.label))}
-                className="flex h-full flex-col items-center rounded-[8px] px-2 py-3 text-center w-full hover:bg-[#fafbfe] transition focus:outline-none"
+                className="flex h-full flex-col items-center rounded-[8px] px-2 py-3 text-center w-full cursor-pointer hover:bg-[#f0f1f6] hover:shadow-sm active:scale-[0.97] transition focus:outline-none"
               >
                 <IconBubble icon={Icon} tone={step.tone} />
                 <p className="mt-3 text-[24px] font-extrabold leading-none text-black">{formatCreatorInteger(step.value)}</p>
@@ -887,7 +887,7 @@ function buildRevenueSources(summary: CreatorLiveSummary) {
     }
 
     const label = getOpportunitySourceLabel(opportunity.badge);
-    sources[label] = (sources[label] || 0) + opportunity.value;
+    sources[label] = (sources[label] || 0) + (opportunity.value || 0);
     return sources;
   }, {});
   const total = Object.values(groupedSources).reduce((sum, value) => sum + value, 0);
@@ -1298,7 +1298,7 @@ export function DashboardOverview({
           <OpportunityList summary={summary} onNavigate={onNavigate} />
 
           <div className="grid content-start gap-5">
-            <PipelineOverview intent={intent} summary={summary} />
+            <PipelineOverview intent={intent} summary={summary} onNavigate={onNavigate} />
             <ActivityList summary={summary} onNavigate={onNavigate} />
           </div>
 

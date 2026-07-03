@@ -1982,7 +1982,7 @@ export async function POST(request: Request) {
               direction: msgToInsert.direction,
               text: msgToInsert.text,
               timestamp: msgToInsert.timestamp,
-              rawEvent: msgToInsert.rawEvent,
+              rawEvent: msgToInsert.rawEvent, 
               metadata: {
                 source: 'meta-webhook',
                 participant: msgToInsert.participant || undefined,
