@@ -20,13 +20,7 @@ import {
 } from "@/lib/opportunity-workflow-state";
 
 const opportunityToneClasses = {
-  purple: {
-    tile: "bg-[#f0edff] text-[#4b3cff]",
-    badge: "bg-[#ece8ff] text-[#4b3cff]",
-    value: "text-[#4b3cff]",
-    progress: "bg-[#4b3cff]",
-    action: "text-black",
-  },
+
   green: {
     tile: "bg-[#eafaf0] text-[#13a84f]",
     badge: "bg-[#e7f8ed] text-[#0a9b3f]",

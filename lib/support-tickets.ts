@@ -73,7 +73,7 @@ export async function createSupportTicket({
   };
 
   if (sourceEventId) {
-    const { data: existing, error: lookupError } = await supabase
+    const { data: existing, error: lookupError } = await (supabase as any)
       .from("support_tickets")
       .select("id")
       .eq("source_event_id", sourceEventId)
@@ -85,7 +85,7 @@ export async function createSupportTicket({
     }
 
     if (existing?.[0]?.id) {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await (supabase as any)
         .from("support_tickets")
         .update(payload)
         .eq("id", existing[0].id);
@@ -98,7 +98,7 @@ export async function createSupportTicket({
     }
   }
 
-  const { data, error } = await supabase.from("support_tickets").insert(payload).select("id").single();
+  const { data, error } = await (supabase as any).from("support_tickets").insert(payload).select("id").single();
 
   if (error) {
     if (isMissingTableError(error)) {

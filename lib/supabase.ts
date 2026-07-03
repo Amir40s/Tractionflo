@@ -27,8 +27,15 @@ function getSupabaseServiceEnv() {
   };
 }
 
+let cachedServiceClient: ReturnType<typeof createClient> | null = null;
+
 export function createSupabaseServiceClient() {
+  if (cachedServiceClient) {
+    return cachedServiceClient;
+  }
+
   const { supabaseUrl, supabaseKey } = getSupabaseServiceEnv();
 
-  return createClient(supabaseUrl, supabaseKey);
+  cachedServiceClient = createClient(supabaseUrl, supabaseKey);
+  return cachedServiceClient;
 }

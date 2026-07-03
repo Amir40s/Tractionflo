@@ -63,7 +63,7 @@ function getSuperAdminOpportunityTone(row: SuperAdminConnectedAccountApiRow): Op
     return "orange";
   }
 
-  return row.instagram === "Connected" ? "blue" : "purple";
+  return row.instagram === "Connected" ? "blue" : "orange";
 }
 
 function buildSuperAdminOverviewSummary(
@@ -478,11 +478,7 @@ export function SuperAdminOverviewPage({
 
 
 const toneClasses = {
-  purple: {
-    tile: "bg-[#f0edff] text-[#4b3cff]",
-    badge: "bg-[#ece8ff] text-[#4b3cff]",
-    value: "text-[#4b3cff]",
-  },
+
   blue: {
     tile: "bg-[#eef4ff] text-[#246bff]",
     badge: "bg-[#e8f0ff] text-[#246bff]",

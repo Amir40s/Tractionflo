@@ -153,6 +153,14 @@ export async function runAssistantThread({
     additional_instructions: additionalInstructions,
     response_format: responseFormat === "json_object" ? { type: "json_object" } : "auto",
     max_completion_tokens: maxTokens,
+    tools: [
+      {
+        type: "file_search",
+        file_search: {
+          max_num_results: 7, // Limit results to 3 (default is 20) to save tokens
+        },
+      },
+    ],
   });
 
   if (run.status === 'completed') {
@@ -169,7 +177,11 @@ export async function runAssistantThread({
 
     return cleanedReply;
   } else {
-    throw new Error(`Run failed with status: ${run.status}`);
+    logger.error('OpenAI Assistant run failed', {
+      status: run.status,
+      lastError: run.last_error,
+    });
+    throw new Error(`Run failed with status: ${run.status}${run.last_error ? ` - ${run.last_error.message}` : ''}`);
   }
 }
 
@@ -220,15 +232,21 @@ export async function syncVectorStoreWithStorage({
       if (shouldUpload) {
         logger.info('Uploading file to vector store during sync', { fileName: source.fileName });
         try {
-          const { data: fileData, error: downloadError } = await supabase.storage
-            .from(knowledgeBucketName)
-            .download(source.filePath);
+          let fileBuffer: Buffer;
+          if (source.mimeType === "text/x-tractionflo-manual") {
+            const manualText = (source.chunks || []).map((c) => c.text).join("\n\n");
+            fileBuffer = Buffer.from(manualText, "utf8");
+          } else {
+            const { data: fileData, error: downloadError } = await supabase.storage
+              .from(knowledgeBucketName)
+              .download(source.filePath);
 
-          if (downloadError || !fileData) {
-            throw new Error(`Download from Supabase failed: ${downloadError?.message}`);
+            if (downloadError || !fileData) {
+              throw new Error(`Download from Supabase failed: ${downloadError?.message}`);
+            }
+
+            fileBuffer = Buffer.from(await fileData.arrayBuffer());
           }
-
-          const fileBuffer = Buffer.from(await fileData.arrayBuffer());
           const uploadedFile = await uploadFileToVectorStore({
             apiKey,
             vectorStoreId,

@@ -143,9 +143,10 @@ export async function POST(request: Request) {
       throw outcomeError;
     }
 
-    const metadata = isRecord(outcome.metadata) ? outcome.metadata : {};
+    const outcomeAny = outcome as any;
+    const metadata = isRecord(outcomeAny.metadata) ? outcomeAny.metadata : {};
     const actionMetadata = isRecord(metadata.outcomeAction) ? metadata.outcomeAction : {};
-    const outcomeType = getString(outcome.outcome_type);
+    const outcomeType = getString(outcomeAny.outcome_type);
     const action = buildRevenueOutcomeAction(buildManualExecutionSnapshot(outcomeType, metadata), outcomeType);
     const providerSettings = await loadRevenueOutcomeProviderSettings({
       supabase,
@@ -155,10 +156,10 @@ export async function POST(request: Request) {
     const result = await executeRevenueOutcomeProvider({
       supabase,
       userId: user.id,
-      prospectId: getString(outcome.prospect_id),
-      decisionId: getString(outcome.decision_id),
+      prospectId: getString(outcomeAny.prospect_id),
+      decisionId: getString(outcomeAny.decision_id),
       outcomeId,
-      conversationId: getString(outcome.conversation_id),
+      conversationId: getString(outcomeAny.conversation_id),
       action: {
         ...action,
         ...actionMetadata,

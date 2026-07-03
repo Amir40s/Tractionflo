@@ -206,7 +206,7 @@ export default function CopilotPlayground() {
               <div className="flex items-center gap-2">
                 <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white">
                   {/* Instagram colorful gradient boundary ring */}
-                  <div className="absolute inset-[-2px] rounded-full border border-transparent bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 -z-10 p-[1px] scale-105" />
+                  <div className="absolute inset-[-2px] rounded-full border border-transparent bg-gradient-to-tr from-orange-400 via-pink-500 to-orange-600 -z-10 p-[1px] scale-105" />
                   <Bot className="h-4.5 w-4.5 text-black" strokeWidth={2.5} />
                 </div>
                 <div className="text-left">

@@ -134,6 +134,17 @@ type PermissionItem = {
   icon: LucideIcon;
 };
 
+type AILearnedContext = {
+  summary: string;
+  keywords: string[];
+  themes: string[];
+  contentPillars: string[];
+  offerSignals: string[];
+  contentTypes: string[];
+  postsCount: number;
+  lastSynced: string;
+};
+
 type OnboardingData = {
   isLoading: boolean;
   error: string;
@@ -183,12 +194,14 @@ type OnboardingData = {
   knowledgeScore: number;
   reviewActions: string[];
   allowedPages: string[];
+  aiLearnedContext: AILearnedContext | null;
 };
 
 type OnboardingDraft = {
   businessName?: string;
   niche?: string;
   description?: string;
+  websiteUrl?: string;
   offers?: CatalogItem[];
   businessGoal?: string;
   conversionActions?: ConversionAction[];
@@ -203,12 +216,14 @@ type ActiveModal =
   | { type: "conversion"; actionLabel: string }
   | { type: "missing"; itemLabel: string }
   | { type: "customRule" }
+  | { type: "connect" }
   | null;
 
 type PersistedOnboardingSetup = {
   businessName?: string;
   niche?: string;
   description?: string;
+  websiteUrl?: string;
   offers?: CatalogItem[];
   businessGoal?: string;
   conversionActions?: Array<Pick<ConversionAction, "label" | "detail" | "configured" | "href">>;
@@ -267,6 +282,7 @@ const emptyData: OnboardingData = {
   knowledgeScore: 0,
   reviewActions: [],
   allowedPages: [],
+  aiLearnedContext: null,
 };
 
 const discoveryRows = [
@@ -456,25 +472,25 @@ function normalizeConversations(value: unknown): RawConversation[] {
     const participant = isRecord(conversation.participant) ? conversation.participant : {};
     const messages = Array.isArray(conversation.messages)
       ? conversation.messages.filter(isRecord).map((message) => {
-          const replyTo = isRecord(message.reply_to) ? message.reply_to : {};
-          const story = isRecord(replyTo.story) ? replyTo.story : undefined;
+        const replyTo = isRecord(message.reply_to) ? message.reply_to : {};
+        const story = isRecord(replyTo.story) ? replyTo.story : undefined;
 
-          return {
-            text: getString(message.text),
-            from: message.from === "me" ? "me" : message.from === "note" ? "note" : "user",
-            attachments: Array.isArray(message.attachments) ? message.attachments : [],
-            catalogItems: Array.isArray(message.catalogItems) ? message.catalogItems : [],
-            time: getString(message.time),
-            reply_to: story
-              ? {
-                  story: {
-                    id: getString(story.id),
-                    url: getString(story.url),
-                  },
-                }
-              : undefined,
-          } satisfies RawMessage;
-        })
+        return {
+          text: getString(message.text),
+          from: message.from === "me" ? "me" : message.from === "note" ? "note" : "user",
+          attachments: Array.isArray(message.attachments) ? message.attachments : [],
+          catalogItems: Array.isArray(message.catalogItems) ? message.catalogItems : [],
+          time: getString(message.time),
+          reply_to: story
+            ? {
+              story: {
+                id: getString(story.id),
+                url: getString(story.url),
+              },
+            }
+            : undefined,
+        } satisfies RawMessage;
+      })
       : [];
 
     return {
@@ -676,7 +692,7 @@ function hasKnowledgeMatch(sources: KnowledgeSource[], pattern: RegExp) {
 }
 
 function isProviderConfigured(provider?: OutcomeProvider) {
-  return Boolean(provider?.enabled && (provider.actionUrl || provider.webhookUrl || provider.apiEndpoint || provider.outcomeType === "purchase_product"));
+  return Boolean(provider?.enabled && (provider.actionUrl || provider.webhookUrl || provider.apiEndpoint));
 }
 
 function getProvider(providers: OutcomeProvider[], outcomeType: string) {
@@ -699,8 +715,8 @@ function buildConversionActions(providers: OutcomeProvider[], catalog: CatalogIt
     },
     {
       label: "Purchase / Checkout",
-      detail: catalog.length > 0 ? `${catalog.length} catalog offer${catalog.length === 1 ? "" : "s"} detected` : "No priced catalog offer detected",
-      configured: Boolean(isProviderConfigured(purchase) && catalog.length > 0),
+      detail: purchase?.actionUrl || "No purchase link connected",
+      configured: isProviderConfigured(purchase),
       href: purchase?.actionUrl || "",
       icon: ShoppingCart,
     },
@@ -896,6 +912,11 @@ function buildOnboardingData({
   });
   const missingItems = [
     {
+      label: "Business Detailed Information",
+      detail: hasKnowledgeMatch(knowledgeSources, /faq|details|about|information|common/i) ? "Information added" : "Add detailed business info for AI context",
+      complete: hasKnowledgeMatch(knowledgeSources, /faq|details|about|information|common/i),
+    },
+    {
       label: "Pricing Information",
       detail: averageValue > 0 ? "Pricing detected" : "Add pricing details",
       complete: averageValue > 0,
@@ -969,6 +990,7 @@ function buildOnboardingData({
     knowledgeScore,
     reviewActions: buildReviewActions(conversionActions, escalationRules, permissions),
     allowedPages,
+    aiLearnedContext: null,
   };
 }
 
@@ -1182,11 +1204,27 @@ function ConnectInstagramCard({
     <Card>
       <StepTitle number={1} title="Connect Instagram" subtitle="Secure and easy connection" />
       <div className="flex items-center gap-4 border-b border-[#eef1f5] pb-5">
-        {data.connected && data.avatarUrl ? <Avatar src={data.avatarUrl} name={data.accountName || data.username} size="h-16 w-16" /> : <InstagramLogoBox />}
-        <div className="min-w-0">
-          <p className="truncate text-[15px] font-extrabold text-black">{data.username ? `@${data.username}` : data.connected ? "Connected account" : "Instagram not connected"}</p>
-          <p className="mt-1 truncate text-[13px] font-extrabold text-[#344054]">{data.accountName || "Connect your business account"}</p>
-          <p className="mt-1 text-[12px] font-semibold text-[#667085]">{data.accountType || (data.connected ? "Instagram business account" : "Required for live data")}</p>
+        {data.isLoading ? (
+          <span className="h-16 w-16 shrink-0 animate-pulse rounded-full bg-[#eef2f7]" />
+        ) : data.connected && data.avatarUrl ? (
+          <Avatar src={data.avatarUrl} name={data.accountName || data.username} size="h-16 w-16" />
+        ) : (
+          <InstagramLogoBox />
+        )}
+        <div className="min-w-0 flex-1">
+          {data.isLoading ? (
+            <>
+              <div className="h-4 w-36 animate-pulse rounded-[6px] bg-[#eef2f7]" />
+              <div className="mt-2 h-3 w-28 animate-pulse rounded-[6px] bg-[#eef2f7]" />
+              <div className="mt-2 h-3 w-20 animate-pulse rounded-[6px] bg-[#eef2f7]" />
+            </>
+          ) : (
+            <>
+              <p className="truncate text-[15px] font-extrabold text-black">{data.username ? `@${data.username}` : data.connected ? "Connected account" : "Instagram not connected"}</p>
+              <p className="mt-1 truncate text-[13px] font-extrabold text-[#344054]">{data.accountName || "Connect your business account"}</p>
+              <p className="mt-1 text-[12px] font-semibold text-[#667085]">{data.accountType || (data.connected ? "Instagram business account" : "Required for live data")}</p>
+            </>
+          )}
         </div>
       </div>
 
@@ -1199,21 +1237,26 @@ function ConnectInstagramCard({
           ["Cancel anytime", true],
         ].map(([label, done]) => (
           <div key={String(label)} className="flex items-center gap-3 text-[13px] font-extrabold text-[#344054]">
-            {done ? <IconCheck /> : <Circle size={18} className="text-[#98a2b3]" />}
+            {data.isLoading && (label === "Business account connected" || label === "Live metrics from Instagram") ? (
+              <span className="h-[18px] w-[18px] shrink-0 animate-pulse rounded-full bg-[#eef2f7]" />
+            ) : done ? (
+              <IconCheck />
+            ) : (
+              <Circle size={18} className="text-[#98a2b3]" />
+            )}
             <span>{label}</span>
           </div>
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={onConnect}
-        className="mt-8 flex h-12 w-full items-center justify-center gap-2 rounded-[8px] bg-black px-4 text-[14px] font-extrabold text-white shadow-[0_16px_34px_rgba(0,0,0,0.16)] transition hover:bg-[#1f2937]"
-      >
-        <Camera size={18} strokeWidth={2.4} />
-        {data.connected ? "Connect Another Instagram" : "Connect Instagram"}
-      </button>
-
+      {!data.connected && !data.isLoading && (
+        <button
+          onClick={onConnect}
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 px-4 py-3.5 text-[15px] font-extrabold text-white shadow-lg transition-all hover:scale-[1.02] hover:opacity-90 active:scale-95"
+        >
+          Connect Instagram
+        </button>
+      )}
       <p className="mt-7 flex items-center justify-center gap-2 text-[12px] font-semibold text-[#667085]">
         <Clock size={16} strokeWidth={2.3} />
         Takes less than 30 seconds
@@ -1227,8 +1270,8 @@ function DiscoveryCard({ data }: { data: OnboardingData }) {
     "Instagram Profile": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
     "Recent Posts & Reels": data.isLoading ? "In Progress" : data.mediaCount > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
     "Comments & DMs": data.isLoading ? "In Progress" : data.conversationCount > 0 || data.totalPostComments > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
-    "Story Replies": data.isLoading ? "In Progress" : data.storyReplyCount > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
-    "Business Knowledge": data.isLoading ? "In Progress" : data.knowledgeCount > 0 || data.catalogCount > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
+    "Story Replies": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
+    "Business Knowledge": data.isLoading ? "In Progress" : data.knowledgeCount > 0 || data.catalogCount > 0 || Boolean(data.aiLearnedContext) ? "Completed" : data.connected ? "Limited" : "Waiting",
     "Analyzing Opportunities": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
   };
 
@@ -1249,6 +1292,32 @@ function DiscoveryCard({ data }: { data: OnboardingData }) {
           );
         })}
       </div>
+
+      {data.aiLearnedContext && (
+        <div className="mt-8 rounded-[12px] border-2 border-[#ff7a00] bg-[#fff4e6] p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Sparkles size={18} className="shrink-0 text-[#ff7a00]" strokeWidth={2.3} />
+            <h3 className="text-[13px] font-extrabold text-[#ff7a00]">What Your AI Learned About Your Business</h3>
+          </div>
+
+          <p className="text-[12px] font-semibold text-[#7a3d00] leading-5">
+            {data.aiLearnedContext.summary}
+          </p>
+
+          {data.aiLearnedContext.contentPillars.length > 0 && (
+            <div>
+            
+            </div>
+          )}
+
+
+
+          <p className="text-[10px] text-[#ff7a00] opacity-70 mt-3">
+            Based on {data.aiLearnedContext.postsCount} posts • Last updated {formatLastUpdated(data.aiLearnedContext.lastSynced || "")}
+          </p>
+        </div>
+      )}
+
       <div className="mt-8 rounded-[8px] bg-[#f8fafc] px-4 py-4 text-center text-[12px] font-semibold text-[#667085]">
         {data.isLoading ? "Usually takes 30-60 seconds" : formatLastUpdated(data.lastUpdated)}
       </div>
@@ -1291,19 +1360,7 @@ function ReportCard({ data }: { data: OnboardingData }) {
         />
       </div>
 
-      <div className="mt-6 rounded-[8px] bg-[#fff8eb] p-4">
-        <div className="flex gap-3">
-          <AlertCircle size={18} className="mt-0.5 shrink-0 text-[#f79009]" strokeWidth={2.4} />
-          <p className="text-[13px] font-extrabold leading-relaxed text-[#344054]">
-            {data.potentialRevenue > 0
-              ? `You could be losing ${formatCurrency(data.potentialRevenue, data.revenueCurrency)} in potential revenue.`
-              : "Add pricing or paid-order data to calculate potential revenue."}
-            <span className="mt-3 block font-semibold">
-              Turn on your AI Sales Agent to capture qualified opportunities from these live conversations.
-            </span>
-          </p>
-        </div>
-      </div>
+
     </Card>
   );
 }
@@ -1324,13 +1381,12 @@ function OpportunitiesCard({ data }: { data: OnboardingData }) {
                   <div className="flex items-center gap-2">
                     <h3 className="truncate text-[14px] font-extrabold text-black">{opportunity.name}</h3>
                     <span
-                      className={`shrink-0 rounded-[8px] px-2 py-1 text-[10px] font-extrabold ${
-                        opportunity.badge === "Hot Lead"
-                          ? "bg-[#fff1ed] text-[#d92d20]"
-                          : opportunity.badge === "Needs Reply"
-                            ? "bg-[#fff8eb] text-[#b54708]"
-                            : "bg-[#f2f4f7] text-[#475467]"
-                      }`}
+                      className={`shrink-0 rounded-[8px] px-2 py-1 text-[10px] font-extrabold ${opportunity.badge === "Hot Lead"
+                        ? "bg-[#fff1ed] text-[#d92d20]"
+                        : opportunity.badge === "Needs Reply"
+                          ? "bg-[#fff8eb] text-[#b54708]"
+                          : "bg-[#f2f4f7] text-[#475467]"
+                        }`}
                     >
                       {opportunity.badge}
                     </span>
@@ -1344,10 +1400,6 @@ function OpportunitiesCard({ data }: { data: OnboardingData }) {
                       </li>
                     ))}
                   </ul>
-                  <p className="mt-4 text-right text-[11px] font-semibold text-[#667085]">Est. Value</p>
-                  <p className="text-right text-[18px] font-extrabold text-[#159947]">
-                    {opportunity.estimatedValue > 0 ? formatCurrency(opportunity.estimatedValue, data.revenueCurrency) : "Needs pricing"}
-                  </p>
                 </div>
               </div>
             </article>
@@ -2078,6 +2130,11 @@ function OnboardingModal({
   );
 }
 
+function buildInstagramConsentUrl(nextPath: string, expectedUsername: string) {
+  const cleanUsername = expectedUsername.trim().toLowerCase().replace(/^@/, "");
+  return `/api/auth/instagram?next=${encodeURIComponent(nextPath)}&username=${encodeURIComponent(cleanUsername)}`;
+}
+
 function FieldLabel({ children }: { children: ReactNode }) {
   return <label className="block text-[12px] font-extrabold text-[#344054]">{children}</label>;
 }
@@ -2095,11 +2152,12 @@ function BusinessEditForm({
   onSave,
 }: {
   data: OnboardingData;
-  onSave: (draft: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "offers">) => void;
+  onSave: (draft: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "websiteUrl" | "offers">) => void;
 }) {
   const [businessName, setBusinessName] = useState(data.businessName);
   const [niche, setNiche] = useState(data.niche);
   const [description, setDescription] = useState(data.description);
+  const [websiteUrl, setWebsiteUrl] = useState((data as OnboardingData & { websiteUrl?: string }).websiteUrl ?? "");
   const [offersText, setOffersText] = useState(data.offers.map((offer) => offer.title).join("\n"));
 
   return (
@@ -2125,7 +2183,7 @@ function BusinessEditForm({
           };
         });
 
-        onSave({ businessName: businessName.trim(), niche: niche.trim(), description: description.trim(), offers });
+        onSave({ businessName: businessName.trim(), niche: niche.trim(), description: description.trim(), websiteUrl: websiteUrl.trim(), offers });
       }}
     >
       <div>
@@ -2141,6 +2199,17 @@ function BusinessEditForm({
         <textarea className={textAreaClass()} value={description} onChange={(event) => setDescription(event.target.value)} />
       </div>
       <div>
+        <FieldLabel>Website / Purchase Link</FieldLabel>
+        <input
+          className={textInputClass()}
+          placeholder="https://yoursite.com"
+          type="url"
+          value={websiteUrl}
+          onChange={(event) => setWebsiteUrl(event.target.value)}
+        />
+        <p className="mt-1 text-[11px] font-semibold text-[#667085]">The AI uses this to answer \"what&apos;s your website?\" and send purchase links.</p>
+      </div>
+      <div>
         <FieldLabel>Offers, one per line</FieldLabel>
         <textarea className={textAreaClass()} value={offersText} onChange={(event) => setOffersText(event.target.value)} />
       </div>
@@ -2153,12 +2222,14 @@ function BusinessEditForm({
 
 function ConversionActionForm({
   action,
+  offers,
   onSave,
 }: {
   action: ConversionAction;
+  offers: CatalogItem[];
   onSave: (url: string) => void;
 }) {
-  const [url, setUrl] = useState(action.href || (action.configured ? action.detail : ""));
+  const [url, setUrl] = useState(action.href || (action.configured && action.label !== "Purchase / Checkout" ? action.detail : ""));
 
   return (
     <form
@@ -2168,6 +2239,19 @@ function ConversionActionForm({
         onSave(url.trim());
       }}
     >
+      {action.label === "Purchase / Checkout" && offers.length > 0 && (
+        <div className="mb-4 space-y-2 rounded-[8px] border border-[#e5e8f0] bg-[#f8f9fc] p-3">
+          <p className="text-[12px] font-bold text-black">Detected Catalog Products:</p>
+          <div className="max-h-[150px] overflow-y-auto space-y-2 pr-1">
+            {offers.map((offer, idx) => (
+              <div key={idx} className="flex items-center justify-between text-[11px] font-semibold text-[#46506a]">
+                <span className="truncate max-w-[200px]" title={offer.title}>{offer.title}</span>
+                <span className="text-[#3044ff]">{offer.priceText || "Priced"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div>
         <FieldLabel>{action.label} link</FieldLabel>
         <input className={textInputClass()} placeholder="https://..." value={url} onChange={(event) => setUrl(event.target.value)} />
@@ -2190,23 +2274,100 @@ function MissingInfoForm({
   onSave: (detail: string) => void;
 }) {
   const [detail, setDetail] = useState(item.complete ? item.detail : "");
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("category", "Business Information");
+      formData.append("assignment", "auto");
+
+      const response = await fetch("/api/knowledge/sources", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to upload file");
+      }
+
+      onSave(`Uploaded file: ${file.name}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to upload file");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
-    <form
-      className="space-y-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSave(detail.trim() || "Added in onboarding");
-      }}
-    >
-      <div>
-        <FieldLabel>{item.label}</FieldLabel>
-        <textarea className={textAreaClass()} value={detail} onChange={(event) => setDetail(event.target.value)} />
+    <div className="space-y-4">
+      {error && (
+        <div className="rounded-[8px] bg-red-50 p-3 text-[12px] font-semibold text-red-600">
+          {error}
+        </div>
+      )}
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave(detail.trim() || "Added in onboarding");
+        }}
+      >
+        <div>
+          <FieldLabel>{item.label}</FieldLabel>
+          <textarea className={textAreaClass()} placeholder="Type details here..." value={detail} onChange={(event) => setDetail(event.target.value)} disabled={uploading} />
+        </div>
+        <button type="submit" disabled={uploading} className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white disabled:opacity-50">
+          Save Information
+        </button>
+      </form>
+
+      <div className="relative flex py-2 items-center">
+        <div className="flex-grow border-t border-[#e8ebf2]"></div>
+        <span className="flex-shrink mx-4 text-[#667085] text-[12px] font-extrabold">OR</span>
+        <div className="flex-grow border-t border-[#e8ebf2]"></div>
       </div>
-      <button type="submit" className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white">
-        Save Information
-      </button>
-    </form>
+
+      <div className="rounded-[8px] border border-dashed border-[#d0d5dd] p-4 text-center">
+        <input
+          type="file"
+          id="onboarding-file-upload"
+          accept=".pdf,.txt"
+          onChange={handleFileUpload}
+          disabled={uploading}
+          className="hidden"
+        />
+        <label
+          htmlFor="onboarding-file-upload"
+          className="cursor-pointer flex flex-col items-center gap-2"
+        >
+          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f8fafc] text-black">
+            {uploading ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-black border-t-transparent" />
+            ) : (
+              <FileText size={20} />
+            )}
+          </span>
+          <div>
+            <span className="text-[13px] font-extrabold text-[#175cd3]">
+              {uploading ? "Uploading file..." : "Click to upload PDF or TXT"}
+            </span>
+            <p className="mt-1 text-[11px] font-semibold text-[#667085]">
+              Max file size 50MB
+            </p>
+          </div>
+        </label>
+      </div>
+    </div>
   );
 }
 
@@ -2242,6 +2403,7 @@ export default function OnboardingPage() {
   const [data, setData] = useState<OnboardingData>(emptyData);
   const [draft, setDraft] = useState<OnboardingDraft>({});
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
+  const [connectUsername, setConnectUsername] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
 
   const loadOnboardingData = useCallback(async () => {
@@ -2258,6 +2420,7 @@ export default function OnboardingPage() {
         outcomeProvidersResult,
         knowledgeResult,
         onboardingSetupResult,
+        businessContextResult,
       ] = await Promise.allSettled([
         fetchJson("/api/auth/instagram/status"),
         fetchJson(`/api/instagram/content?${scanParams.toString()}`),
@@ -2269,6 +2432,7 @@ export default function OnboardingPage() {
         fetchJson("/api/revenue/outcome-providers"),
         fetchJson("/api/knowledge/sources"),
         fetchJson("/api/auth/onboarding"),
+        fetchJson("/api/instagram/profile/business-context/view"),
       ]);
 
       const nextData = buildOnboardingData({
@@ -2282,11 +2446,20 @@ export default function OnboardingPage() {
         outcomeProvidersPayload: outcomeProvidersResult.status === "fulfilled" ? outcomeProvidersResult.value : {},
         knowledgePayload: knowledgeResult.status === "fulfilled" ? knowledgeResult.value : {},
       });
+      
+      const businessContextValue = businessContextResult.status === "fulfilled"
+        ? (businessContextResult.value as { context?: AILearnedContext } | undefined)
+        : undefined;
+      const businessContextData = businessContextValue?.context ?? null;
+
       const persistedSetup = getPersistedOnboardingSetup(
         onboardingSetupResult.status === "fulfilled" ? onboardingSetupResult.value : {}
       );
 
-      setData(nextData);
+      setData({
+        ...nextData,
+        aiLearnedContext: businessContextData,
+      });
       setDraft((current) => ({
         ...buildDraftFromPersistedSetup(persistedSetup, nextData),
         ...current,
@@ -2331,6 +2504,23 @@ export default function OnboardingPage() {
   }, [data.connected, data.conversationCount]);
   const visibleData = useMemo(() => {
     const offers = draft.offers ?? data.offers;
+    const conversionActions = draft.conversionActions ?? data.conversionActions;
+    const escalationRules = draft.escalationRules ?? data.escalationRules;
+    const missingItems = draft.missingItems ?? data.missingItems;
+    const configuredActions = conversionActions.filter((action) => action.configured).length;
+    const enabledRules = escalationRules.filter((rule) => rule.enabled).length;
+
+    const completedMissingCount = missingItems.filter((item) => item.complete).length;
+    const knowledgeCount = data.knowledgeCount + completedMissingCount;
+
+    const knowledgeScore = getKnowledgeScore({
+      connected: data.connected,
+      conversationCount: data.conversationCount,
+      catalogCount: offers.length,
+      configuredActions,
+      knowledgeCount,
+      enabledRules,
+    });
 
     return {
       ...data,
@@ -2338,11 +2528,12 @@ export default function OnboardingPage() {
       offers,
       catalogCount: draft.offers ? offers.length : data.catalogCount,
       businessGoal: draft.businessGoal ?? data.businessGoal,
-      conversionActions: draft.conversionActions ?? data.conversionActions,
-      escalationRules: draft.escalationRules ?? data.escalationRules,
+      conversionActions,
+      escalationRules,
       permissions: draft.permissions ?? data.permissions,
-      missingItems: draft.missingItems ?? data.missingItems,
+      missingItems,
       behavior: draft.behavior ?? data.behavior,
+      knowledgeScore,
     } satisfies OnboardingData;
   }, [data, draft]);
 
@@ -2361,8 +2552,16 @@ export default function OnboardingPage() {
     router.push("/dashboard");
   }
 
-  function connectInstagram() {
-    window.location.href = "/api/auth/instagram?next=/onboarding";
+  function connectInstagram(expectedUsername?: string) {
+    window.location.href = buildInstagramConsentUrl("/onboarding", expectedUsername || connectUsername);
+  }
+
+  function openConnectModal() {
+    setActiveModal({ type: "connect" });
+  }
+
+  function closeConnectModal() {
+    setActiveModal(null);
   }
 
   function updateDraft(partial: OnboardingDraft) {
@@ -2372,7 +2571,7 @@ export default function OnboardingPage() {
     });
   }
 
-  function updateBusinessDraft(partial: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "offers">) {
+  function updateBusinessDraft(partial: Pick<OnboardingDraft, "businessName" | "niche" | "description" | "websiteUrl" | "offers">) {
     updateDraft(partial);
     setActiveModal(null);
   }
@@ -2385,11 +2584,11 @@ export default function OnboardingPage() {
     const actions = visibleData.conversionActions.map((action) =>
       action.label === actionLabel
         ? {
-            ...action,
-            configured: Boolean(url),
-            href: url,
-            detail: url || action.detail,
-          }
+          ...action,
+          configured: Boolean(url),
+          href: url,
+          detail: url || action.detail,
+        }
         : action
     );
 
@@ -2431,10 +2630,10 @@ export default function OnboardingPage() {
       missingItems: visibleData.missingItems.map((item) =>
         item.label === itemLabel
           ? {
-              ...item,
-              complete: true,
-              detail: detail || "Added in onboarding",
-            }
+            ...item,
+            complete: true,
+            detail: detail || "Added in onboarding",
+          }
           : item
       ),
     });
@@ -2466,7 +2665,7 @@ export default function OnboardingPage() {
       phase: "Phase 1: Discovery",
       label: "Connect Instagram",
       width: "max-w-[430px]",
-      content: <ConnectInstagramCard data={visibleData} onConnect={connectInstagram} />,
+      content: <ConnectInstagramCard data={visibleData} onConnect={openConnectModal} />,
     },
     {
       id: "discovery",
@@ -2604,9 +2803,8 @@ export default function OnboardingPage() {
               {currentScreen.phase}
             </span>
             <div className="flex flex-wrap gap-3 text-[11px] font-extrabold text-black">
-              <span>100% free</span>
-              <span>No commitment</span>
-              <span>{phaseOneSummary}</span>
+
+
             </div>
           </div>
 
@@ -2640,9 +2838,8 @@ export default function OnboardingPage() {
 
                       setStepIndex(index);
                     }}
-                    className={`h-2.5 rounded-full transition ${
-                      index === stepIndex ? "w-9 bg-black" : index < stepIndex ? "w-2.5 bg-[#667085]" : "w-2.5 bg-[#d0d5dd]"
-                    } ${index > 0 && !visibleData.connected ? "cursor-not-allowed opacity-40" : ""}`}
+                    className={`h-2.5 rounded-full transition ${index === stepIndex ? "w-9 bg-black" : index < stepIndex ? "w-2.5 bg-[#667085]" : "w-2.5 bg-[#d0d5dd]"
+                      } ${index > 0 && !visibleData.connected ? "cursor-not-allowed opacity-40" : ""}`}
                   />
                 ))}
               </div>
@@ -2683,7 +2880,7 @@ export default function OnboardingPage() {
         ) : null}
         {activeConversionAction ? (
           <OnboardingModal title={`Update ${activeConversionAction.label}`} onClose={() => setActiveModal(null)}>
-            <ConversionActionForm action={activeConversionAction} onSave={(url) => editConversionAction(activeConversionAction.label, url)} />
+            <ConversionActionForm action={activeConversionAction} offers={visibleData.offers} onSave={(url) => editConversionAction(activeConversionAction.label, url)} />
           </OnboardingModal>
         ) : null}
         {activeMissingItem ? (
@@ -2694,6 +2891,50 @@ export default function OnboardingPage() {
         {activeModal?.type === "customRule" ? (
           <OnboardingModal title="Add Custom Escalation Rule" onClose={() => setActiveModal(null)}>
             <CustomRuleForm onSave={addCustomRule} />
+          </OnboardingModal>
+        ) : null}
+        {activeModal?.type === "connect" ? (
+          <OnboardingModal title="Connect Instagram" onClose={closeConnectModal}>
+            <form
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                connectInstagram(connectUsername);
+              }}
+            >
+              <div>
+                <FieldLabel>Instagram username</FieldLabel>
+                <input
+                  autoFocus
+                  value={connectUsername}
+                  onChange={(event) => setConnectUsername(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      connectInstagram(connectUsername);
+                    }
+                  }}
+                  placeholder="@username"
+                  className={textInputClass()}
+                />
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeConnectModal}
+                  className="rounded-[8px] border border-[#d0d5dd] px-4 py-2 text-[12px] font-extrabold text-black"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!connectUsername.trim()}
+                  className="rounded-[8px] bg-black px-4 py-2 text-[12px] font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </form>
           </OnboardingModal>
         ) : null}
       </div>

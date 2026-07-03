@@ -341,7 +341,7 @@ async function hasAutomatedReplyAfterInbound({
     return false;
   }
 
-  return (data || []).some((row) => {
+  return ((data || []) as any[]).some((row) => {
     const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : {};
     const source = typeof metadata.source === 'string' ? metadata.source : '';
 
@@ -418,6 +418,7 @@ async function claimWebhookAutomationSend({
   recipientId,
   text,
   idempotencyKey,
+  knowledgeConfidence,
 }: {
   supabase: SupabaseServiceClient;
   userId: string;
@@ -426,13 +427,14 @@ async function claimWebhookAutomationSend({
   recipientId: string;
   text: string;
   idempotencyKey: string;
+  knowledgeConfidence?: number;
 }) {
   if (await hasWebhookAutomationSendForKey({ supabase, userId, conversationId, idempotencyKey })) {
     return { claimed: false, lockMid: '' };
   }
 
   const lockMid = getWebhookAutomationLockMid(idempotencyKey);
-  const { error } = await supabase.from('messages').insert({
+  const { error } = await (supabase.from('messages') as any).insert({
     mid: lockMid,
     user_id: userId,
     conversation_id: conversationId,
@@ -449,6 +451,7 @@ async function claimWebhookAutomationSend({
       source: 'instagram_webhook_ai_lock',
       idempotencyKey,
       idempotencyStatus: 'sending',
+      knowledgeConfidence,
     },
   });
 
@@ -487,8 +490,7 @@ async function completeWebhookAutomationSendLock({
     return false;
   }
 
-  const { error } = await supabase
-    .from('messages')
+  const { error } = await (supabase.from('messages') as any)
     .update({
       mid: sentMid || lockMid,
       text,
@@ -842,7 +844,7 @@ async function generateWebhookAiReply({
     .order('timestamp', { ascending: false })
     .limit(16);
 
-  const parsedMessages = (dbMessages || [])
+  const parsedMessages = ((dbMessages || []) as any[])
     .reverse()
     .map((msg) => ({
       from: msg.direction === 'outbound' ? 'me' as const : 'user' as const,
@@ -878,6 +880,7 @@ async function generateWebhookAiReply({
     ros: result.ros,
     handoff: result.handoff,
     escalation: result.escalation,
+    knowledgeConfidence: result.knowledgeConfidence,
   };
 }
 
@@ -929,7 +932,7 @@ async function getRecentWebhookConversationLines({
     return '';
   }
 
-  return (data || [])
+  return ((data || []) as any[])
     .reverse()
     .map((row) => {
       const direction = typeof row.direction === 'string' ? row.direction : '';
@@ -972,7 +975,7 @@ async function hasRecentCatalogDeclineForSender({
     return false;
   }
 
-  return (data || []).some((row) => isCatalogDeclineRequest(String(row.text || '')));
+  return ((data || []) as any[]).some((row) => isCatalogDeclineRequest(String(row.text || '')));
 }
 
 async function recoverPendingCommerceOrderFromCatalog({
@@ -1126,7 +1129,6 @@ async function processInstagramAutomations(
         continue;
       }
 
-      // Fetch user to check settings and metadata
       const { data: { user }, error: userError } = await supabase.auth.admin.getUserById(account.user_id);
       if (userError || !user) {
         logger.error("processInstagramAutomations: Failed to load user metadata by user_id", { userId: account.user_id, error: userError });
@@ -1407,11 +1409,19 @@ async function processInstagramAutomations(
       const escalation = detectConversationEscalation([{ from: 'user', text: event.text }], {
         rules: metadata[escalationRulesMetadataKey],
       });
-      const pauseForEscalation = shouldPauseAiForEscalation(escalation);
+      
+      // If payment is requested but Stripe is not configured, force escalation to human
+      const hasStripeConfigured = Boolean(process.env.STRIPE_SECRET_KEY?.trim() && process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim());
+      const isPaymentRequestEscalation = escalation?.intent === 'payment_request';
+      const shouldForcePauseForUnconfiguredPayment = isPaymentRequestEscalation && !hasStripeConfigured;
+      
+      const pauseForEscalation = shouldPauseAiForEscalation(escalation) || shouldForcePauseForUnconfiguredPayment;
 
       if (escalation && pauseForEscalation) {
         const notificationTitle = `${escalation.label} detected`;
-        const notificationBody = escalation.summary;
+        const notificationBody = shouldForcePauseForUnconfiguredPayment 
+          ? "Customer requested payment but Stripe is not configured. Team member needed to process manually."
+          : escalation.summary;
         const notificationMetadata = {
           source: 'instagram-webhook',
           userId: user.id,
@@ -1421,6 +1431,7 @@ async function processInstagramAutomations(
           category: escalation.intent,
           urgency: escalation.urgency,
           urgent: escalation.urgency === 'High',
+          stripeMissing: shouldForcePauseForUnconfiguredPayment,
         };
         const notificationId = `escalation:${user.id}:${event.senderId}:${escalation.intent}`;
 
@@ -1441,6 +1452,7 @@ async function processInstagramAutomations(
           userId: user.id,
           intent: escalation.intent,
           senderId: event.senderId,
+          stripeMissing: shouldForcePauseForUnconfiguredPayment,
         });
         continue;
       }
@@ -1469,6 +1481,7 @@ async function processInstagramAutomations(
       let catalogOffer: InstagramCatalogOffer | null = null;
       let catalogOffers: InstagramCatalogOffer[] = [];
       let catalogCheckoutReady = false;
+      let knowledgeConfidence = 0;
       let aiResult: any = null;
       if (isFirstInboundDm && welcome.enabled) {
         logger.info("processInstagramAutomations: Generating Welcome Message.");
@@ -1490,6 +1503,7 @@ async function processInstagramAutomations(
         catalogOffer = aiResult.catalogOffer;
         catalogOffers = aiResult.catalogOffers;
         catalogCheckoutReady = aiResult.catalogCheckoutReady;
+        knowledgeConfidence = aiResult.knowledgeConfidence || 0;
 
         // Human handoff: AI detected it can't answer — notify human and skip auto-send
         if (aiResult.handoff) {
@@ -1559,6 +1573,7 @@ async function processInstagramAutomations(
         recipientId: event.senderId,
         text: reply.trim(),
         idempotencyKey,
+        knowledgeConfidence,
       });
 
       if (!sendClaim.claimed) {
@@ -1651,6 +1666,7 @@ async function processInstagramAutomations(
         catalogCarouselCount: catalogCarouselCards.length,
         orderId,
         idempotencyKey,
+        knowledgeConfidence,
       };
       const lockMidToComplete = activeWebhookAutomationLockMid;
       const lockCompleted = await completeWebhookAutomationSendLock({
@@ -1904,14 +1920,18 @@ export async function POST(request: Request) {
             if (story) {
               dbText = `__STORY_REPLY__:${JSON.stringify(story)}__TEXT__:${displayText}`;
             }
-            const connectedAccount = await getFreshInstagramAccountByIgUserId(supabase, recipientId).catch((accountError) => {
-              logger.warn('Could not resolve connected Instagram account while storing inbound webhook message.', {
+            const isOutbound = senderId === entry.id || msg.message?.is_echo;
+            const conversationId = isOutbound ? recipientId : senderId;
+            const direction = (isOutbound ? 'outbound' : 'inbound') as 'inbound' | 'outbound';
+            
+            const connectedAccount = await getFreshInstagramAccountByIgUserId(supabase, isOutbound ? senderId : recipientId).catch((accountError) => {
+              logger.warn('Could not resolve connected Instagram account while storing webhook message.', {
                 error: accountError,
-                recipientId,
+                igUserId: isOutbound ? senderId : recipientId,
               });
               return null;
             });
-            const participant = connectedAccount?.access_token
+            const participant = connectedAccount?.access_token && !isOutbound
               ? await fetchParticipantProfile(connectedAccount.access_token, senderId).catch((participantError) => {
                   logger.warn('Could not resolve Instagram participant while storing inbound webhook message.', {
                     error: participantError,
@@ -1924,23 +1944,26 @@ export async function POST(request: Request) {
             messagesToInsert.push({
               mid,
               userId: connectedAccount?.user_id || null,
-              conversationId: senderId,
+              conversationId,
               senderId,
               recipientId,
               text: dbText,
               timestamp: msg.timestamp,
               rawEvent: msg as Record<string, unknown>,
               participant,
+              direction,
             });
 
-            automationEvents.push({
-              mid,
-              senderId,
-              recipientId,
-              text: automationText,
-              timestamp: msg.timestamp,
-              previousSenderMessageCount,
-            });
+            if (!isOutbound) {
+              automationEvents.push({
+                mid,
+                senderId,
+                recipientId,
+                text: automationText,
+                timestamp: msg.timestamp,
+                previousSenderMessageCount,
+              });
+            }
           }
         }
       }
@@ -1956,10 +1979,10 @@ export async function POST(request: Request) {
               conversationId: msgToInsert.conversationId,
               senderId: msgToInsert.senderId,
               recipientId: msgToInsert.recipientId,
-              direction: 'inbound',
+              direction: msgToInsert.direction,
               text: msgToInsert.text,
               timestamp: msgToInsert.timestamp,
-              rawEvent: msgToInsert.rawEvent,
+              rawEvent: msgToInsert.rawEvent, 
               metadata: {
                 source: 'meta-webhook',
                 participant: msgToInsert.participant || undefined,

@@ -7,7 +7,7 @@ import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type SupportTone = "green" | "amber" | "red" | "purple";
+type SupportTone = "green" | "amber" | "red";
 
 type AnyRow = Record<string, unknown>;
 
@@ -249,10 +249,10 @@ function getPriorityTone(priority: string): SupportTone {
     return "amber";
   }
 
-  return "purple";
+  return "amber";
 }
 
-function getStatusTone(status: string, fallback: SupportTone = "purple"): SupportTone {
+function getStatusTone(status: string, fallback: SupportTone = "amber"): SupportTone {
   const normalizedStatus = status.toLowerCase();
 
   if (normalizedStatus.includes("resolved") || normalizedStatus.includes("closed") || normalizedStatus.includes("handled")) {

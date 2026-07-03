@@ -7,7 +7,7 @@ import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type PlatformTone = "green" | "amber" | "red" | "purple";
+type PlatformTone = "green" | "amber" | "red";
 
 type ServiceRow = {
   name: string;

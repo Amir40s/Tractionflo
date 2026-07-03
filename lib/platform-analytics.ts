@@ -36,7 +36,7 @@ export async function recordPlatformAnalyticsEvent({
   metadata = {},
   occurredAt,
 }: PlatformAnalyticsEventInput) {
-  const { error } = await supabase.from("platform_analytics_events").insert({
+  const { error } = await (supabase.from("platform_analytics_events") as any).insert({
     user_id: userId || null,
     event_name: eventName,
     source,
