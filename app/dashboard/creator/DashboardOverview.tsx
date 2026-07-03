@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import {
   ArrowRight,
   ChevronDown,
@@ -57,6 +57,53 @@ const dashboardChartRangeOptions = [
 ] satisfies { value: DashboardChartRange; label: string; points: number }[];
 
 const panelClass = "rounded-[8px] border border-[#eceff5] bg-white shadow-[0_18px_55px_rgba(20,28,53,0.035)]";
+
+const dashboardTabUrlValues: Record<DashboardTab, string> = {
+  dashboard: "/dashboard",
+  inbox: "/conversations",
+  "instagram-content": "/instagram-content",
+  opportunities: "/opportunities",
+  ros: "/ros",
+  audience: "/audience",
+  knowledge: "/knowledge-base",
+  escalations: "/escalations",
+  analytics: "/analytics",
+  settings: "/settings",
+};
+
+function openDashboardTab(
+  tab: DashboardTab,
+  onNavigate?: (tab: DashboardTab) => void,
+  event?: MouseEvent<HTMLAnchorElement | HTMLButtonElement>
+) {
+  event?.preventDefault();
+  onNavigate?.(tab);
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const targetPath = dashboardTabUrlValues[tab];
+
+  if (!targetPath) {
+    return;
+  }
+
+  if (window.location.pathname === targetPath) {
+    return;
+  }
+
+  window.history.pushState(null, "", targetPath);
+  window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+}
+
+function getDashboardTabHref(tab: DashboardTab) {
+  return dashboardTabUrlValues[tab] || "/dashboard";
+}
+
+function isOpportunityLabel(label: string) {
+  return label.toLowerCase().includes("opportunit");
+}
 
 const toneClasses: Record<ToneName, { soft: string; text: string; bar: string; dot: string }> = {
   orange: {
@@ -470,7 +517,7 @@ function buildIntentSnapshot(summary: CreatorLiveSummary) {
       const text = message.text || "";
       const hasUrl = /https?:\/\/[^\s]+/.test(text);
       const hasOfferKeyword = /\b(proposal|pricing|package|plan|payment link|checkout|invoice)\b/i.test(text);
-      const hasCatalog = Boolean((message as any).catalogItems && (message as any).catalogItems.length > 0);
+      const hasCatalog = Boolean(message.catalogItems && message.catalogItems.length > 0);
       return hasUrl || hasOfferKeyword || hasCatalog;
     });
   }).length;
@@ -480,7 +527,7 @@ function buildIntentSnapshot(summary: CreatorLiveSummary) {
   let buyingSignalCount = 0;
   summary.conversations.forEach((conversation) => {
     const latestText = getCreatorLatestInboundText(conversation);
-    const text = latestText || getCreatorConversationText(conversation);
+    const text = getCreatorConversationText(conversation) || latestText;
     
     const inboundCount = conversation.messages.filter((message) => message.from === "user").length;
     const buyerHits = countCreatorKeywordHits(text, creatorBuyerKeywords);
@@ -496,6 +543,15 @@ function buildIntentSnapshot(summary: CreatorLiveSummary) {
     if (hasBudget) buyingSignalCount++;
     if (hasTimeline) buyingSignalCount++;
   });
+  const buyingSignalCardCount = summary.opportunityCards.filter((card) => {
+    const signalText = `${card.badge} ${card.subtitle} ${card.intent || ""} ${(card.signals || []).join(" ")}`.toLowerCase();
+
+    return /\b(paid|checkout|order|buying|booking|payment|budget|pricing|urgent|bulk)\b/.test(signalText);
+  }).length;
+  const buyingSignalOrderCount = summary.orders.filter(
+    (order) => order.status === "confirmed" || order.status === "paid" || order.paymentStatus === "paid" || order.paymentStatus === "pending"
+  ).length;
+  buyingSignalCount = Math.max(buyingSignalCount, buyingSignalCardCount, buyingSignalOrderCount);
 
   return {
     activeContacts,
@@ -646,7 +702,7 @@ function OpportunityList({
               <button
                 key={card.id}
                 type="button"
-                onClick={() => onNavigate?.("opportunities")}
+                onClick={() => openDashboardTab("opportunities", onNavigate)}
                 className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[8px] p-2 text-left transition hover:bg-[#fff7fb]"
               >
                 <span className={`h-2 w-2 rounded-full ${toneClasses[tone].dot}`} />
@@ -726,7 +782,7 @@ function ActivityList({
               <button
                 key={`${item.title}-${index}`}
                 type="button"
-                onClick={() => onNavigate?.(item.title.toLowerCase().includes("lead") ? "opportunities" : "inbox")}
+                onClick={() => openDashboardTab(item.title.toLowerCase().includes("lead") ? "opportunities" : "inbox", onNavigate)}
                 className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3 text-left"
               >
                 <span className={`flex h-9 w-9 items-center justify-center rounded-full ${item.tone}`}>
@@ -802,7 +858,7 @@ function PipelineOverview({
   ];
 
   const getTabForPipeline = (label: string): DashboardTab => {
-    if (label.toLowerCase().includes("opportunity")) return "opportunities";
+    if (isOpportunityLabel(label)) return "opportunities";
     if (label.toLowerCase().includes("offer")) return "ros";
     if (label.toLowerCase().includes("payment") || label.toLowerCase().includes("pending")) return "ros";
     if (label.toLowerCase().includes("buyer")) return "opportunities";
@@ -822,18 +878,20 @@ function PipelineOverview({
             <div key={step.label} className="relative min-w-0">
               <button
                 type="button"
-                onClick={() => onNavigate?.(getTabForPipeline(step.label))}
-                className="flex h-full flex-col items-center rounded-[8px] px-2 py-3 text-center w-full cursor-pointer hover:bg-[#f0f1f6] hover:shadow-sm active:scale-[0.97] transition focus:outline-none"
+                onClick={() => openDashboardTab(getTabForPipeline(step.label), onNavigate)}
+                className="group flex h-full min-h-[126px] w-full cursor-pointer flex-col items-center justify-start overflow-hidden rounded-[8px] px-2 py-3 text-center transition hover:bg-[#f0f1f6] hover:shadow-sm active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3044ff]/25"
               >
                 <IconBubble icon={Icon} tone={step.tone} />
                 <p className="mt-3 text-[24px] font-extrabold leading-none text-black">{formatCreatorInteger(step.value)}</p>
-                <p className="mt-2 text-[11px] font-bold leading-snug text-[#111827]">{step.label}</p>
+                <p className="mt-2 w-full max-w-[96px] whitespace-normal break-words text-[11px] font-bold leading-tight text-[#111827]">
+                  {step.label}
+                </p>
               </button>
               {index < steps.length - 1 ? (
                 <ArrowRight
                   size={19}
                   strokeWidth={2.2}
-                  className="absolute right-[-15px] top-1/2 hidden -translate-y-1/2 text-black xl:block"
+                  className="pointer-events-none absolute right-[-15px] top-1/2 hidden -translate-y-1/2 text-black xl:block"
                 />
               ) : null}
             </div>
@@ -1044,7 +1102,7 @@ function RevenueHero({
     if (label.toLowerCase().includes("buy")) return "opportunities";
     if (label.toLowerCase().includes("follow")) return "inbox" as DashboardTab;
     if (label.toLowerCase().includes("payment")) return "ros";
-    if (label.toLowerCase().includes("opportunity")) return "opportunities";
+    if (isOpportunityLabel(label)) return "opportunities";
     return "dashboard";
   };
 
@@ -1054,7 +1112,7 @@ function RevenueHero({
       <div className="relative grid gap-6 lg:grid-cols-[minmax(240px,0.78fr)_minmax(0,1.22fr)] lg:items-center">
         <button
           type="button"
-          onClick={() => onNavigate?.("ros")}
+          onClick={() => openDashboardTab("ros", onNavigate)}
           className="text-left w-full hover:opacity-90 transition focus:outline-none"
         >
           <h2 className="text-[15px] font-extrabold text-white">{revenueTitle}</h2>
@@ -1073,7 +1131,7 @@ function RevenueHero({
               icon={item.icon}
               item={item}
               isLoading={isLoading}
-              onClick={() => onNavigate?.(getTabForMetric(item.label))}
+              onClick={() => openDashboardTab(getTabForMetric(item.label), onNavigate)}
             />
           ))}
         </div>
@@ -1256,6 +1314,7 @@ export function DashboardOverview({
           <RevenueHero
             heroStats={heroStats}
             isLoading={isLoading}
+            onNavigate={onNavigate}
             revenueTotal={revenueTotal}
             summary={summary}
           />
@@ -1270,24 +1329,27 @@ export function DashboardOverview({
                   if (label.toLowerCase().includes("revenue")) return "ros";
                   if (label.toLowerCase().includes("buyer")) return "opportunities";
                   if (label.toLowerCase().includes("offer")) return "ros";
-                  if (label.toLowerCase().includes("opportunity")) return "opportunities";
+                  if (isOpportunityLabel(label)) return "opportunities";
                   if (label.toLowerCase().includes("contact") || label.toLowerCase().includes("conversation")) return "inbox" as DashboardTab;
                   if (label.toLowerCase().includes("signal")) return "opportunities";
                   return "dashboard";
                 };
+                const targetTab = getTabForLiveSummary(item.label);
 
                 return (
-                  <button
+                  <a
                     key={item.label}
-                    type="button"
-                    onClick={() => onNavigate?.(getTabForLiveSummary(item.label))}
-                    className="min-w-0 text-left border-[#edf0f6] py-2 sm:border-l sm:pl-5 first:sm:border-l-0 first:sm:pl-0 hover:bg-[#fafbfe] transition focus:outline-none rounded-[6px]"
+                    href={getDashboardTabHref(targetTab)}
+                    onClick={(event) => openDashboardTab(targetTab, onNavigate, event)}
+                    aria-label={`Open ${item.label}`}
+                    title={`Open ${item.label}`}
+                    className="block min-w-0 cursor-pointer rounded-[6px] border-[#edf0f6] py-2 text-left no-underline transition hover:bg-[#fafbfe] active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3044ff]/20 sm:border-l sm:pl-5 first:sm:border-l-0 first:sm:pl-0"
                   >
                     <IconBubble icon={item.icon} tone={item.tone} />
                     <p className="mt-5 truncate text-[27px] font-extrabold leading-none text-black">{item.value}</p>
                     <p className="mt-3 text-[12px] font-bold text-[#30384d]">{item.label}</p>
                     <TrendText>{item.trend}</TrendText>
-                  </button>
+                  </a>
                 );
               })}
             </div>

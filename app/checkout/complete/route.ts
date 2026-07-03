@@ -3,6 +3,7 @@ import { sendCommerceOrderPaymentThankYou } from "@/lib/commerce-payment-notific
 import {
   type CommerceOrder,
   getCommerceOrderById,
+  getCommerceStripeSecretKeyForUser,
   markCommerceOrderPaid,
 } from "@/lib/commerce-orders";
 import { getFreshInstagramAccount, getFreshInstagramAccountByIgUserId } from "@/lib/instagram-token";
@@ -24,10 +25,6 @@ type StripeCheckoutSession = {
     message?: string;
   };
 };
-
-function getStripeSecretKey() {
-  return process.env.STRIPE_SECRET_KEY?.trim() || "";
-}
 
 function getReturnTo(requestUrl: URL) {
   if (requestUrl.searchParams.get("return_to") === "instagram") {
@@ -181,11 +178,11 @@ function getPaymentIntentId(session: StripeCheckoutSession) {
   return "";
 }
 
-async function retrieveStripeCheckoutSession(sessionId: string) {
-  const stripeSecretKey = getStripeSecretKey();
+async function retrieveStripeCheckoutSession(sessionId: string, stripeSecretKey: string) {
+  const resolvedStripeSecretKey = stripeSecretKey.trim();
 
-  if (!stripeSecretKey) {
-    throw new Error("Stripe checkout is not configured.");
+  if (!resolvedStripeSecretKey) {
+    throw new Error("Stripe checkout is not configured for this account.");
   }
 
   const sessionUrl = new URL(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`);
@@ -193,7 +190,7 @@ async function retrieveStripeCheckoutSession(sessionId: string) {
 
   const response = await fetch(sessionUrl.toString(), {
     headers: {
-      Authorization: `Bearer ${stripeSecretKey}`,
+      Authorization: `Bearer ${resolvedStripeSecretKey}`,
     },
     cache: "no-store",
   });
@@ -229,7 +226,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(await getCompletionRedirect(supabase, requestUrl, order), 303);
     }
 
-    const session = await retrieveStripeCheckoutSession(sessionId);
+    const stripeSecretKey = await getCommerceStripeSecretKeyForUser(supabase, order.userId);
+    const session = await retrieveStripeCheckoutSession(sessionId, stripeSecretKey);
     const stripeOrderId = getOrderIdFromStripeSession(session);
 
     if (stripeOrderId !== order.id) {

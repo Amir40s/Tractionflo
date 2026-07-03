@@ -511,7 +511,7 @@ function RestrictedPage() {
 }
 
 function DashboardContent() {
-  const [activeTab, setActiveTab] = useState<DashboardTab>("dashboard");
+  const [activeTab, setActiveTab] = useState<DashboardTab>(() => getDashboardTabFromUrl());
   const [accountProfile, setAccountProfile] = useState<AccountProfile>(defaultAccountProfile);
   const [creatorConversationResponse, setCreatorConversationResponse] = useState<InstagramConversationsResponse>({
     conversations: [],

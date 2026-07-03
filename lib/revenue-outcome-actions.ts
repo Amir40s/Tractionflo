@@ -58,8 +58,8 @@ const outcomeActionMap: Record<RevenueOutcomeKey, Omit<RevenueOutcomeAction, "ou
     label: "Purchase product",
     nextAction: "Confirm the product and send checkout or payment.",
     cta: "I can send the checkout link now if you want to go ahead.",
-    integrationStatus: "connected",
-    providerHint: "Stripe checkout and Instagram commerce order tracking are implemented.",
+    integrationStatus: "needs_provider",
+    providerHint: "Connect this account's Stripe Payment Link or Stripe secret key for checkout.",
   },
   upgrade_plan: {
     label: "Upgrade plan",
@@ -119,7 +119,7 @@ export function buildRevenueOutcomeAction(
         provider.actionUrl ||
         provider.webhookUrl ||
         provider.apiEndpoint ||
-        outcomeType === "purchase_product" ||
+        provider.secretSaved ||
         outcomeType === "follow_creator"
       )
   );
@@ -141,6 +141,8 @@ export function buildRevenueOutcomeAction(
       ? `${provider?.provider || action.label} connected: ${actionUrl}`
       : provider?.webhookUrl || provider?.apiEndpoint
         ? `${provider?.provider || action.label} ${provider.executionMode} execution is configured.`
+        : provider?.secretSaved
+          ? `${provider.provider || action.label} account credentials are saved.`
         : provider?.notes || action.providerHint,
   };
 }

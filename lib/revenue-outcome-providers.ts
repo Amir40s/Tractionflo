@@ -48,7 +48,7 @@ const defaultProviderCopy: Record<RevenueOutcomeKey, Pick<RevenueOutcomeProvider
   purchase_product: {
     provider: "Stripe Checkout",
     cta: "I can send the checkout link now if you want to go ahead.",
-    notes: "Product purchase is connected through existing Stripe checkout and Instagram orders.",
+    notes: "Add this account's Stripe Payment Link or Stripe secret key for product checkout.",
   },
   upgrade_plan: {
     provider: "Billing",
@@ -106,11 +106,12 @@ function normalizeProviderConfig(outcomeType: RevenueOutcomeKey, value: unknown)
   const actionUrl = sanitizeUrl(record.actionUrl ?? record.action_url ?? record.url);
   const webhookUrl = sanitizeUrl(record.webhookUrl ?? record.webhook_url);
   const apiEndpoint = sanitizeUrl(record.apiEndpoint ?? record.api_endpoint ?? record.apiUrl ?? record.api_url);
-  const isAlwaysConnected = outcomeType === "purchase_product";
+  const hasSavedSecret = record.secretSaved === true || record.secret_saved === true;
+  const isAlwaysConnected = outcomeType === "follow_creator";
 
   return {
     outcomeType,
-    enabled: isAlwaysConnected || record.enabled === true || Boolean(actionUrl || webhookUrl || apiEndpoint),
+    enabled: isAlwaysConnected || record.enabled === true || Boolean(actionUrl || webhookUrl || apiEndpoint || hasSavedSecret),
     autoExecute: record.autoExecute === true || record.auto_execute === true,
     provider: sanitizeText(record.provider, defaults.provider, 80),
     actionUrl,
@@ -119,7 +120,7 @@ function normalizeProviderConfig(outcomeType: RevenueOutcomeKey, value: unknown)
     executionMode: normalizeExecutionMode(record.executionMode ?? record.execution_mode),
     webhookUrl,
     apiEndpoint,
-    secretSaved: record.secretSaved === true || record.secret_saved === true,
+    secretSaved: hasSavedSecret,
     lastStatus: sanitizeText(record.lastStatus ?? record.last_status, "", 80),
     lastSyncAt: sanitizeText(record.lastSyncAt ?? record.last_sync_at, "", 80),
   };
@@ -156,14 +157,18 @@ export function getRevenueOutcomeProvider(
 
 export function formatRevenueOutcomeProvidersForPrompt(settings: RevenueOutcomeProviderSettings | undefined) {
   return (settings || getDefaultRevenueOutcomeProviderSettings()).providers
-    .filter((provider) => provider.enabled && (provider.actionUrl || provider.webhookUrl || provider.apiEndpoint || provider.outcomeType === "purchase_product"))
+    .filter((provider) =>
+      provider.enabled &&
+      (provider.actionUrl || provider.webhookUrl || provider.apiEndpoint || provider.secretSaved || provider.outcomeType === "follow_creator")
+    )
     .map((provider) => {
       const link = provider.actionUrl ? ` Link: ${provider.actionUrl}` : "";
+      const secret = provider.secretSaved ? " Secure account credentials are saved." : "";
       const execution =
         provider.executionMode === "webhook" || provider.executionMode === "api"
           ? ` Execution: ${provider.executionMode}${provider.autoExecute ? " auto-enabled" : " manual-ready"}.`
           : "";
-      return `- ${provider.outcomeType}: ${provider.provider}. CTA: ${provider.cta}.${link}${execution}`;
+      return `- ${provider.outcomeType}: ${provider.provider}. CTA: ${provider.cta}.${link}${secret}${execution}`;
     })
     .join("\n");
 }

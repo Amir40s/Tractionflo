@@ -53,6 +53,9 @@ export type InstagramSettingsMessage = {
     preview_url?: string;
     name?: string;
   }[];
+  catalogItems?: {
+    priceAmount?: number | null;
+  }[];
   from: "me" | "user" | "note";
   sender_name?: string;
   sender_id?: string;
