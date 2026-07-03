@@ -84,7 +84,7 @@ function getConnectionEndpoint(provider: RevenueOutcomeProviderConfig) {
 }
 
 function isNativeOutcomeRoute(outcomeType: string) {
-  return outcomeType === "follow_creator" || outcomeType === "purchase_product";
+  return outcomeType === "follow_creator";
 }
 
 async function readResponsePayload(response: Response) {
@@ -295,7 +295,7 @@ export async function executeRevenueOutcomeProvider({
     status = "ready";
     errorMessage = "Provider is configured but auto-execution is disabled.";
   } else if (provider.executionMode === "link" || !endpoint) {
-    status = provider.actionUrl || action.actionUrl || isNativeOutcomeRoute(action.outcomeType) ? "routed" : "ready";
+    status = provider.actionUrl || provider.secretSaved || action.actionUrl || isNativeOutcomeRoute(action.outcomeType) ? "routed" : "ready";
   } else {
     try {
       const response = await fetch(endpoint, {

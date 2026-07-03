@@ -1,6 +1,16 @@
 import type { createSupabaseServiceClient } from "@/lib/supabase";
 
 type SupabaseServiceClient = ReturnType<typeof createSupabaseServiceClient>;
+type SupabaseInsertError = {
+  code?: string;
+  message?: string;
+};
+type MessageInsertTable = {
+  insert: (payload: Record<string, unknown>) => Promise<{ error: SupabaseInsertError | null }>;
+};
+type StoredMessageDuplicateRow = {
+  text?: string | null;
+};
 
 export type StoredInstagramMessageInput = {
   supabase: SupabaseServiceClient;
@@ -95,7 +105,7 @@ async function hasNearbyStoredDuplicate({
     return false;
   }
 
-  return ((data || []) as any[]).some((row) => normalizeMessageText(String(row.text || "")) === normalizedText);
+  return (data || []).some((row) => normalizeMessageText(String((row as StoredMessageDuplicateRow).text || "")) === normalizedText);
 }
 
 export async function storeInstagramMessage({
@@ -139,14 +149,19 @@ export async function storeInstagramMessage({
     });
 
     if (duplicateExists) {
-      return;
+      return false;
     }
   }
 
-  const { error } = await (supabase.from("messages") as any).insert(payload);
+  const messagesTable = supabase.from("messages") as unknown as MessageInsertTable;
+  const { error } = await messagesTable.insert(payload);
 
-  if (!error || ("code" in error && error.code === "23505")) {
-    return;
+  if (!error) {
+    return true;
+  }
+
+  if ("code" in error && error.code === "23505") {
+    return false;
   }
 
   if (!isSchemaMismatch(error)) {
@@ -159,9 +174,19 @@ export async function storeInstagramMessage({
     text: text || "",
     timestamp: normalizedTimestamp,
   };
-  const { error: fallbackError } = await (supabase.from("messages") as any).insert(fallbackPayload);
+  const { error: fallbackError } = await messagesTable.insert(fallbackPayload);
 
-  if (fallbackError && (!("code" in fallbackError) || fallbackError.code !== "23505")) {
+  if (!fallbackError) {
+    return true;
+  }
+
+  if ("code" in fallbackError && fallbackError.code === "23505") {
+    return false;
+  }
+
+  if (fallbackError) {
     throw fallbackError;
   }
+
+  return true;
 }

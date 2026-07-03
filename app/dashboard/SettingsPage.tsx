@@ -3284,7 +3284,7 @@ function isOutcomeProviderConfigured(provider: RevenueOutcomeProviderConfig) {
         provider.actionUrl ||
         provider.webhookUrl ||
         provider.apiEndpoint ||
-        provider.outcomeType === "purchase_product" ||
+        provider.secretSaved ||
         provider.outcomeType === "follow_creator"
       )
   );
@@ -3292,7 +3292,11 @@ function isOutcomeProviderConfigured(provider: RevenueOutcomeProviderConfig) {
 
 function getOutcomeProviderRouteLabel(provider: RevenueOutcomeProviderConfig) {
   if (provider.outcomeType === "purchase_product") {
-    return "Stripe commerce";
+    if (provider.secretSaved) {
+      return "Stripe account";
+    }
+
+    return provider.actionUrl ? "Stripe link" : "Stripe";
   }
 
   if (provider.outcomeType === "follow_creator") {
@@ -3327,7 +3331,7 @@ function SettingsRevenueOutcomeProvidersSection({
     onChange({
       providers: outcomeProviders.providers.map((provider) =>
         provider.outcomeType === outcomeType
-          ? { ...provider, ...partial, enabled: provider.outcomeType === "purchase_product" ? true : partial.enabled ?? provider.enabled }
+          ? { ...provider, ...partial, enabled: provider.outcomeType === "follow_creator" ? true : partial.enabled ?? provider.enabled }
           : provider
       ),
     });
@@ -3393,7 +3397,9 @@ function SettingsRevenueOutcomeProvidersSection({
       <div className="mt-5 grid gap-3">
         {visibleProviders.map((provider) => {
           const isPurchase = provider.outcomeType === "purchase_product";
-          const isNative = isPurchase || provider.outcomeType === "follow_creator";
+          const isNative = provider.outcomeType === "follow_creator";
+          const usesSecretToken = isPurchase || provider.executionMode === "webhook" || provider.executionMode === "api";
+          const showAutoExecute = provider.executionMode === "webhook" || provider.executionMode === "api";
           const ready = isOutcomeProviderConfigured(provider);
           const routeLabel = getOutcomeProviderRouteLabel(provider);
           const routePlaceholder =
@@ -3478,7 +3484,7 @@ function SettingsRevenueOutcomeProvidersSection({
                       }}
                       placeholder={
                         isPurchase
-                          ? "Existing Stripe checkout is used for product purchases"
+                          ? "https://buy.stripe.com/..."
                           : provider.outcomeType === "follow_creator"
                             ? "Instagram follow is native"
                             : routePlaceholder
@@ -3508,11 +3514,11 @@ function SettingsRevenueOutcomeProvidersSection({
                 />
               </label>
 
-              {(provider.executionMode === "webhook" || provider.executionMode === "api") && !isNative ? (
-                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
+              {usesSecretToken && !isNative ? (
+                <div className={`mt-3 grid gap-3 ${showAutoExecute ? "lg:grid-cols-[minmax(0,1fr)_180px]" : ""}`}>
                   <label className="block">
                     <span className="text-[11px] font-extrabold text-[#46506a]">
-                      Secret token {provider.secretSaved ? "(saved)" : "(optional)"}
+                      {isPurchase ? "Stripe secret key" : "Secret token"} {provider.secretSaved ? "(saved)" : "(optional)"}
                     </span>
                     <input
                       type="password"
@@ -3523,21 +3529,31 @@ function SettingsRevenueOutcomeProvidersSection({
                           [provider.outcomeType]: event.target.value,
                         }))
                       }
-                      placeholder={provider.secretSaved ? "Leave blank to keep saved token" : "Bearer token for endpoint"}
+                      placeholder={
+                        isPurchase
+                          ? provider.secretSaved
+                            ? "Leave blank to keep saved Stripe key"
+                            : "sk_live_... or sk_test_..."
+                          : provider.secretSaved
+                            ? "Leave blank to keep saved token"
+                            : "Bearer token for endpoint"
+                      }
                       className="mt-2 h-10 w-full rounded-[8px] border border-[#dde3ee] px-3 text-[12px] font-semibold outline-none focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
                     />
                   </label>
-                  <div className="flex items-end justify-between gap-3 rounded-[8px] border border-[#edf0f6] bg-[#fbfcff] px-3 py-2">
-                    <div>
-                      <p className="text-[11px] font-extrabold text-[#46506a]">Auto execute</p>
-                      <p className="mt-1 text-[10px] font-semibold text-[#8a91a3]">Run when ROS picks this route.</p>
+                  {showAutoExecute ? (
+                    <div className="flex items-end justify-between gap-3 rounded-[8px] border border-[#edf0f6] bg-[#fbfcff] px-3 py-2">
+                      <div>
+                        <p className="text-[11px] font-extrabold text-[#46506a]">Auto execute</p>
+                        <p className="mt-1 text-[10px] font-semibold text-[#8a91a3]">Run when ROS picks this route.</p>
+                      </div>
+                      <SettingsToggle
+                        ariaLabel={`Auto execute ${outcomeProviderLabels[provider.outcomeType] || provider.outcomeType}`}
+                        checked={provider.autoExecute}
+                        onChange={(autoExecute) => updateProvider(provider.outcomeType, { autoExecute })}
+                      />
                     </div>
-                    <SettingsToggle
-                      ariaLabel={`Auto execute ${outcomeProviderLabels[provider.outcomeType] || provider.outcomeType}`}
-                      checked={provider.autoExecute}
-                      onChange={(autoExecute) => updateProvider(provider.outcomeType, { autoExecute })}
-                    />
-                  </div>
+                  ) : null}
                 </div>
               ) : null}
 

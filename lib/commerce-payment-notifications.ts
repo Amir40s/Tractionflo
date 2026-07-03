@@ -5,6 +5,7 @@ import {
   markCommerceOrderPaymentThankYouMessageSent,
   type CommerceOrder,
 } from "@/lib/commerce-orders";
+import { persistCommercePaidThankYouOutboundMessage } from "@/lib/commerce-message-persistence";
 import { sendInstagramTextMessage } from "@/lib/instagram-send-api";
 import { getFreshInstagramAccount } from "@/lib/instagram-token";
 import logger from "@/lib/logger";
@@ -55,11 +56,22 @@ export async function sendCommerceOrderPaymentThankYou(
   }
 
   try {
+    const text = buildCommerceOrderPaidReply(freshOrder);
     const sent = await sendInstagramTextMessage(
       account.access_token,
       freshOrder.instagramSenderId,
-      buildCommerceOrderPaidReply(freshOrder)
+      text
     );
+
+    await persistCommercePaidThankYouOutboundMessage({
+      supabase,
+      order: freshOrder,
+      messageId: sent.message_id || "",
+      text,
+      senderId: account.ig_user_id || "",
+      recipientId: freshOrder.instagramSenderId,
+      source,
+    });
 
     await markCommerceOrderPaymentThankYouMessageSent(supabase, {
       userId: freshOrder.userId,

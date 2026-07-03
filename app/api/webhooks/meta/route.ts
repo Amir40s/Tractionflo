@@ -4,18 +4,24 @@ import logger from '@/lib/logger';
 import type { User } from '@supabase/supabase-js';
 import {
   buildCommerceOrderPaymentReply,
+  buildCommerceOrderPaidReply,
   cancelPendingCommerceOrdersForSender,
   confirmPendingCommerceOrderById,
   confirmLatestPendingCommerceOrder,
   createPendingCommerceOrder,
-  getCommerceOrderPublicCheckoutUrl,
+  isCommerceCheckoutConfiguredForUser,
   hasCommerceOrderCheckoutButtonMessage,
   getLatestCommerceOrderForSender,
   hasCommerceOrderPaymentMessage,
   isCommerceOrderConfirmationText,
   markCommerceOrderPaymentMessageSent,
   prepareCommerceOrderCheckout,
+  type CommerceOrder,
 } from '@/lib/commerce-orders';
+import {
+  persistCommercePaidThankYouOutboundMessage,
+  persistCommercePaymentOutboundMessages,
+} from '@/lib/commerce-message-persistence';
 import {
   detectConversationEscalation,
   escalationRulesMetadataKey,
@@ -904,6 +910,53 @@ async function getRecentSenderCatalogText(supabase: SupabaseServiceClient, sende
     .join('\n');
 }
 
+function isShortCommerceCheckoutConfirmationText(text: string) {
+  const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  return /^(yes|yes please|yep|yeah|ok|okay|sure|send it|please send|go ahead|do it|ready|i am ready|proceed)$/.test(normalized);
+}
+
+function isCommerceCheckoutResendRequest(text: string) {
+  const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  return (
+    /\b(resend|send again|again)\b/.test(normalized) ||
+    /\b(send|share|give|open)\b.*\b(payment link|checkout link|stripe link|pay link|checkout)\b/.test(normalized) ||
+    /\b(payment link|checkout link|stripe link|pay link)\b/.test(normalized)
+  );
+}
+
+function isCommerceCheckoutPromiseText(text: string) {
+  const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  return (
+    /\b(i('|’)ll|i will|i can|i'm|i am|sending|send|share|sharing)\b.*\b(checkout link|payment link|stripe link|pay link|checkout)\b/.test(normalized) ||
+    /\b(just a moment|one moment|give me a moment)\b.*\b(checkout|payment|stripe|link)\b/.test(normalized)
+  );
+}
+
+function isPaidCommerceOrder(order: CommerceOrder) {
+  return order.status === 'paid' || order.paymentStatus === 'paid';
+}
+
+async function hasActionableCheckoutOrderForSender({
+  supabase,
+  userId,
+  instagramSenderId,
+}: {
+  supabase: SupabaseServiceClient;
+  userId: string;
+  instagramSenderId: string;
+}) {
+  const order = await getLatestCommerceOrderForSender(supabase, {
+    userId,
+    instagramSenderId,
+    statuses: ['pending_confirmation', 'confirmed'],
+  });
+
+  return Boolean(order && !isPaidCommerceOrder(order));
+}
+
 async function getRecentWebhookConversationLines({
   supabase,
   userId,
@@ -1145,7 +1198,24 @@ async function processInstagramAutomations(
       const welcome = normalizeInstagramWelcomeAutomation(metadata[instagramWelcomeAutomationMetadataKey]);
 
       const explicitConfirmOrderId = getConfirmOrderIdFromPayload(event.text);
-      if (explicitConfirmOrderId || isCommerceOrderConfirmationText(event.text)) {
+      const hasExplicitCommerceConfirmation = Boolean(explicitConfirmOrderId || isCommerceOrderConfirmationText(event.text));
+      const hasShortCheckoutConfirmation =
+        !hasExplicitCommerceConfirmation &&
+        isShortCommerceCheckoutConfirmationText(event.text) &&
+        await hasActionableCheckoutOrderForSender({
+          supabase,
+          userId: user.id,
+          instagramSenderId: event.senderId,
+        }).catch((orderError) => {
+          logger.warn('processInstagramAutomations: Could not check actionable checkout order for short confirmation.', {
+            error: orderError,
+            userId: user.id,
+            senderId: event.senderId,
+          });
+          return false;
+        });
+
+      if (hasExplicitCommerceConfirmation || hasShortCheckoutConfirmation) {
         const confirmationText = explicitConfirmOrderId ? 'Confirm order' : event.text;
         let confirmedOrder = explicitConfirmOrderId
           ? await confirmPendingCommerceOrderById(supabase, {
@@ -1226,6 +1296,44 @@ async function processInstagramAutomations(
         const orderForReply = confirmedOrder || alreadyConfirmedOrder;
 
         if (orderForReply) {
+          if (isPaidCommerceOrder(orderForReply)) {
+            const paidReply = buildCommerceOrderPaidReply(orderForReply);
+            const paidSent = await sendInstagramTextMessage(account.access_token, event.senderId, paidReply);
+
+            await persistCommercePaidThankYouOutboundMessage({
+              supabase,
+              order: orderForReply,
+              messageId: paidSent.message_id || '',
+              text: paidReply,
+              senderId: account.ig_user_id || event.recipientId,
+              recipientId: event.senderId,
+              source: 'webhook_already_paid_confirmation',
+            });
+
+            await triggerRealtimeNotification([getUserChannel(user.id), getSuperAdminChannel()], {
+              type: 'message',
+              title: 'Instagram payment already received',
+              body: paidReply.slice(0, 120),
+              url: '/dashboard',
+              metadata: {
+                source: 'instagram-webhook-already-paid',
+                userId: user.id,
+                senderId: event.senderId,
+                orderId: orderForReply.id,
+                messageId: paidSent.message_id || '',
+              },
+            }).catch((notificationError) => {
+              logger.error('Realtime Instagram already-paid notification error:', { error: notificationError });
+            });
+
+            logger.info('processInstagramAutomations: Paid commerce order reply sent instead of checkout link.', {
+              orderId: orderForReply.id,
+              userId: user.id,
+              senderId: event.senderId,
+            });
+            continue;
+          }
+
           let payableOrder = orderForReply;
           const checkout = await prepareCommerceOrderCheckout(supabase, {
             userId: user.id,
@@ -1240,13 +1348,14 @@ async function processInstagramAutomations(
             });
           }
           let sent: Awaited<ReturnType<typeof sendInstagramTextMessage>> = {};
-          const shouldSendPaymentText = !hasCommerceOrderPaymentMessage(payableOrder);
+          const shouldForceResendPaymentMessage =
+            !isPaidCommerceOrder(payableOrder) &&
+            isCommerceCheckoutResendRequest(event.text);
+          const shouldSendPaymentText = shouldForceResendPaymentMessage || !hasCommerceOrderPaymentMessage(payableOrder);
           const shouldSendCheckoutButton = Boolean(
-            checkout.checkoutUrl && !hasCommerceOrderCheckoutButtonMessage(payableOrder)
+            checkout.checkoutUrl && (shouldForceResendPaymentMessage || !hasCommerceOrderCheckoutButtonMessage(payableOrder))
           );
-          const customerCheckoutUrl = checkout.checkoutUrl
-            ? getCommerceOrderPublicCheckoutUrl(payableOrder)
-            : '';
+          const customerCheckoutUrl = checkout.checkoutUrl || '';
           const paymentReply = buildCommerceOrderPaymentReply(payableOrder, customerCheckoutUrl, Boolean(alreadyConfirmedOrder), {
             includeCheckoutUrl: !shouldSendCheckoutButton,
           });
@@ -1264,21 +1373,33 @@ async function processInstagramAutomations(
             sent = {
               message_id: paymentSent.messageId,
             };
+            await persistCommercePaymentOutboundMessages({
+              supabase,
+              order: payableOrder,
+              sent: paymentSent,
+              checkoutUrl: customerCheckoutUrl,
+              senderId: account.ig_user_id || event.recipientId,
+              recipientId: event.senderId,
+              alreadyConfirmed: Boolean(alreadyConfirmedOrder),
+              source: alreadyConfirmedOrder ? 'webhook_already_confirmed_payment' : 'webhook_confirm_payment',
+            });
             if (checkout.checkoutUrl) {
-              await markCommerceOrderPaymentMessageSent(supabase, {
-                userId: user.id,
-                order: payableOrder,
-                messageId: paymentSent.messageId,
-                source: alreadyConfirmedOrder ? 'webhook_already_confirmed_payment' : 'webhook_confirm_payment',
-                textMessageId: paymentSent.textMessageId,
-                checkoutButtonMessageId: paymentSent.checkoutButtonMessageId,
-                checkoutFallbackMessageId: paymentSent.checkoutFallbackMessageId,
-              }).catch((markError) => {
+              try {
+                payableOrder = await markCommerceOrderPaymentMessageSent(supabase, {
+                  userId: user.id,
+                  order: payableOrder,
+                  messageId: paymentSent.messageId,
+                  source: alreadyConfirmedOrder ? 'webhook_already_confirmed_payment' : 'webhook_confirm_payment',
+                  textMessageId: paymentSent.textMessageId,
+                  checkoutButtonMessageId: paymentSent.checkoutButtonMessageId,
+                  checkoutFallbackMessageId: paymentSent.checkoutFallbackMessageId,
+                });
+              } catch (markError) {
                 logger.warn('Could not mark commerce payment message as sent.', {
                   error: markError,
                   orderId: payableOrder.id,
                 });
-              });
+              }
             }
             if (paymentSent.checkoutButtonError) {
               logger.warn('Instagram checkout button failed; payment link fallback was used.', {
@@ -1411,7 +1532,13 @@ async function processInstagramAutomations(
       });
       
       // If payment is requested but Stripe is not configured, force escalation to human
-      const hasStripeConfigured = Boolean(process.env.STRIPE_SECRET_KEY?.trim() && process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?.trim());
+      const hasStripeConfigured = await isCommerceCheckoutConfiguredForUser(supabase, user.id).catch((providerError) => {
+        logger.warn('processInstagramAutomations: Could not check account Stripe checkout configuration.', {
+          error: providerError,
+          userId: user.id,
+        });
+        return false;
+      });
       const isPaymentRequestEscalation = escalation?.intent === 'payment_request';
       const shouldForcePauseForUnconfiguredPayment = isPaymentRequestEscalation && !hasStripeConfigured;
       
@@ -1543,6 +1670,49 @@ async function processInstagramAutomations(
         continue;
       }
 
+      let checkoutReplyOrder: CommerceOrder | null = null;
+      let checkoutReplyUrl = '';
+      if (isCommerceCheckoutResendRequest(event.text) || isCommerceCheckoutPromiseText(reply)) {
+        const latestCheckoutOrder = await getLatestCommerceOrderForSender(supabase, {
+          userId: user.id,
+          instagramSenderId: event.senderId,
+          statuses: ['confirmed', 'paid'],
+        }).catch((orderError) => {
+          logger.warn('processInstagramAutomations: Could not load checkout order for AI checkout promise.', {
+            error: orderError,
+            userId: user.id,
+            senderId: event.senderId,
+          });
+          return null;
+        });
+
+        if (latestCheckoutOrder) {
+          if (isPaidCommerceOrder(latestCheckoutOrder)) {
+            reply = buildCommerceOrderPaidReply(latestCheckoutOrder);
+            checkoutReplyOrder = latestCheckoutOrder;
+          } else {
+            const checkout = await prepareCommerceOrderCheckout(supabase, {
+              userId: user.id,
+              order: latestCheckoutOrder,
+            });
+            checkoutReplyOrder = checkout.order;
+            checkoutReplyUrl = checkout.checkoutUrl || '';
+            reply = buildCommerceOrderPaymentReply(checkout.order, checkoutReplyUrl, true, {
+              includeCheckoutUrl: true,
+            });
+
+            if (checkout.error) {
+              logger.warn('processInstagramAutomations: AI checkout promise could not create Stripe checkout.', {
+                error: checkout.error,
+                orderId: latestCheckoutOrder.id,
+                userId: user.id,
+                senderId: event.senderId,
+              });
+            }
+          }
+        }
+      }
+
       const alreadyReplied = await hasAutomatedReplyAfterInbound({
         supabase,
         userId: user.id,
@@ -1659,12 +1829,20 @@ async function processInstagramAutomations(
       );
       logger.info("processInstagramAutomations: Instagram text message sent successfully", { message_id: sent.message_id });
 
+      const outboundOrderId = orderId || checkoutReplyOrder?.id || '';
       const outboundMetadata = {
         source: isFirstInboundDm && welcome.enabled ? 'instagram_webhook_welcome' : 'instagram_webhook_ai',
         catalogProduct: catalogOffer?.title || '',
         catalogImageMessageId,
         catalogCarouselCount: catalogCarouselCards.length,
-        orderId,
+        orderId: outboundOrderId,
+        ...(checkoutReplyOrder
+          ? {
+              commerceOrderId: checkoutReplyOrder.id,
+              commerceMessageType: isPaidCommerceOrder(checkoutReplyOrder) ? 'payment_thank_you' : 'payment_text',
+              checkoutUrl: checkoutReplyUrl,
+            }
+          : {}),
         idempotencyKey,
         knowledgeConfidence,
       };
@@ -1695,6 +1873,22 @@ async function processInstagramAutomations(
           metadata: outboundMetadata,
         }).catch((storeError) => {
           logger.warn('processInstagramAutomations: Could not persist outbound automation message.', { error: storeError });
+        });
+      }
+
+      if (checkoutReplyOrder && checkoutReplyUrl && !isPaidCommerceOrder(checkoutReplyOrder)) {
+        await markCommerceOrderPaymentMessageSent(supabase, {
+          userId: user.id,
+          order: checkoutReplyOrder,
+          messageId: sent.message_id || '',
+          source: 'webhook_ai_checkout_promise',
+          textMessageId: sent.message_id || '',
+        }).catch((markError) => {
+          logger.warn('processInstagramAutomations: Could not mark AI checkout reply as payment message sent.', {
+            error: markError,
+            orderId: checkoutReplyOrder?.id,
+            userId: user.id,
+          });
         });
       }
 
@@ -1972,7 +2166,7 @@ export async function POST(request: Request) {
       if (messagesToInsert.length > 0) {
         for (const msgToInsert of messagesToInsert) {
           try {
-            await storeInstagramMessage({
+            const didStoreMessage = await storeInstagramMessage({
               supabase,
               mid: msgToInsert.mid,
               userId: msgToInsert.userId,
@@ -1988,7 +2182,9 @@ export async function POST(request: Request) {
                 participant: msgToInsert.participant || undefined,
               },
             });
-            insertedMids.add(msgToInsert.mid);
+            if (didStoreMessage) {
+              insertedMids.add(msgToInsert.mid);
+            }
           } catch (insertError) {
             logger.error('Failed to insert message into Supabase:', { error: insertError, mid: msgToInsert.mid });
           }
@@ -2019,11 +2215,18 @@ export async function POST(request: Request) {
               : `${notificationMessages.length} new Instagram DMs arrived.`;
           const notificationMetadata = {
             count: notificationMessages.length,
+            messageIds: notificationMessages.map((message) => message.mid).filter(Boolean).sort().join(','),
+            senderId: notificationMessages.length === 1 ? notificationMessages[0].senderId : null,
             source: 'meta-webhook',
           };
+          const notificationId = `message:${notificationMetadata.messageIds || notificationMessages
+            .map((message) => `${message.senderId}-${message.timestamp}`)
+            .sort()
+            .join(',')}`;
 
           if (!shouldSuppressRealtimeNotification({ title: notificationTitle, body: notificationBody, metadata: notificationMetadata })) {
             await triggerRealtimeNotification([getGlobalChannel(), getSuperAdminChannel()], {
+              id: notificationId,
               type: 'message',
               title: notificationTitle,
               body: notificationBody,

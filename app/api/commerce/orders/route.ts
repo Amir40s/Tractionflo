@@ -4,7 +4,6 @@ import {
   confirmLatestPendingCommerceOrder,
   createPendingCommerceOrder,
   type CommerceOrder,
-  getCommerceOrderPublicCheckoutUrl,
   getLatestCommerceOrderForSender,
   hasCommerceOrderCheckoutButtonMessage,
   listCommerceOrdersForUser,
@@ -13,6 +12,7 @@ import {
   normalizeCommerceOrderDraft,
   prepareCommerceOrderCheckout,
 } from "@/lib/commerce-orders";
+import { persistCommercePaymentOutboundMessages } from "@/lib/commerce-message-persistence";
 import { sendInstagramCommercePaymentMessage } from "@/lib/instagram-send-api";
 import { getFreshInstagramAccount } from "@/lib/instagram-token";
 import { findBestCatalogOffer, getInstagramProductCatalogForUser, isCatalogDeclineRequest } from "@/lib/instagram-product-catalog";
@@ -279,7 +279,7 @@ export async function PATCH(request: Request) {
         checkout.checkoutUrl &&
         !hasCommerceOrderCheckoutButtonMessage(order)
     );
-    const customerCheckoutUrl = checkout.checkoutUrl ? getCommerceOrderPublicCheckoutUrl(order) : "";
+    const customerCheckoutUrl = checkout.checkoutUrl || "";
 
     await recordRevenueConversionEvent({
       supabase: serviceSupabase,
@@ -341,6 +341,16 @@ export async function PATCH(request: Request) {
           .then(async (sent) => {
             confirmationSent = true;
             confirmationMessageId = sent.messageId || "";
+            await persistCommercePaymentOutboundMessages({
+              supabase: serviceSupabase,
+              order: order!,
+              sent,
+              checkoutUrl: customerCheckoutUrl,
+              senderId: account.ig_user_id || "",
+              recipientId: order!.instagramSenderId,
+              alreadyConfirmed,
+              source: alreadyConfirmed ? "inbox_already_confirmed_payment_fallback" : "inbox_confirm_payment",
+            });
             if (checkout.checkoutUrl) {
               order = await markCommerceOrderPaymentMessageSent(serviceSupabase, {
                 userId: user.id,
