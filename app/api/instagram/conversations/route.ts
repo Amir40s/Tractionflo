@@ -147,7 +147,7 @@ async function getParticipantProfile(participant: InstagramParticipant | undefin
   }
 
   try {
-    const profileUrl = new URL(`https://graph.instagram.com/v21.0/${participant.id}`);
+    const profileUrl = new URL(`https://graph.facebook.com/v21.0/${participant.id}`);
     profileUrl.searchParams.set('fields', 'id,username,name,profile_pic');
     profileUrl.searchParams.set('access_token', accessToken);
 

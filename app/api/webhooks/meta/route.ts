@@ -563,7 +563,7 @@ function getProfilePictureUrl(value: unknown) {
 
 async function fetchParticipantProfile(accessToken: string, participantId: string) {
   try {
-    const profileUrl = new URL(`https://graph.instagram.com/v21.0/${participantId}`);
+    const profileUrl = new URL(`https://graph.facebook.com/v21.0/${participantId}`);
     profileUrl.searchParams.set('fields', 'id,username,name,profile_pic');
     profileUrl.searchParams.set('access_token', accessToken);
 
