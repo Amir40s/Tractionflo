@@ -13,24 +13,27 @@ function createStateSignature({
   nextPath,
   returnTo,
   userId,
+  expectedUsername,
   secret,
 }: {
   nextPath: string;
   returnTo: string;
   userId: string;
+  expectedUsername: string;
   secret: string;
 }) {
   return createHmac('sha256', secret)
-    .update(`${userId}:${nextPath}:${returnTo}`)
+    .update(`${userId}:${nextPath}:${returnTo}:${expectedUsername}`)
     .digest('hex');
 }
 
-function createOAuthState(nextPath: string, returnTo: string, userId: string, secret: string) {
+function createOAuthState(nextPath: string, returnTo: string, userId: string, expectedUsername: string, secret: string) {
   return JSON.stringify({
     next: nextPath,
     returnTo,
     userId,
-    signature: createStateSignature({ nextPath, returnTo, userId, secret }),
+    expectedUsername,
+    signature: createStateSignature({ nextPath, returnTo, userId, expectedUsername, secret }),
   });
 }
 
@@ -81,7 +84,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  const state = createOAuthState(nextPath, request.nextUrl.origin, user.id, appSecret);
+  const usernameParam = request.nextUrl.searchParams.get('username') || '';
+  const expectedUsername = usernameParam.trim().toLowerCase().replace(/^@/, '');
+  
+  const state = createOAuthState(nextPath, request.nextUrl.origin, user.id, expectedUsername, appSecret);
 
   const scopes = [
     'instagram_business_basic',

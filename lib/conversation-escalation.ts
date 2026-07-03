@@ -13,7 +13,8 @@ export type ConversationEscalationIntent =
   | "high_ticket_lead"
   | "bulk_order"
   | "urgent_order"
-  | "complex_question";
+  | "complex_question"
+  | "payment_request";
 
 export type ConversationEscalation = {
   intent: ConversationEscalationIntent;
@@ -40,6 +41,7 @@ export const defaultEscalationRuleSettings: EscalationRuleSetting[] = [
   { id: "refunds", label: "Refund requests", action: "Always escalate", priority: "High", enabled: true },
   { id: "complaints", label: "Complaints", action: "High priority", priority: "High", enabled: true },
   { id: "human_handoff", label: "Human handoff requests", action: "Always escalate", priority: "High", enabled: true },
+  { id: "payments", label: "Payment requests", action: "Always escalate", priority: "High", enabled: true },
 ];
 
 function isEscalationRuleSetting(value: unknown): value is Partial<EscalationRuleSetting> & { id: string } {
@@ -164,6 +166,10 @@ function hasComplexQuestion(text: string) {
   return /\b(complex|not in your knowledge|not listed|not sure|legal|medical|injury|injured|allergy|sensitive issue)\b/.test(text);
 }
 
+function hasPaymentRequest(text: string) {
+  return /\b(payment link|checkout link|send payment|send checkout|payment method|card detail|billing|accept payment|payment info|how to pay|where to pay|pay now|payment gateway)\b/.test(text);
+}
+
 function getRuleIdForIntent(intent: ConversationEscalationIntent) {
   if (intent === "refund_request") return "refunds";
   if (intent === "complaint") return "complaints";
@@ -171,6 +177,7 @@ function getRuleIdForIntent(intent: ConversationEscalationIntent) {
   if (intent === "high_ticket_lead") return "vip";
   if (intent === "bulk_order") return "bulk_orders";
   if (intent === "urgent_order") return "urgent_orders";
+  if (intent === "payment_request") return "payments";
   if (intent === "human_handoff" || intent === "complex_question") return "human_handoff";
   return "";
 }
@@ -212,7 +219,17 @@ function buildEscalationsForText(normalized: string, rules: EscalationRuleSettin
       urgency: "High",
     });
   }
-
+  if (hasPaymentRequest(normalized) && isIntentEnabled("payment_request", rules)) {
+    escalations.push({
+      intent: "payment_request",
+      label: "Payment Request",
+      reply: "I'll connect you with a team member who can process your payment securely.",
+      summary: "Customer asked for payment link, checkout link, or payment information.",
+      recommendedAction: "Take over immediately. Process payment through Stripe checkout. Do not offer external payment methods or direct payment requests outside the system.",
+      signals: ["Payment or checkout request"],
+      urgency: "High",
+    });
+  }
   if (hasBulkOrder(normalized) && isIntentEnabled("bulk_order", rules)) {
     const urgentBulkOrder = hasUrgentOrder(normalized);
 
@@ -341,6 +358,7 @@ export function shouldPauseAiForEscalation(escalation: ConversationEscalation | 
     escalation.intent === "human_handoff" ||
     escalation.intent === "refund_request" ||
     escalation.intent === "complaint" ||
-    escalation.intent === "complex_question"
+    escalation.intent === "complex_question" ||
+    escalation.intent === "payment_request"
   );
 }

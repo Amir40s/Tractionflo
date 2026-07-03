@@ -160,13 +160,40 @@ export function mergeLiveEscalationSnapshots<T extends LiveEscalationConversatio
     byId.set(conversation.id, conversation);
   }
 
-  for (const snapshot of readLiveEscalationSnapshots()) {
+  const rawSnapshots = readRawSnapshots();
+  const validSnapshots: LiveEscalationSnapshot[] = [];
+  const now = Date.now();
+
+  for (const snapshot of rawSnapshots) {
     const existing = byId.get(snapshot.id);
+    const snapshotAge = now - getSnapshotTime(snapshot.savedAt);
 
     if (!existing) {
-      byId.set(snapshot.id, snapshot);
+      if (snapshotAge <= 120_000) {
+        validSnapshots.push(snapshot);
+        byId.set(snapshot.id, {
+          id: snapshot.id,
+          participant: snapshot.participant,
+          updated_time: snapshot.updated_time,
+          messages: snapshot.messages,
+        });
+      }
       continue;
     }
+
+    const dbMessageIds = new Set(existing.messages.map((m) => m.id));
+    const mergedMessages = mergeMessages(existing, snapshot).filter((message) => {
+      if (dbMessageIds.has(message.id)) {
+        return true;
+      }
+      const messageAge = now - getSnapshotTime(message.time);
+      return messageAge <= 120_000;
+    });
+
+    validSnapshots.push({
+      ...snapshot,
+      messages: mergedMessages,
+    });
 
     byId.set(snapshot.id, {
       ...existing,
@@ -180,8 +207,12 @@ export function mergeLiveEscalationSnapshots<T extends LiveEscalationConversatio
         getSnapshotTime(existing.updated_time) >= getSnapshotTime(snapshot.updated_time)
           ? existing.updated_time
           : snapshot.updated_time,
-      messages: mergeMessages(existing, snapshot),
+      messages: mergedMessages,
     });
+  }
+
+  if (typeof window !== "undefined" && rawSnapshots.length !== validSnapshots.length) {
+    window.localStorage.setItem(liveEscalationSnapshotsStorageKey, JSON.stringify(validSnapshots.slice(0, 25)));
   }
 
   return Array.from(byId.values()).sort((a, b) => getLatestMessageTime(b) - getLatestMessageTime(a));

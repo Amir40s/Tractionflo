@@ -237,7 +237,7 @@ export const superAdminDetailConfigs: Record<Exclude<SuperAdminPage, "overview" 
     rows: [
       { name: "Founder Plan", detail: "$499 monthly", values: ["Founder", "$170,159", "341", "+21.1%", "114%"], status: "Strong", statusTone: "green" },
       { name: "Pro Plan", detail: "$249 monthly", values: ["Pro", "$132,219", "531", "+17.4%", "109%"], status: "Strong", statusTone: "green" },
-      { name: "Trial pool", detail: "Not billed yet", values: ["Trial", "$64,200", "412", "+8.7%", "Pending"], status: "Pipeline", statusTone: "purple" },
+      { name: "Trial pool", detail: "Not billed yet", values: ["Trial", "$64,200", "412", "+8.7%", "Pending"], status: "Pipeline", statusTone: "amber" },
     ],
     insightTitle: "Revenue mix",
     insightItems: [
@@ -370,7 +370,7 @@ export const superAdminDetailConfigs: Record<Exclude<SuperAdminPage, "overview" 
     rows: [
       { name: "GPT reply drafts", detail: "Suggested and sent replies", values: ["$912", "51M", "49,200", "$0.019", "Stable"], status: "Normal", statusTone: "green" },
       { name: "Lead qualification", detail: "Opportunity scoring", values: ["$684", "38M", "31,004", "$0.022", "Up"], status: "Watch", statusTone: "amber" },
-      { name: "Workflow tests", detail: "Internal AI tests", values: ["$246", "13M", "8,210", "$0.030", "Review"], status: "Review", statusTone: "purple" },
+      { name: "Workflow tests", detail: "Internal AI tests", values: ["$246", "13M", "8,210", "$0.030", "Review"], status: "Review", statusTone: "amber" },
     ],
     insightTitle: "Cost controls",
     insightItems: [
@@ -408,7 +408,7 @@ export const superAdminDetailConfigs: Record<Exclude<SuperAdminPage, "overview" 
     rows: [
       { name: "Webhook not receiving", detail: "Sarah Creates", values: ["High", "Instagram", "18 min", "Platform", "On track"], status: "Open", statusTone: "red" },
       { name: "Billing question", detail: "GlowSkin", values: ["Medium", "Billing", "1h 04m", "Support", "On track"], status: "In progress", statusTone: "amber" },
-      { name: "AI reply tone", detail: "Mike Coach", values: ["Low", "AI", "2h 10m", "AI", "On track"], status: "Open", statusTone: "purple" },
+      { name: "AI reply tone", detail: "Mike Coach", values: ["Low", "AI", "2h 10m", "AI", "On track"], status: "Open", statusTone: "amber" },
     ],
     insightTitle: "Support summary",
     insightItems: [
@@ -427,7 +427,7 @@ export const superAdminDetailConfigs: Record<Exclude<SuperAdminPage, "overview" 
     rows: [
       { name: "Instagram reconnect loop", detail: "6 creators affected", values: ["Platform", "High", "42 min", "Platform", "Patch"], status: "Open", statusTone: "red" },
       { name: "AI draft too long", detail: "3 creators affected", values: ["AI", "Medium", "2h", "AI", "Tune"], status: "Review", statusTone: "amber" },
-      { name: "Plan upgrade blocked", detail: "2 creators affected", values: ["Billing", "Medium", "4h", "Billing", "Retry"], status: "Open", statusTone: "purple" },
+      { name: "Plan upgrade blocked", detail: "2 creators affected", values: ["Billing", "Medium", "4h", "Billing", "Retry"], status: "Open", statusTone: "amber" },
     ],
     insightTitle: "Issue themes",
     insightItems: [

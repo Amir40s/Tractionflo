@@ -96,7 +96,7 @@ export type Opportunity = {
   body: string[];
   value?: string;
   action: string;
-  tone: "purple" | "blue" | "orange" | "red";
+  tone: "blue" | "orange" | "red";
   icon: LucideIcon;
 };
 
@@ -116,7 +116,7 @@ export type OpportunityPageCard = {
   detail: string;
   badge: string;
   time: string;
-  tone: "purple" | "green" | "blue" | "orange" | "red";
+  tone: "green" | "blue" | "orange" | "red";
   icon: LucideIcon;
   value?: string;
   scoreLabel?: string;
@@ -142,7 +142,7 @@ export type AudienceMetric = {
   label: string;
   value: string;
   change: string;
-  tone: "purple" | "green" | "blue" | "violet" | "orange";
+  tone: "green" | "blue" | "orange";
   icon: LucideIcon;
 };
 

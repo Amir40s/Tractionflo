@@ -46,7 +46,7 @@ export type Opportunity = {
   body: string[];
   value?: string;
   action: string;
-  tone: "purple" | "blue" | "orange" | "red";
+  tone: "blue" | "orange" | "red";
   icon: LucideIcon;
 };
 
@@ -127,7 +127,7 @@ export type SuperAdminConnectedAccountsResponse = {
     platformHealth?: {
       label: string;
       status: string;
-      tone: "green" | "amber" | "red" | "purple";
+      tone: "green" | "amber" | "red";
     }[];
   };
   rows?: SuperAdminConnectedAccountApiRow[];

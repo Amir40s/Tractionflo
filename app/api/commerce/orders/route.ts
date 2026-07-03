@@ -76,7 +76,7 @@ async function hasRecentProductRefusal({
     return false;
   }
 
-  return (data || []).some((row) => isCatalogDeclineRequest(String(row.text || "")));
+  return (data || []).some((row) => isCatalogDeclineRequest(String((row as any).text || "")));
 }
 
 async function cancelRefusedPendingOrders({

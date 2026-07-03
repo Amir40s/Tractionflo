@@ -107,6 +107,7 @@ type IGMessage = {
       url?: string;
     };
   };
+  metadata?: Record<string, any>;
 };
 
 type IGConversation = {
@@ -852,6 +853,7 @@ function getConversationsSignature(conversations: IGConversation[]) {
               message.time,
               message.text,
               message.status || "",
+              String(message.metadata?.knowledgeConfidence ?? ""),
               message.attachments
                 ?.map((attachment) => `${attachment.type}:${attachment.name || ""}:${attachment.mime_type || ""}`)
                 .join(",") || "",
@@ -890,6 +892,11 @@ function clearInstagramOAuthErrorFromLocation() {
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
+function buildInstagramConsentUrl(nextPath: string, expectedUsername: string) {
+  const cleanUsername = expectedUsername.trim().toLowerCase().replace(/^@/, "");
+  return `/api/auth/instagram?next=${encodeURIComponent(nextPath)}&username=${encodeURIComponent(cleanUsername)}`;
+}
+
 function getConversationAiMessages(conv: IGConversation) {
   return [...conv.messages]
     .reverse()
@@ -914,6 +921,7 @@ const inboxEscalationIntentCategories: Record<ConversationEscalationIntent, stri
   urgent_order: "urgent_order",
   human_handoff: "human",
   complex_question: "complex",
+  payment_request: "payment",
 };
 
 const knownConversationEscalationIntents = new Set<ConversationEscalationIntent>(
@@ -1192,12 +1200,13 @@ function ConvList({
                 Connect an Instagram Business account to load conversations.
               </p>
             )}
-            <a
-              href="/api/auth/instagram?next=/conversations"
+            <button
+              type="button"
+              onClick={onConnectNew}
               className="mt-1 flex h-8 items-center justify-center rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-semibold text-white"
             >
               Connect Instagram
-            </a>
+            </button>
           </div>
         ) : error ? (
           <div className="mx-3 mt-6 rounded-[10px] border border-[#ffd5dd] bg-[#fff7f9] p-4 text-center">
@@ -1452,9 +1461,16 @@ function ChatBubble({
             </div>
           </div>
         ) : null}
-        <div className={`mt-1 text-[10px] font-medium text-[#596175] ${isMe ? "text-right" : ""}`}>
-          {msg.status === "sending" ? "Sending..." : msg.status === "failed" ? "Not sent" : msgTime(msg.time)}
-          {isMe && msg.status !== "failed" && <span className="ml-1 text-[#246bff]">✓✓</span>}
+        <div className="mt-1 flex items-center justify-between gap-3 text-[10px] font-medium text-[#596175]">
+          <div className="flex items-center gap-1">
+            {msg.status === "sending" ? "Sending..." : msg.status === "failed" ? "Not sent" : msgTime(msg.time)}
+            {isMe && msg.status !== "failed" && <span className="text-[#246bff]">✓✓</span>}
+          </div>
+          {isMe && msg.status !== "sending" && msg.status !== "failed" && msg.metadata?.knowledgeConfidence !== undefined && msg.metadata?.knowledgeConfidence !== null && String(msg.metadata.knowledgeConfidence) !== "" && (
+            <span className="inline-flex shrink-0 items-center rounded bg-[#eef2ff] px-1 py-0.5 text-[8.5px] font-bold text-[#4f46e5]">
+              KB Match: {msg.metadata.knowledgeConfidence}%
+            </span>
+          )}
         </div>
       </div>
       {isMe && (
@@ -2207,16 +2223,14 @@ function EscalationFlagCarousel({
                         ))}
                       </div>
                     ) : null}
-                    {!isHumanTakeover ? (
-                      <button
-                        type="button"
-                        onClick={onToggleTakeoverMode}
-                        className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-3 text-[11px] font-extrabold text-white shadow-[0_12px_24px_rgba(48,68,255,0.18)]"
-                      >
-                        <Users size={13} strokeWidth={2.4} />
-                        Take over human
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      onClick={onToggleTakeoverMode}
+                      className="mt-3 flex h-8 w-full items-center justify-center gap-2 rounded-[8px] bg-[#3044ff] px-3 text-[11px] font-extrabold text-white shadow-[0_12px_24px_rgba(48,68,255,0.18)]"
+                    >
+                      <Users size={13} strokeWidth={2.4} />
+                      {isHumanTakeover ? "Take over AI" : "Take over human"}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2487,34 +2501,12 @@ function SummaryPanel({
   }, []);
 
   useEffect(() => {
-    if (!conv) {
-      const timeout = window.setTimeout(() => {
-        setAiWorkflow(null);
-        setAiStatus("");
-        setAiLoading(false);
-        lastAiKeyRef.current = "";
-      }, 0);
-
-      return () => window.clearTimeout(timeout);
-    }
-
-    if (lastAiKeyRef.current === aiRefreshKey) {
-      return undefined;
-    }
-
-    lastAiKeyRef.current = aiRefreshKey;
+    // Disable automatic AI workflow trigger to save resources and loading time
     setAiWorkflow(null);
-    setAiLoading(true);
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
-      void runAiWorkflow({ silent: true, signal: controller.signal });
-    }, 700);
-
-    return () => {
-      window.clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [aiRefreshKey, conv, runAiWorkflow]);
+    setAiStatus("");
+    setAiLoading(false);
+    lastAiKeyRef.current = "";
+  }, [aiRefreshKey, conv]);
 
   useEffect(() => {
     if (!conv || !latestInboundMessage || !latestInboundIsOrderConfirmation) {
@@ -2874,343 +2866,7 @@ function SummaryPanel({
                 </div>
               ) : null}
 
-              {!isHumanTakeover ? (
-                <div className="mt-3 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="flex min-w-0 items-center gap-1.5 text-[12px] font-extrabold text-black">
-                      <Target size={14} className="text-[#3044ff]" strokeWidth={2.35} />
-                      AI qualification
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => void runAiWorkflow({ forceRefresh: true })}
-                      disabled={aiLoading}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border border-[#dde3ee] bg-white text-[#46506a] disabled:cursor-not-allowed disabled:opacity-55"
-                      aria-label="Refresh AI qualification"
-                    >
-                      <RefreshCw size={13} className={aiLoading ? "animate-spin" : ""} />
-                    </button>
-                  </div>
-
-                  {leadInsight ? (
-                    <div className="mt-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className={`rounded-[8px] px-2 py-1 text-[10px] font-extrabold ${getLeadScoreTone(leadInsight.score)}`}>
-                          {leadInsight.score}/100
-                        </span>
-                        <span className="rounded-[8px] bg-white px-2 py-1 text-[10px] font-extrabold text-[#253049]">
-                          {leadInsight.stage}
-                        </span>
-                        <span className="rounded-[8px] bg-white px-2 py-1 text-[10px] font-extrabold text-[#253049]">
-                          {leadInsight.urgency} urgency
-                        </span>
-                      </div>
-                      <p className="mt-2 text-[11px] font-medium leading-relaxed text-[#46506a]">{getLeadSummary(leadInsight)}</p>
-                      <p className="mt-2 rounded-[8px] bg-white p-2 text-[11px] font-semibold leading-relaxed text-[#253049]">
-                        {leadInsight.recommendedAction}
-                      </p>
-                      {leadInsight.signals.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {leadInsight.signals.slice(0, 3).map((signal) => (
-                            <span key={signal} className="rounded-[7px] bg-[#f0edff] px-2 py-1 text-[10px] font-bold text-[#3044ff]">
-                              {signal}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {conversationIntelligence ? (
-                        <div className="mt-3 rounded-[9px] border border-[#e2e7f2] bg-white p-2.5">
-                          <p className="text-[10px] font-extrabold uppercase text-[#596175]">Conversation intelligence</p>
-                          <div className="mt-2 grid gap-1.5">
-                            {conversationIntelligenceItems.map((item) => (
-                              <div key={item.label} className="grid grid-cols-[88px_minmax(0,1fr)] gap-2 text-[10px] leading-snug">
-                                <span className="font-extrabold text-[#596175]">{item.label}</span>
-                                <span className="break-words font-bold text-[#253049]">{item.value || "None"}</span>
-                              </div>
-                            ))}
-                          </div>
-                          {conversationQuestions.length > 0 && (
-                            <div className="mt-2">
-                              <p className="text-[10px] font-extrabold text-[#596175]">Questions</p>
-                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                {conversationQuestions.map((question) => (
-                                  <span key={question} className="rounded-[7px] bg-[#f6f7fb] px-2 py-1 text-[10px] font-bold text-[#253049]">
-                                    {question}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {conversationSignals.length > 0 && (
-                            <div className="mt-2">
-                              <p className="text-[10px] font-extrabold text-[#596175]">Signals</p>
-                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                {conversationSignals.map((signal) => (
-                                  <span key={signal} className="rounded-[7px] bg-[#eef4ff] px-2 py-1 text-[10px] font-bold text-[#3044ff]">
-                                    {signal}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="mt-2 rounded-[8px] bg-white p-2 text-[11px] font-medium leading-relaxed text-[#596175]">
-                      {aiLoading ? "Reading this conversation..." : aiStatus || "Ask a superadmin to connect the platform OpenAI key to activate AI qualification."}
-                    </p>
-                  )}
-
-                  {aiStatus && leadInsight && (
-                    <p className="mt-2 text-[10px] font-bold text-[#596175]">{aiStatus}</p>
-                  )}
-
-                </div>
-              ) : null}
-
-              {(aiWorkflow?.ros || aiLoading) && (
-                <div className="mt-3 rounded-[10px] border border-[#edf0f6] bg-[#fbfbff] p-2.5">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <h3 className="flex min-w-0 items-center gap-1.5 text-[12px] font-extrabold text-black">
-                      <Zap size={14} className="text-[#ff850d]" strokeWidth={2.35} />
-                      ROS 9-Layer Pipeline
-                    </h3>
-                    <span className="rounded-[8px] bg-[#fff3e6] px-2 py-0.5 text-[9px] font-extrabold text-[#ff850d]">
-                      {aiLoading ? "Processing..." : "Live Snapshot"}
-                    </span>
-                  </div>
-
-                  {aiLoading ? (
-                    <div className="flex flex-col items-center justify-center py-6 gap-2 bg-white rounded-[8px] border border-[#eef1f6] mt-2">
-                      <Loader2 size={18} className="animate-spin text-[#ff850d]" />
-                      <p className="text-[10px] font-semibold text-[#596175]">Evaluating pipeline layers...</p>
-                    </div>
-                  ) : aiWorkflow?.ros ? (
-                    <div className="space-y-2 mt-2">
-                      {(() => {
-                        const layerStatuses = (aiWorkflow.ros as any).layerStatuses || {};
-                        const renderLayerBadge = (status?: "pending" | "in_progress" | "completed", fallbackLabel = "Completed") => {
-                          if (status === "completed") {
-                            return (
-                              <span className="text-[10px] text-[#14a947] font-extrabold flex items-center gap-1">
-                                <Check size={12} strokeWidth={3} /> {fallbackLabel}
-                              </span>
-                            );
-                          }
-                          if (status === "in_progress") {
-                            return (
-                              <span className="text-[10px] text-[#ff850d] font-extrabold flex items-center gap-1">
-                                <span className="relative flex h-2 w-2">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#ff850d] opacity-75"></span>
-                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-[#ff850d]"></span>
-                                </span>
-                                In Progress
-                              </span>
-                            );
-                          }
-                          return (
-                            <span className="text-[10px] text-[#a1a7b6] font-extrabold flex items-center gap-1">
-                              Pending
-                            </span>
-                          );
-                        };
-
-                        return (
-                          <>
-                            {/* Layer 9 */}
-                            {layerStatuses.layer9 !== "pending" && (
-                              <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
-                                <div className="flex items-center justify-between gap-1.5 font-bold">
-                                  <span className="text-[#253049]">Layer 9: Escalation</span>
-                                  {aiWorkflow.escalation || aiWorkflow.handoff ? (
-                                    <span className="flex items-center gap-1 text-[10px] text-[#df405b] font-extrabold">
-                                      <TriangleAlert size={12} /> Triggered
-                                    </span>
-                                  ) : renderLayerBadge(layerStatuses.layer9, "Cleared")}
-                                </div>
-                                <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
-                                  {aiWorkflow.escalation
-                                    ? `Handoff requested: ${aiWorkflow.escalation.summary || aiWorkflow.escalation.label}`
-                                    : "No urgent safety or human handoff rules triggered."}
-                                </p>
-                              </div>
-                            )}
-
-                      {/* Layer 1 */}
-                      {layerStatuses.layer1 !== "pending" && (
-                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
-                          <div className="flex items-center justify-between gap-1.5 font-bold">
-                            <span className="text-[#253049]">Layer 1: Conversation Intel</span>
-                            {renderLayerBadge(layerStatuses.layer1, "Analyzed")}
-                          </div>
-                          <div className="mt-1.5 flex flex-wrap gap-1">
-                            <span className="rounded-[6px] bg-[#f1f3f9] px-1.5 py-0.5 text-[9px] font-bold text-[#46506a]">
-                              Sentiment: {aiWorkflow.ros.conversationIntelligence?.sentiment || "neutral"}
-                            </span>
-                            <span className="rounded-[6px] bg-[#f1f3f9] px-1.5 py-0.5 text-[9px] font-bold text-[#46506a]">
-                              Emotion: {aiWorkflow.ros.conversationIntelligence?.emotion || "unknown"}
-                            </span>
-                            {aiWorkflow.ros.conversationIntelligence?.objection && aiWorkflow.ros.conversationIntelligence.objection !== "none" && (
-                              <span className="rounded-[6px] bg-[#ffebee] px-1.5 py-0.5 text-[9px] font-extrabold text-[#df405b]">
-                                Objection: {aiWorkflow.ros.conversationIntelligence.objection}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Layer 2 */}
-                      {layerStatuses.layer2 !== "pending" && (
-                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
-                          <div className="flex items-center justify-between gap-1.5 font-bold">
-                            <span className="text-[#253049]">Layer 2: Business Intel</span>
-                            {renderLayerBadge(layerStatuses.layer2, "Evaluated")}
-                          </div>
-                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
-                            {aiWorkflow.catalogOffer
-                              ? `Product Match: ${aiWorkflow.catalogOffer.title || "Selected Item"}`
-                              : aiWorkflow.catalogOffers && aiWorkflow.catalogOffers.length > 0
-                              ? `Found ${aiWorkflow.catalogOffers.length} catalog options matching context.`
-                              : "Searched knowledge bases & menu databases. No active catalog items overlayed."}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Layer 3 */}
-                      {layerStatuses.layer3 !== "pending" && (
-                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
-                          {(() => {
-                            const bi = aiWorkflow.ros.buyerIntelligence || {};
-                            const fields = [
-                              { label: "B", value: bi.budget, title: "Budget" },
-                              { label: "A", value: bi.authority, title: "Authority" },
-                              { label: "N", value: bi.need, title: "Need" },
-                              { label: "T", value: bi.timeline, title: "Timeline" },
-                            ];
-                            const filledCount = fields.filter(f => f.value && f.value !== "unknown" && f.value !== "").length;
-                            return (
-                              <>
-                                <div className="flex items-center justify-between gap-1.5 font-bold">
-                                  <span className="text-[#253049]">Layer 3: Buyer Intel (BANT)</span>
-                                  {renderLayerBadge(layerStatuses.layer3, "Qualified")}
-                                </div>
-                                <div className="mt-2 flex items-center gap-1.5">
-                                  {fields.map(f => (
-                                    <span
-                                      key={f.label}
-                                      title={`${f.title}: ${f.value || "Unknown/Missing"}`}
-                                      className={`flex h-5 w-5 items-center justify-center rounded-[6px] text-[9px] font-extrabold border ${
-                                        f.value && f.value !== "unknown" && f.value !== ""
-                                          ? "bg-[#e8f5e9] border-[#c8e6c9] text-[#2e7d32]"
-                                          : "bg-[#fafafa] border-[#e0e0e0] text-[#757575]"
-                                      }`}
-                                    >
-                                      {f.label}
-                                    </span>
-                                  ))}
-                                  {bi.goal && (
-                                    <span className="rounded-[6px] bg-[#eef4ff] border border-[#d2e3fc] px-1.5 py-0.5 text-[9px] font-bold text-[#1a73e8] truncate max-w-[120px]" title={`Goal: ${bi.goal}`}>
-                                      Goal: {bi.goal}
-                                    </span>
-                                  )}
-                                </div>
-                              </>
-                            );
-                          })()}
-                        </div>
-                      )}
-
-                      {/* Layer 6 */}
-                      {layerStatuses.layer6 !== "pending" && (
-                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
-                          <div className="flex items-center justify-between gap-1.5 font-bold">
-                            <span className="text-[#253049]">Layer 6: Revenue Memory</span>
-                            {renderLayerBadge(layerStatuses.layer6, "Remembered")}
-                          </div>
-                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
-                            {(() => {
-                              const m = aiWorkflow.ros.memory || {};
-                              const parts = [];
-                              if (m.objections?.length > 0) parts.push(`${m.objections.length} objections`);
-                              if (m.offersPresented?.length > 0) parts.push(`${m.offersPresented.length} offers shown`);
-                              if (m.questionsAsked?.length > 0) parts.push(`${m.questionsAsked.length} questions asked`);
-                              return parts.length > 0 ? `Loaded profile relationship state: ${parts.join(", ")}.` : "First touchpoint profile (clean memory snapshot loaded).";
-                            })()}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Layer 7 */}
-                      {layerStatuses.layer7 !== "pending" && (
-                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
-                          <div className="flex items-center justify-between gap-1.5 font-bold">
-                            <span className="text-[#253049]">Layer 7: Learning Engine</span>
-                            {renderLayerBadge(layerStatuses.layer7, "Ingested")}
-                          </div>
-                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
-                            Tactic: <code className="rounded bg-[#f5f5f5] px-1 text-[9px] font-mono text-[#e91e63]">{aiWorkflow.ros.tacticIntelligence?.primaryTactic || "consultative_reply"}</code>
-                            {aiWorkflow.ros.revenueIntelligence?.framework ? ` via ${aiWorkflow.ros.revenueIntelligence.framework}` : ""}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Layer 8 */}
-                      {layerStatuses.layer8 !== "pending" && (
-                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
-                          <div className="flex items-center justify-between gap-1.5 font-bold">
-                            <span className="text-[#253049]">Layer 8: Outcome Intel</span>
-                            {renderLayerBadge(layerStatuses.layer8, "Configured")}
-                          </div>
-                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
-                            Sales stage: <span className="font-semibold text-[#253049]">{aiWorkflow.ros.revenueIntelligence?.salesStage || "initial_inbound"}</span>
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Layer 5 */}
-                      {layerStatuses.layer5 !== "pending" && (
-                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
-                          <div className="flex items-center justify-between gap-1.5 font-bold">
-                            <span className="text-[#253049]">Layer 5: Decision Intel</span>
-                            {renderLayerBadge(layerStatuses.layer5, "Resolved")}
-                          </div>
-                          <div className="mt-1 text-[10px] text-[#46506a] leading-relaxed">
-                            <div className="font-semibold text-[#253049]">Next Action:</div>
-                            <div className="mt-0.5 rounded-[6px] bg-[#f5f7ff] p-1.5 text-[10px] font-bold text-[#3044ff] border border-[#e5e9ff]">
-                              {aiWorkflow.ros.decision?.bestNextAction || "Respond to inquiry"}
-                            </div>
-                            <div className="mt-1 text-[9px] text-[#596175] flex items-center justify-between">
-                              <span>Confidence:</span>
-                              <span className="font-bold">{aiWorkflow.ros.decision?.confidence || 85}%</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Layer 4 */}
-                      {layerStatuses.layer4 !== "pending" && (
-                        <div className="rounded-[8px] bg-white border border-[#eef1f6] p-2 text-[11px]">
-                          <div className="flex items-center justify-between gap-1.5 font-bold">
-                            <span className="text-[#253049]">Layer 4: Revenue Intel (Post)</span>
-                            {renderLayerBadge(layerStatuses.layer4, "Applied")}
-                          </div>
-                          <p className="mt-1 text-[10px] text-[#596175] leading-relaxed">
-                            Lead is classified as <span className="font-extrabold text-[#253049]">{aiWorkflow.lead?.stage || "New"}</span>.
-                            {aiWorkflow.ros.revenueIntelligence?.recommendation && (
-                              <span className="block mt-1 italic">"{aiWorkflow.ros.revenueIntelligence.recommendation}"</span>
-                            )}
-                          </p>
-                        </div>
-                      )}
-
-                            </>
-                          );
-                        })()}
-                      </div>
-                  ) : null}
-                </div>
-              )}
+              {/* AI qualification and ROS 9-Layer Pipeline panels removed to save screen space and background resources */}
 
               <div className="mt-3 rounded-[10px] border border-[#e2e7f2] bg-white p-2.5">
                 <div className="flex items-center justify-between gap-2">
@@ -3365,7 +3021,26 @@ export default function Inbox() {
   const [canManageAgents, setCanManageAgents] = useState(false);
   const [assignmentSavingAgentId, setAssignmentSavingAgentId] = useState("");
   const [assignmentStatus, setAssignmentStatus] = useState("");
-  const [takeoverModes, setTakeoverModes] = useState<Record<string, ConversationTakeoverMode>>({});
+  const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [connectUsername, setConnectUsername] = useState("");
+  const [takeoverModes, setTakeoverModes] = useState<Record<string, ConversationTakeoverMode>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const stored = window.localStorage.getItem("tractionflo_takeover_modes");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("tractionflo_takeover_modes", JSON.stringify(takeoverModes));
+    } catch (e) {
+      console.error("Failed to save takeover modes to localStorage", e);
+    }
+  }, [takeoverModes]);
+
   const [starredConversationIds, setStarredConversationIds] = useState<string[]>([]);
   const [commerceOrders, setCommerceOrders] = useState<CommerceOrder[]>([]);
   const [confirmingOrderId, setConfirmingOrderId] = useState("");
@@ -3525,8 +3200,24 @@ export default function Inbox() {
     setOauthError(null);
     clearInstagramOAuthErrorFromLocation();
 
-    window.location.href = "/api/auth/instagram?next=/conversations";
-  }, []);
+    window.location.href = buildInstagramConsentUrl("/onboarding", connectUsername);
+  }, [connectUsername]);
+
+  const openConnectModal = useCallback(() => {
+    if (disconnecting || connectingNew) {
+      return;
+    }
+
+    setConnectModalOpen(true);
+  }, [connectingNew, disconnecting]);
+
+  const closeConnectModal = useCallback(() => {
+    if (connectingNew) {
+      return;
+    }
+
+    setConnectModalOpen(false);
+  }, [connectingNew]);
 
   const loadAgents = useCallback(async () => {
     setLoadingAgents(true);
@@ -3761,7 +3452,6 @@ export default function Inbox() {
               : conv
           )
         );
-
         let postSendNotice = payload.automated ? "AI sent automatically" : "Sent";
         let postSendError: string | null = null;
 
@@ -3856,7 +3546,9 @@ export default function Inbox() {
   }, [fetchConvs]);
 
   const activeConv = convs.find(c => c.id === activeId) ?? null;
-  const activeTakeoverMode: ConversationTakeoverMode = activeConv ? takeoverModes[activeConv.id] || "ai" : "ai";
+  const activeTakeoverMode: ConversationTakeoverMode = activeConv
+    ? takeoverModes[activeConv.id] || takeoverModes[activeConv.participant?.id ?? ''] || "ai"
+    : "ai";
   const activeConversationIsStarred = Boolean(activeId && starredConversationIds.includes(activeId));
   const activeCommerceOrder = activeConv
     ? commerceOrders.find(
@@ -4097,7 +3789,7 @@ export default function Inbox() {
           void fetchConvs({ showLoader: false });
         }}
         onDisconnect={disconnectInstagram}
-        onConnectNew={connectNewInstagram}
+        onConnectNew={openConnectModal}
         disconnecting={disconnecting}
         connectingNew={connectingNew}
       />
@@ -4137,6 +3829,63 @@ export default function Inbox() {
         onConfirmPendingOrder={confirmPendingOrder}
         onConfirmLatestInboundOrder={confirmLatestInboundOrder}
       />
+
+      {connectModalOpen && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 px-4 py-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="connect-instagram-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeConnectModal();
+            }
+          }}
+        >
+          <div className="w-full max-w-[460px] rounded-[18px] border border-[#dde3ee] bg-white p-5 shadow-[0_24px_80px_rgba(10,16,32,0.28)]">
+            <h2 id="connect-instagram-title" className="text-[18px] font-bold text-black">
+              Connect Instagram account
+            </h2>
+            <p className="mt-2 text-[13px] leading-[1.55] text-[#596175]">
+              Enter the account username first. Next will open the Instagram consent page with that username filled in.
+            </p>
+            <label className="mt-4 block">
+              <span className="mb-2 block text-[12px] font-semibold text-[#1f2638]">Instagram username</span>
+              <input
+                autoFocus
+                value={connectUsername}
+                onChange={(event) => setConnectUsername(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && connectUsername.trim()) {
+                    event.preventDefault();
+                    void connectNewInstagram();
+                  }
+                }}
+                placeholder="@username"
+                className="h-11 w-full rounded-[10px] border border-[#dde3ee] bg-white px-3 text-[13px] font-medium text-[#20273b] outline-none placeholder:text-[#9aa1b5] focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+              />
+            </label>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeConnectModal}
+                disabled={connectingNew}
+                className="flex h-9 items-center justify-center rounded-[9px] border border-[#dde3ee] bg-white px-4 text-[12px] font-semibold text-[#1f2638] transition hover:bg-[#f6f7fb] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void connectNewInstagram()}
+                disabled={connectingNew || !connectUsername.trim()}
+                className="flex h-9 items-center justify-center rounded-[9px] bg-[#3044ff] px-4 text-[12px] font-semibold text-white transition hover:bg-[#2638f0] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {connectingNew ? "Opening Instagram" : "Next"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

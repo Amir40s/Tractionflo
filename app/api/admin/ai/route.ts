@@ -8,7 +8,7 @@ import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type AiAdminTone = "green" | "amber" | "red" | "purple";
+type AiAdminTone = "green" | "amber" | "red";
 
 type StoredMessageRow = {
   text?: string | null;
@@ -133,7 +133,7 @@ function getBucketStatus(count: number, configuredCreators: number) {
     return { status: "Live", tone: "green" as const, health: "Active" };
   }
 
-  return { status: "Ready", tone: "purple" as const, health: "No signals" };
+  return { status: "Ready", tone: "amber" as const, health: "No signals" };
 }
 
 async function getStoredMessages(supabase: SupabaseClient) {
@@ -302,7 +302,7 @@ export async function GET() {
           costPerReply: 0,
           trend: "Estimated",
           status: "Estimate",
-          tone: "purple" as AiAdminTone,
+          tone: "amber" as AiAdminTone,
         },
         {
           name: "Workflow coverage",

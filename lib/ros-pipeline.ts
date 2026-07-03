@@ -1,4 +1,10 @@
-import { runAssistantThread } from '@/lib/openai-assistants';
+import {
+  runAssistantThread,
+  getOrCreateAssistant,
+  getOrCreateVectorStore,
+  attachVectorStoreToAssistant,
+  syncVectorStoreWithStorage,
+} from '@/lib/openai-assistants';
 import { resolvePlatformAiConfig } from '@/lib/platform-ai-config';
 import { loadRevenueOutcomeProviderSettings } from '@/lib/revenue-provider-execution';
 import { formatRevenueLearningForPrompt } from '@/lib/revenue-learning';
@@ -33,6 +39,7 @@ import {
 import { detectConversationEscalation, escalationRulesMetadataKey, shouldPauseAiForEscalation } from '@/lib/conversation-escalation';
 import logger from '@/lib/logger';
 import { createSupabaseServiceClient } from '@/lib/supabase';
+import { getBusinessContextFromDatabase } from '@/lib/instagram-business-context';
 import type { User } from '@supabase/supabase-js';
 
 export type RosPipelineInput = {
@@ -61,6 +68,7 @@ export type RosPipelineResult = {
   catalogOffer: any | null;
   catalogOffers: any[];
   catalogCheckoutReady: boolean;
+  knowledgeConfidence: number;
 };
 
 function formatConversationLine(message: any) {
@@ -138,6 +146,43 @@ function normalizeLeadInsight(value: unknown): any {
     cta: normalizeText(lead.cta, defaultAiLeadInsight.cta, 260),
   };
 }
+
+function normalizeQuestionText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isFollowUpQuestion(text: string) {
+  const normalized = normalizeQuestionText(text);
+  if (!normalized) return false;
+
+  return /\?$/.test(text.trim()) || /what are you interested in|which one|want more details|ready to start|need help with|tell me more|can i share|want details|interested in/.test(normalized);
+}
+
+function detectRepeatedQuestionLoop(messages: Array<{ from?: 'me' | 'user' | 'note'; text?: string }>, reply: string) {
+  const recentAssistantQuestions = messages
+    .filter((message) => message.from === 'me' && typeof message.text === 'string')
+    .map((message) => message.text || '')
+    .filter(isFollowUpQuestion)
+    .map(normalizeQuestionText);
+
+  if (!recentAssistantQuestions.length || !isFollowUpQuestion(reply)) {
+    return false;
+  }
+
+  const normalizedReply = normalizeQuestionText(reply);
+  return recentAssistantQuestions.some((question) => question && question === normalizedReply);
+}
+
+function isGreetingMessage(text: string) {
+  const normalized = text.trim().toLowerCase().replace(/[.,!?:;]+/g, "");
+  const greetings = new Set(["hi", "hello", "hey", "hy", "hola", "hi sir", "hello sir", "hello there", "greetings", "good morning", "good afternoon", "good evening", "assalam o alaikum", "assalamualaikum", "aoa"]);
+  return greetings.has(normalized);
+}
+
 
 export async function runRosPipeline(input: RosPipelineInput): Promise<RosPipelineResult> {
   const {
@@ -228,6 +273,7 @@ export async function runRosPipeline(input: RosPipelineInput): Promise<RosPipeli
       catalogOffer: null,
       catalogOffers: [],
       catalogCheckoutReady: false,
+      knowledgeConfidence: 0,
     };
   }
 
@@ -244,6 +290,23 @@ export async function runRosPipeline(input: RosPipelineInput): Promise<RosPipeli
   // LAYER 2: BUSINESS INTELLIGENCE
   // ==========================================
   logger.info("ROS Pipeline [Layer 2 - Business Intelligence]: Extracting catalog search criteria and fetching business context.");
+  const businessContext = await getBusinessContextFromDatabase(supabase, user.id).catch((err) => {
+    logger.error("ROS Pipeline: Failed to fetch business context from database:", err);
+    return null;
+  });
+  logger.info("ROS Pipeline: Retrieved businessContext profile:", { hasProfile: Boolean(businessContext?.profile) });
+  let businessContextPrompt = '';
+  if (businessContext?.profile) {
+    const profile = businessContext.profile;
+    businessContextPrompt = `What Your AI Learned About Your Business (Onboarding & Instagram Profile Context):
+Instagram Profile: ${profile.username || ''}
+Niche / Selling: ${profile.business_keywords?.join(', ') || ''}
+Summary of Business:
+${profile.business_summary || ''}`;
+    logger.info("ROS Pipeline: Generated businessContextPrompt:", { prompt: businessContextPrompt });
+  } else {
+    logger.warn("ROS Pipeline: No businessContext profile found in database for user:", { userId: user.id });
+  }
   const catalogSearchText = buildCatalogSearchText(latestText, conversationLines);
   const freshCatalogCategoryRequest = isFreshCatalogCategoryRequest(latestText, conversationLines);
   const productCatalog = await getInstagramProductCatalogForUser(supabase, user.id).catch((catalogError) => {
@@ -290,9 +353,82 @@ export async function runRosPipeline(input: RosPipelineInput): Promise<RosPipeli
   const integration = platformConfig.integration;
   const enabledWorkflows = getEnabledWorkflowMap(integration.workflows);
   const apiKey = platformConfig.apiKey;
-  const assistantId = metadata.openai_assistant_id as string | undefined;
+  
+  let assistantId = metadata.openai_assistant_id as string | undefined;
+  let vectorStoreId = metadata.openai_vector_store_id as string | undefined;
+
+  if (apiKey && (!assistantId || !vectorStoreId)) {
+    try {
+      logger.info("Dynamically resolving/creating OpenAI Assistant and Vector Store on pipeline run", { userId: user.id });
+      
+      const assistant = await getOrCreateAssistant({
+        apiKey,
+        assistantId,
+        name: `${metadata.businessName || 'Business'} AI Assistant`,
+        instructions: `You are an AI customer service assistant. Be helpful, professional, and knowledgeable about the business.`,
+        model: 'gpt-4o-mini',
+      });
+      assistantId = assistant.id;
+
+      const vectorStore = await getOrCreateVectorStore({ apiKey, vectorStoreId });
+      vectorStoreId = vectorStore.id;
+
+      await attachVectorStoreToAssistant({ apiKey, assistantId, vectorStoreId });
+
+      const serviceSupabase = createSupabaseServiceClient();
+      await serviceSupabase.auth.admin.updateUserById(user.id, {
+        user_metadata: {
+          ...metadata,
+          openai_assistant_id: assistantId,
+          openai_vector_store_id: vectorStoreId,
+        },
+      });
+
+      metadata.openai_assistant_id = assistantId;
+      metadata.openai_vector_store_id = vectorStoreId;
+
+      logger.info("Successfully dynamic-saved assistant and vector store ID", { assistantId, vectorStoreId });
+    } catch (e) {
+      logger.error("Failed to dynamically resolve/create OpenAI Assistant and Vector Store during run", { error: e });
+    }
+  }
+
+  if (apiKey && vectorStoreId) {
+    try {
+      const serviceSupabase = createSupabaseServiceClient();
+      await syncVectorStoreWithStorage({
+        apiKey,
+        vectorStoreId,
+        userId: user.id,
+        supabase: serviceSupabase,
+      });
+      logger.info("Successfully synced vector store files during pipeline run", { userId: user.id });
+    } catch (syncError) {
+      logger.error("Failed to sync vector store files during pipeline run", { error: syncError });
+    }
+  }
 
   if (!apiKey || !assistantId) {
+    if (isGreetingMessage(latestText)) {
+      return {
+        reply: "Hi! How can I help you?",
+        starter: "",
+        cta: "",
+        handoff: false,
+        escalation: null,
+        lead: null,
+        ros: {
+          intent: "greeting",
+          stage: "New",
+          sentiment: "neutral",
+          nextAction: "Greet customer",
+        },
+        catalogOffer: null,
+        catalogOffers: [],
+        catalogCheckoutReady: false,
+        knowledgeConfidence: 0,
+      };
+    }
     throw new Error("Missing OpenAI configuration (API Key or Assistant ID).");
   }
 
@@ -320,7 +456,9 @@ export async function runRosPipeline(input: RosPipelineInput): Promise<RosPipeli
 
 ${integration.systemPrompt}
 
-IMPORTANT: The attached files and vector store contain the primary truth for this business (such as menus, pricing, services, and policies). You MUST search these files using the file_search tool for any specific business inquiries (e.g. "menu", "pricing", "cost", "hours", "booking", or specific products/services). Do NOT rely on default prompts or assume the business context is TractionFlo if the knowledge base documents specify a different business (e.g. Taste Haven Restaurant).
+${businessContextPrompt}
+
+IMPORTANT: The attached files, vector store, and the 'What Your AI Learned About Your Business' summary contain the primary truth for this business (such as menus, pricing, services, and policies). You MUST search these files using the file_search tool or reference the onboarding business summary for any specific business inquiries (e.g. "menu", "pricing", "cost", "hours", "booking", "what is your business", or specific products/services). Do NOT rely on default prompts or assume the business context is TractionFlo if the knowledge base documents/summary specify a different business (e.g. Taste Haven Restaurant). If the user asks what the business does, who we are, or what services we provide, you MUST answer directly based on the 'What Your AI Learned About Your Business' summary, score knowledgeConfidence as 85-100%, decision confidence as 85-100%, and set tactic to something other than human_handoff.
 
 ${getAiBehaviorPrompt(integration.behavior)}
 
@@ -451,6 +589,7 @@ JSON shape:
   "starter": "first response to send when AI Starts Conversation is on and this is a new inbound lead; empty when not needed",
   "reply": "best next answer to the latest user message; answer direct questions directly; be brief and conversational",
   "cta": "short CTA message that moves a ready lead forward",
+  "knowledgeConfidence": 0-100 (an integer from 0 to 100 representing how confident you are that this answer is derived from the given knowledge base files/posts rather than general training data),
   ${leadSchema},
   "ros": {
     "conversationIntelligence": {
@@ -521,16 +660,40 @@ JSON shape:
 Recent conversation:
 ${conversationLines || 'No prior messages.'}
 
-CRITICAL FINAL INSTRUCTIONS BEFORE WRITING YOUR REPLY:
-1. Answer direct questions simply and casually. ONLY answer exactly what the user asked. NEVER provide unrequested information, especially pricing or long explanations, unless explicitly asked for. Be extremely brief. Do NOT add unnecessary follow-up questions or pivots.
-2. If asking a discovery question, make it sound like a quick DM from a friend, not a survey.
-3. NEVER use empathetic AI filler like "I understand", "I completely understand", or "I'm here to help". Just answer the question or make your point directly.
-4. NEVER use "This will help me assist you better" or any customer-service phrasing.
-5. Do NOT give up easily. Follow the TractionFlo ROS methodology: Pivot naturally to discover the prospect's underlying goal or offer an alternative outcome (like a free resource or newsletter) if they reject the main offer. Keep it extremely conversational.
-6. MAXIMUM 1-2 short sentences. No bullet points. NO WALLS OF TEXT.
-7. NEVER hallucinate placeholders like "[insert_X_here]". If you lack ANY needed information (links, answers, or details) not found in your knowledge base, DO NOT make it up and DO NOT tell the customer you are transferring them to a human. Instead, reply with a natural delay like "Let me check on that real quick!" or "Give me just a second to pull that up!" and set the tactic to "human_handoff" so the CRM can take over.
+===== ABSOLUTE RULES — VIOLATION OF ANY RULE = FAILURE =====
 
-Write the next best reply adhering strictly to these rules. Make sure it sounds like a human typed it on a phone.`,
+RULE 1 — ANSWER ONLY WHAT WAS ASKED:
+Answer the user's exact question in 1-2 short sentences max. Do NOT volunteer extra information, pricing, features, or follow-up questions they did not ask for. If they asked "what do you do?", give ONE sentence. Stop.
+
+RULE 2 — SOUND HUMAN, NOT AI:
+Write like a real person texting on their phone. No bullet points. No walls of text. No formal language. No "I'd be happy to", "I understand", "I completely understand", "I'm here to help", "This will help me assist you better", or any customer-service/AI filler phrases. Just talk normally.
+
+RULE 3 — KNOWLEDGE BASE ONLY:
+You may ONLY reference facts, details, offers, links, case studies, success stories, testimonials, or pricing that exist in your knowledge base files or the auto-generated onboarding/Instagram summary (What Your AI Learned About Your Business). If the info does not exist in these sources, you DO NOT HAVE IT. (Note: The onboarding summary is the core source of truth for who you are and what the business does).
+
+RULE 4 — NO HALLUCINATION, NO PLACEHOLDERS:
+NEVER output "[insert_X]", "[your_link]", or any placeholder. NEVER fabricate links, names, statistics, or details. If you cannot find the specific information in your knowledge base files or onboarding summary, say "Let me check on that real quick!" and set tactic to "human_handoff".
+
+RULE 5 — NO LOOPS, NO REPETITION:
+Before writing your reply, SCAN the entire conversation history above. If the Business already said something similar (same pitch, same question, same offer description, same greeting), you MUST NOT say it again. If the user confirms with "yes"/"okay"/"sure", move to the NEXT concrete step (share a link, ask a NEW question, provide the CTA). Never circle back.
+
+RULE 6 — NO EMPTY PROMISES:
+NEVER say "Want me to share a case study?", "I can show you success stories!", "Ready to see some results?" or similar UNLESS you have the actual case study text/details in your knowledge base files RIGHT NOW. If you do not have them, do NOT mention them at all. Instead, move the conversation forward with what you DO have (offer details, booking link, pricing, etc.).
+
+RULE 7 — LOW CONTEXT = HUMAN HANDOFF:
+If there is no context or very small context/chunk of data available in both your files and onboarding business summary for what the user is asking, do NOT send the answer, just handover the chat to Human Agent. Set knowledgeConfidence to 0-15 in this case. However, if the user asks what the business is or does, the onboarding summary is full context; you MUST answer it using that summary, set knowledgeConfidence to 85-100, and do NOT trigger human handoff.
+
+RULE 8 — STAY CONVERSATIONAL, DON'T GIVE UP:
+If the user rejects the main offer, pivot naturally — ask about their underlying goal, offer a smaller next step (free resource, newsletter, quick call). But ONLY pivot to things that exist in your knowledge base or onboarding summary. Never invent alternatives.
+
+RULE 9 — knowledgeConfidence SCORING:
+Score honestly. 80-100 = answer is directly from knowledge base files or the onboarding summary (answering who you are using the summary is scored here). 50-79 = answer is reasonably inferred from these context sources. 20-49 = answer is loosely related but mostly your own phrasing/general data. 0-19 = you have no relevant knowledge base files or onboarding summary for this answer (should trigger human_handoff).
+
+RULE 10 — MAX LENGTH:
+1-2 sentences. Absolute maximum 3 sentences only if providing a specific link or CTA. No exceptions.
+
+========================================================
+Write the next best reply following these rules with ZERO exceptions. Sound like a human typed it on a phone.`,
       },
     ],
   });
@@ -540,6 +703,22 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
   let reply = normalizeText(parsed.reply, '', 500);
   let starter = normalizeText(parsed.starter, '', 500);
   let cta = normalizeText(parsed.cta, lead.cta, 500);
+  let knowledgeConfidence = 0;
+  const parsedAny = parsed as any;
+  if (typeof parsedAny.knowledgeConfidence === 'number') {
+    knowledgeConfidence = parsedAny.knowledgeConfidence;
+  } else if (typeof parsedAny.knowledgeConfidence === 'string') {
+    const parsedNum = parseInt(parsedAny.knowledgeConfidence, 10);
+    if (!isNaN(parsedNum)) {
+      knowledgeConfidence = parsedNum;
+    }
+  } else if (parsedAny.ros?.businessIntelligence?.confidence) {
+    const val = parsedAny.ros.businessIntelligence.confidence;
+    const parsedNum = typeof val === 'number' ? val : parseInt(String(val), 10);
+    if (!isNaN(parsedNum)) {
+      knowledgeConfidence = parsedNum;
+    }
+  }
 
   // Removed HARD-CODED BANT GUARD to allow AI to respond to pricing queries directly.
   // ==========================================
@@ -619,6 +798,10 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
   }
 
   const isHandoff = finalRos.tacticIntelligence?.tactics?.includes('human_handoff') || false;
+  const decisionConfidence = Number(finalRos.decision?.confidence || 0);
+  const lowConfidenceHandoff = Number.isFinite(decisionConfidence) && decisionConfidence > 0 && decisionConfidence < 50;
+  const repeatedQuestionLoop = detectRepeatedQuestionLoop(messages, reply);
+  const shouldForceHumanHandoff = isHandoff || lowConfidenceHandoff || repeatedQuestionLoop;
   const pipelineEscalation = isHandoff ? {
     intent: 'human_handoff' as const,
     label: 'Human handoff requests',
@@ -626,6 +809,16 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
     summary: 'AI requested human handoff during conversation.',
     recommendedAction: 'Switch this conversation to human takeover and respond personally.',
     signals: ['human_handoff'],
+    reply: '',
+  } : shouldForceHumanHandoff ? {
+    intent: 'human_handoff' as const,
+    label: lowConfidenceHandoff ? 'Low confidence handoff' : 'Repeated question loop',
+    urgency: 'High' as const,
+    summary: lowConfidenceHandoff
+      ? `AI confidence is only ${Math.round(decisionConfidence)}%, so this conversation should be handled by a human.`
+      : 'AI appears to be asking the same follow-up question again.',
+    recommendedAction: 'Pause auto-replies and let a human take over this conversation.',
+    signals: lowConfidenceHandoff ? ['low_confidence'] : ['repeated_question_loop'],
     reply: '',
   } : null;
 
@@ -652,12 +845,13 @@ Write the next best reply adhering strictly to these rules. Make sure it sounds 
     reply,
     starter,
     cta,
-    handoff: isHandoff,
+    handoff: shouldForceHumanHandoff,
     escalation: pipelineEscalation,
     lead,
     ros: finalRos,
     catalogOffer: checkoutCatalogOffer,
     catalogOffers,
     catalogCheckoutReady,
+    knowledgeConfidence,
   };
 }

@@ -86,7 +86,7 @@ export async function GET(request: Request) {
     const uniqueSenderIds = new Set<string>();
 
     if (dbMessages) {
-      for (const msg of dbMessages) {
+      for (const msg of dbMessages as any[]) {
         const text = msg.text || "";
         if (text.startsWith("__STORY_REPLY__:") && text.includes("__TEXT__:")) {
           try {

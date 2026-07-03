@@ -888,7 +888,7 @@ export async function loadRosProspectBuyerProfile({
   }
 
   const query = applyProspectLookup(
-    supabase
+    (supabase as any)
       .from("ros_prospects")
       .select("buyer_profile,readiness")
       .eq("user_id", userId)
@@ -962,7 +962,7 @@ export async function loadRosProspectRevenueMemory({
 
   const context = getEmptyRevenueMemoryContext();
   const prospectQuery = applyProspectLookup(
-    supabase
+    (supabase as any)
       .from("ros_prospects")
       .select("id,last_objection,last_best_next_action,buyer_profile")
       .eq("user_id", userId)
@@ -998,7 +998,7 @@ export async function loadRosProspectRevenueMemory({
   ].filter(Boolean));
 
   const insightQuery = applyMemoryLookup(
-    supabase
+    (supabase as any)
       .from("ros_conversation_insights")
       .select("memory,latest_message,created_at")
       .eq("user_id", userId)
@@ -1023,7 +1023,7 @@ export async function loadRosProspectRevenueMemory({
   }
 
   const decisionQuery = applyMemoryLookup(
-    supabase
+    (supabase as any)
       .from("ros_revenue_decisions")
       .select("best_next_action,cta,payload,created_at")
       .eq("user_id", userId)
@@ -1059,7 +1059,7 @@ export async function loadRosProspectRevenueMemory({
   }
 
   const outcomeQuery = applyMemoryLookup(
-    supabase
+    (supabase as any)
       .from("ros_revenue_outcomes")
       .select("outcome_type,status,value,currency,metadata,occurred_at")
       .eq("user_id", userId)
@@ -1075,12 +1075,12 @@ export async function loadRosProspectRevenueMemory({
   }
 
   context.recentOutcomes = (outcomes || [])
-    .map((row) => formatRevenueEventLabel(row as Record<string, unknown>))
+    .map((row: any) => formatRevenueEventLabel(row as Record<string, unknown>))
     .filter(Boolean)
     .slice(0, 6);
 
   const eventQuery = applyMemoryLookup(
-    supabase
+    (supabase as any)
       .from("ros_conversion_events")
       .select("event_type,outcome_type,status,value,currency,metadata,occurred_at")
       .eq("user_id", userId)
@@ -1097,11 +1097,11 @@ export async function loadRosProspectRevenueMemory({
 
   context.recentOutcomes = uniqueStrings([
     ...context.recentOutcomes,
-    ...(events || []).map((row) => formatRevenueEventLabel(row as Record<string, unknown>)),
+    ...(events || []).map((row: any) => formatRevenueEventLabel(row as Record<string, unknown>)),
   ]).slice(0, 8);
 
   if (lookup.senderId) {
-    const { data: orders, error: orderError } = await supabase
+    const { data: orders, error: orderError } = await (supabase as any)
       .from("commerce_orders")
       .select("product_title,price_text,amount,currency,status,payment_status,created_at,paid_at")
       .eq("user_id", userId)
@@ -1114,7 +1114,7 @@ export async function loadRosProspectRevenueMemory({
     }
 
     context.recentPurchases = (orders || [])
-      .map((row) => formatCommerceOrderLabel(row as Record<string, unknown>))
+      .map((row: any) => formatCommerceOrderLabel(row as Record<string, unknown>))
       .filter(Boolean)
       .slice(0, 6);
   }
@@ -1185,7 +1185,7 @@ async function upsertRosProspect({
 
   const baseBuyerIntelligence = normalizeBuyerIntelligenceProfile(snapshot.buyerIntelligence);
 
-  let lookupQuery = supabase
+  let lookupQuery = (supabase as any)
     .from("ros_prospects")
     .select("id,buyer_profile")
     .eq("user_id", userId)
@@ -1207,7 +1207,7 @@ async function upsertRosProspect({
 
   if (existing?.[0]?.id) {
     const buyerIntelligence = mergeBuyerIntelligenceProfiles(existing[0].buyer_profile, baseBuyerIntelligence);
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from("ros_prospects")
       .update(buildPayload(buyerIntelligence))
       .eq("id", existing[0].id)
@@ -1225,7 +1225,7 @@ async function upsertRosProspect({
   }
 
   const payload = buildPayload(baseBuyerIntelligence);
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("ros_prospects")
     .insert(payload)
     .select("id")
@@ -1279,7 +1279,7 @@ export async function persistRevenueOperatingSnapshot({
   const senderId = participant?.id?.trim() || "";
   const latestMessage = getLatestUserText(messages);
 
-  await supabase.from("ros_conversation_insights").insert({
+  await (supabase as any).from("ros_conversation_insights").insert({
     user_id: userId,
     prospect_id: prospectId,
     conversation_id: conversationId || null,
@@ -1292,7 +1292,7 @@ export async function persistRevenueOperatingSnapshot({
     memory: persistedSnapshot.memory,
   });
 
-  const { data: decision, error: decisionError } = await supabase
+  const { data: decision, error: decisionError } = await (supabase as any)
     .from("ros_revenue_decisions")
     .insert({
       user_id: userId,
@@ -1316,7 +1316,7 @@ export async function persistRevenueOperatingSnapshot({
 
   if (escalation) {
     const sourceEventId = `${userId}:${conversationId || senderId || "conversation"}:${escalation.intent}`;
-    await supabase.from("ros_escalation_events").insert({
+    await (supabase as any).from("ros_escalation_events").insert({
       user_id: userId,
       prospect_id: prospectId,
       conversation_id: conversationId || null,
@@ -1355,7 +1355,7 @@ export async function persistRevenueOperatingSnapshot({
   if (dominantOutcome) {
     const outcomeAction = buildRevenueOutcomeAction(persistedSnapshot, dominantOutcome[0], outcomeProviders);
 
-    const { data: outcome, error: outcomeError } = await supabase.from("ros_revenue_outcomes").insert({
+    const { data: outcome, error: outcomeError } = await (supabase as any).from("ros_revenue_outcomes").insert({
       user_id: userId,
       prospect_id: prospectId,
       decision_id: decision?.id || null,
@@ -1424,7 +1424,7 @@ export async function persistRevenueOperatingSnapshot({
       : []),
   ];
 
-  await supabase.from("ros_learning_events").insert(learningEvents);
+  await (supabase as any).from("ros_learning_events").insert(learningEvents);
 
   await recordPlatformAnalyticsEvent({
     supabase,
@@ -1498,7 +1498,7 @@ export async function recordRevenueConversionEvent({
   let outcomeId: string | null = null;
 
   if (senderId) {
-    const { data: prospects, error: prospectError } = await supabase
+    const { data: prospects, error: prospectError } = await (supabase as any)
       .from("ros_prospects")
       .select("id")
       .eq("user_id", userId)
@@ -1513,7 +1513,7 @@ export async function recordRevenueConversionEvent({
     prospectId = prospects?.[0]?.id || null;
   }
 
-  const decisionQuery = supabase
+  const decisionQuery = (supabase as any)
     .from("ros_revenue_decisions")
     .select("id")
     .eq("user_id", userId)
@@ -1527,7 +1527,7 @@ export async function recordRevenueConversionEvent({
 
   decisionId = decisionResult.data?.[0]?.id || null;
 
-  const outcomeQuery = supabase
+  const outcomeQuery = (supabase as any)
     .from("ros_revenue_outcomes")
     .select("id, metadata")
     .eq("user_id", userId)
@@ -1548,7 +1548,7 @@ export async function recordRevenueConversionEvent({
   outcomeId = existingOutcome?.id || null;
 
   if (outcomeId) {
-    const { error: updateOutcomeError } = await supabase
+    const { error: updateOutcomeError } = await (supabase as any)
       .from("ros_revenue_outcomes")
       .update({
         status: getOutcomeStatusForConversionEvent(status),
@@ -1570,7 +1570,7 @@ export async function recordRevenueConversionEvent({
       throw updateOutcomeError;
     }
   } else {
-    const { data: insertedOutcome, error: insertOutcomeError } = await supabase
+    const { data: insertedOutcome, error: insertOutcomeError } = await (supabase as any)
       .from("ros_revenue_outcomes")
       .insert({
         user_id: userId,
@@ -1599,7 +1599,7 @@ export async function recordRevenueConversionEvent({
     outcomeId = insertedOutcome?.id || null;
   }
 
-  const { error: eventError } = await supabase.from("ros_conversion_events").insert({
+  const { error: eventError } = await (supabase as any).from("ros_conversion_events").insert({
     user_id: userId,
     prospect_id: prospectId,
     decision_id: decisionId,
@@ -1625,7 +1625,7 @@ export async function recordRevenueConversionEvent({
     throw eventError;
   }
 
-  const { error: learningError } = await supabase.from("ros_learning_events").insert({
+  const { error: learningError } = await (supabase as any).from("ros_learning_events").insert({
     user_id: userId,
     prospect_id: prospectId,
     decision_id: decisionId,

@@ -102,7 +102,7 @@ async function readResponsePayload(response: Response) {
 }
 
 export async function listRevenueProviderConnectionRows(supabase: SupabaseServiceClient, userId: string) {
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("ros_provider_connections")
     .select("outcome_type, provider, enabled, auto_execute, action_url, cta, execution_mode, webhook_url, api_endpoint, secret_token, last_status, last_error, last_sync_at")
     .eq("user_id", userId);
@@ -198,7 +198,7 @@ export async function saveRevenueProviderConnections({
       payload.secret_token = secret.secretToken.trim();
     }
 
-    const { error } = await supabase.from("ros_provider_connections").upsert(payload, {
+    const { error } = await (supabase as any).from("ros_provider_connections").upsert(payload, {
       onConflict: "user_id,outcome_type",
     });
 
@@ -220,7 +220,7 @@ async function getProviderWithSecret({
   outcomeType: string;
 }) {
   const baseProvider = providerSettings?.providers.find((provider) => provider.outcomeType === outcomeType);
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("ros_provider_connections")
     .select("*")
     .eq("user_id", userId)
@@ -333,7 +333,7 @@ export async function executeRevenueOutcomeProvider({
     error_message: errorMessage || null,
     completed_at: status === "completed" || status === "routed" ? new Date().toISOString() : null,
   };
-  const { data: execution, error: executionError } = await supabase
+  const { data: execution, error: executionError } = await (supabase as any)
     .from("ros_outcome_executions")
     .insert(executionPayload)
     .select("id")
@@ -344,7 +344,7 @@ export async function executeRevenueOutcomeProvider({
   }
 
   if (provider) {
-    const { error: providerUpdateError } = await supabase
+    const { error: providerUpdateError } = await (supabase as any)
       .from("ros_provider_connections")
       .update({
         last_status: status,
@@ -360,9 +360,9 @@ export async function executeRevenueOutcomeProvider({
   }
 
   if (outcomeId) {
-    const { data: rows } = await supabase.from("ros_revenue_outcomes").select("metadata").eq("id", outcomeId).limit(1);
+    const { data: rows } = await (supabase as any).from("ros_revenue_outcomes").select("metadata").eq("id", outcomeId).limit(1);
     const currentMetadata = isRecord(rows?.[0]?.metadata) ? rows?.[0]?.metadata : {};
-    const { error: outcomeUpdateError } = await supabase
+    const { error: outcomeUpdateError } = await (supabase as any)
       .from("ros_revenue_outcomes")
       .update({
         metadata: {

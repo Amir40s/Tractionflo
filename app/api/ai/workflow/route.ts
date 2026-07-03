@@ -311,7 +311,7 @@ export async function POST(request: Request) {
     if (!forceRefresh) {
       const query = serviceSupabase
         .from('ros_revenue_decisions')
-        .select('payload')
+        .select('payload, created_at')
         .eq('user_id', user.id);
 
       const filters: string[] = [];
@@ -322,9 +322,24 @@ export async function POST(request: Request) {
         ? await query.or(filters.join(',')).order('created_at', { ascending: false }).limit(1)
         : { data: null };
 
-      const latestDecision = cachedDecisions?.[0];
+      const latestDecision = cachedDecisions?.[0] as any;
       if (latestDecision && typeof latestDecision.payload === 'object' && latestDecision.payload !== null) {
         const cachedPayload = latestDecision.payload as any;
+
+        // Invalidate cache if a new user message arrived after this decision was cached
+        const cacheCreatedAt = latestDecision.created_at ? new Date(latestDecision.created_at).getTime() : 0;
+        const latestUserMessage = [...(payload.messages || [])]
+          .reverse()
+          .find((msg) => msg.from === 'user' && msg.time);
+        const latestUserMessageTime = latestUserMessage?.time ? new Date(latestUserMessage.time).getTime() : 0;
+
+        if (latestUserMessageTime > cacheCreatedAt) {
+          logger.info('Cache invalidated: new user message arrived after cached decision.', {
+            cacheCreatedAt: new Date(cacheCreatedAt).toISOString(),
+            latestUserMessageTime: new Date(latestUserMessageTime).toISOString(),
+          });
+          // Fall through to re-run the AI
+        } else {
         logger.info("Found cached ROS snapshot in database. Returning to save tokens.");
         return NextResponse.json({
           assistantId,
@@ -351,6 +366,7 @@ export async function POST(request: Request) {
           knowledge: { mode: 'none' as const, matches: [], totalSources: 0 },
           cached: true,
         });
+        } // end else (cache is still valid)
       }
     }
 
@@ -507,6 +523,7 @@ export async function POST(request: Request) {
       catalogOffers: result.catalogOffers,
       enabledWorkflows,
       knowledge: summarizeKnowledgeForResponse(knowledge, assistantId),
+      knowledgeConfidence: result.knowledgeConfidence,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not run AI workflow';

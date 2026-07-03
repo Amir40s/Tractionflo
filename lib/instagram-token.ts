@@ -22,6 +22,32 @@ type InstagramTokenExchangeResponse = {
   error_message?: string;
 };
 
+function normalizeInstagramAccessToken(token: string | null | undefined) {
+  let normalized = String(token || "").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  normalized = normalized.replace(/^Bearer\s+/i, "").trim();
+  normalized = normalized.replace(/^['"]|['"]$/g, "").trim();
+
+  if (normalized.includes("access_token=")) {
+    const tokenParam = normalized.split("access_token=").pop() || "";
+    normalized = tokenParam.split("&")[0].trim();
+  }
+
+  if (normalized.includes("\n")) {
+    normalized = normalized.split("\n")[0].trim();
+  }
+
+  if (normalized.includes(" ")) {
+    normalized = normalized.split(" ")[0].trim();
+  }
+
+  return normalized;
+}
+
 class InstagramTokenResponseError extends Error {
   constructor(message: string, readonly data: InstagramTokenExchangeResponse) {
     super(message);
@@ -59,7 +85,7 @@ async function parseInstagramTokenResponse(response: Response, fallbackMessage: 
   }
 
   return {
-    accessToken: data.access_token,
+    accessToken: normalizeInstagramAccessToken(data.access_token),
     expiresIn: data.expires_in,
     tokenType: data.token_type,
   };
@@ -106,7 +132,7 @@ export async function exchangeInstagramTokenForLongLivedToken({
   const exchangeUrl = new URL("https://graph.instagram.com/access_token");
   exchangeUrl.searchParams.set("grant_type", "ig_exchange_token");
   exchangeUrl.searchParams.set("client_secret", appSecret);
-  exchangeUrl.searchParams.set("access_token", accessToken);
+  exchangeUrl.searchParams.set("access_token", normalizeInstagramAccessToken(accessToken));
 
   return fetchInstagramTokenWithGetPostFallback(exchangeUrl, "Could not create a long-lived Instagram token.");
 }
@@ -114,7 +140,7 @@ export async function exchangeInstagramTokenForLongLivedToken({
 export async function refreshLongLivedInstagramToken(accessToken: string) {
   const refreshUrl = new URL("https://graph.instagram.com/refresh_access_token");
   refreshUrl.searchParams.set("grant_type", "ig_refresh_token");
-  refreshUrl.searchParams.set("access_token", accessToken);
+  refreshUrl.searchParams.set("access_token", normalizeInstagramAccessToken(accessToken));
 
   return fetchInstagramTokenWithGetPostFallback(refreshUrl, "Could not refresh Instagram token.");
 }
@@ -126,7 +152,7 @@ export async function saveInstagramAccountToken(
   const payload = {
     user_id: account.user_id,
     ig_user_id: account.ig_user_id,
-    access_token: account.access_token,
+    access_token: normalizeInstagramAccessToken(account.access_token),
     created_at: new Date().toISOString(),
   };
 
@@ -176,8 +202,8 @@ export async function saveInstagramAccountToken(
     existingForInstagram?.id ||
     existingForUser?.id;
   const { error } = rowId
-    ? await supabase.from("instagram_accounts").update(payload).eq("id", rowId)
-    : await supabase.from("instagram_accounts").insert(payload);
+    ? await (supabase.from("instagram_accounts") as any).update(payload).eq("id", rowId)
+    : await (supabase.from("instagram_accounts") as any).insert(payload);
 
   if (error) {
     throw new Error(`Could not save Instagram token: ${error.message}`);
@@ -190,10 +216,10 @@ async function updateInstagramAccountAccessToken(
   accessToken: string
 ) {
   const payload = {
-    access_token: accessToken,
+    access_token: normalizeInstagramAccessToken(accessToken),
     created_at: new Date().toISOString(),
   };
-  const query = supabase.from("instagram_accounts").update(payload);
+  const query = (supabase.from("instagram_accounts") as any).update(payload);
 
   if (account.id) {
     return query.eq("id", account.id);
@@ -223,7 +249,10 @@ export async function getStoredInstagramAccount(supabase: SupabaseServiceClient,
     return null;
   }
 
-  return data;
+  return {
+    ...data,
+    access_token: normalizeInstagramAccessToken(data.access_token),
+  };
 }
 
 export async function getStoredInstagramAccountByIgUserId(supabase: SupabaseServiceClient, igUserId: string) {
@@ -244,7 +273,10 @@ export async function getStoredInstagramAccountByIgUserId(supabase: SupabaseServ
     return null;
   }
 
-  return data;
+  return {
+    ...data,
+    access_token: normalizeInstagramAccessToken(data.access_token),
+  };
 }
 
 async function refreshAccountIfNeeded(supabase: SupabaseServiceClient, account: StoredInstagramAccount | null) {

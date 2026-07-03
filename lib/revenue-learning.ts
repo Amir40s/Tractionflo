@@ -117,7 +117,7 @@ function getDecisionTacticIntelligence(decision: RosRow) {
 }
 
 function getRowsForDecision(rows: RosRow[], decisionId: string) {
-  return rows.filter((row) => asString(row.decision_id) === decisionId);
+  return rows.filter((row: any) => asString(row.decision_id) === decisionId);
 }
 
 function isWonStatus(status: string) {
@@ -135,8 +135,8 @@ function getWinRate(wins: number, losses: number) {
 
 function getDecisionResult(outcomes: RosRow[], events: RosRow[], decisionId: string) {
   const relatedRows = [...getRowsForDecision(outcomes, decisionId), ...getRowsForDecision(events, decisionId)];
-  const winningRows = relatedRows.filter((row) => isWonStatus(asString(row.status)));
-  const losingRows = relatedRows.filter((row) => isLostStatus(asString(row.status)));
+  const winningRows = relatedRows.filter((row: any) => isWonStatus(asString(row.status)));
+  const losingRows = relatedRows.filter((row: any) => isLostStatus(asString(row.status)));
   const status = winningRows.length > 0 ? "won" : losingRows.length > 0 ? "lost" : "";
   const valueRows = winningRows.length > 0 ? winningRows : relatedRows;
 
@@ -193,7 +193,7 @@ async function upsertAdaptations(
   adaptations: RevenueStrategyAdaptation[]
 ) {
   for (const adaptation of adaptations) {
-    const { error } = await supabase.from("ros_strategy_adaptations").upsert(
+    const { error } = await (supabase as any).from("ros_strategy_adaptations").upsert(
       {
         user_id: userId,
         strategy_key: adaptation.strategyKey,
@@ -221,9 +221,9 @@ export async function refreshRevenueLearningModel({
   userId: string;
 }) {
   const [decisions, outcomes, events] = await Promise.all([
-    selectRows(supabase.from("ros_revenue_decisions").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(500)),
-    selectRows(supabase.from("ros_revenue_outcomes").select("*").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(500)),
-    selectRows(supabase.from("ros_conversion_events").select("*").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(500)),
+    selectRows((supabase as any).from("ros_revenue_decisions").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(500)),
+    selectRows((supabase as any).from("ros_revenue_outcomes").select("*").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(500)),
+    selectRows((supabase as any).from("ros_conversion_events").select("*").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(500)),
   ]);
   const frameworkStats = new Map<string, { decisions: number; wins: number; losses: number; confidenceTotal: number }>();
   const outcomeStats = new Map<string, { outcomes: number; wins: number; losses: number; value: number }>();
@@ -428,7 +428,7 @@ export async function listRevenueStrategyAdaptations({
   limit?: number;
 }) {
   const rows = await selectRows(
-    supabase
+    (supabase as any)
       .from("ros_strategy_adaptations")
       .select("*")
       .eq("user_id", userId)
@@ -436,7 +436,7 @@ export async function listRevenueStrategyAdaptations({
       .limit(limit)
   );
 
-  return rows.map((row) => ({
+  return rows.map((row: any) => ({
     strategyKey: asString(row.strategy_key),
     outcomeType: asString(row.outcome_type),
     framework: asString(row.framework),

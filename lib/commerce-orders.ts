@@ -292,7 +292,7 @@ export async function listCommerceOrdersForUser(
   supabase: SupabaseServiceClient,
   userId: string
 ): Promise<CommerceOrdersListResult> {
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("commerce_orders")
     .select("*")
     .eq("user_id", userId)
@@ -308,7 +308,7 @@ export async function listCommerceOrdersForUser(
   }
 
   return {
-    orders: (data || []).map((row) => normalizeCommerceOrder(row as CommerceOrderRow)),
+    orders: (data || []).map((row: any) => normalizeCommerceOrder(row as CommerceOrderRow)),
     tableReady: true,
   };
 }
@@ -328,7 +328,7 @@ export async function createPendingCommerceOrder(
   const productId = normalizedDraft.productId || normalizedDraft.sourceMediaId || normalizedDraft.productTitle || "instagram-product";
 
   if (senderId) {
-    const { data: existing, error: existingError } = await supabase
+    const { data: existing, error: existingError } = await (supabase as any)
       .from("commerce_orders")
       .select("*")
       .eq("user_id", userId)
@@ -351,8 +351,8 @@ export async function createPendingCommerceOrder(
     }
   }
 
-  const { data, error } = await supabase
-    .from("commerce_orders")
+  const { data, error } = await ((supabase as any)
+    .from("commerce_orders") as any)
     .insert({
       user_id: userId,
       conversation_id: normalizedDraft.conversationId || null,
@@ -404,7 +404,7 @@ export async function confirmLatestPendingCommerceOrder(
     return null;
   }
 
-  const { data: pendingRows, error: lookupError } = await supabase
+  const { data: pendingRows, error: lookupError } = await (supabase as any)
     .from("commerce_orders")
     .select("*")
     .eq("user_id", userId)
@@ -428,8 +428,8 @@ export async function confirmLatestPendingCommerceOrder(
   }
 
   const confirmedAt = new Date().toISOString();
-  const { data, error } = await supabase
-    .from("commerce_orders")
+  const { data, error } = await ((supabase as any)
+    .from("commerce_orders") as any)
     .update({
       conversation_id: conversationId || pending.conversation_id || null,
       status: "confirmed",
@@ -476,7 +476,7 @@ export async function confirmPendingCommerceOrderById(
     return null;
   }
 
-  let query = supabase
+  let query = (supabase as any)
     .from("commerce_orders")
     .select("*")
     .eq("id", id)
@@ -505,8 +505,8 @@ export async function confirmPendingCommerceOrderById(
   }
 
   const confirmedAt = new Date().toISOString();
-  const { data, error } = await supabase
-    .from("commerce_orders")
+  const { data, error } = await ((supabase as any)
+    .from("commerce_orders") as any)
     .update({
       conversation_id: conversationId || pending.conversation_id || null,
       status: "confirmed",
@@ -549,7 +549,7 @@ export async function cancelPendingCommerceOrdersForSender(
     return [];
   }
 
-  const { data: pendingRows, error: lookupError } = await supabase
+  const { data: pendingRows, error: lookupError } = await (supabase as any)
     .from("commerce_orders")
     .select("*")
     .eq("user_id", userId)
@@ -582,7 +582,7 @@ export async function cancelPendingCommerceOrdersForSender(
         cancellationSource: source,
       };
 
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("commerce_orders")
         .update({
           status: "cancelled",
@@ -625,7 +625,7 @@ export async function getLatestCommerceOrderForSender(
     return null;
   }
 
-  let query = supabase
+  let query = (supabase as any)
     .from("commerce_orders")
     .select("*")
     .eq("user_id", userId)
@@ -659,7 +659,7 @@ export async function getCommerceOrderById(supabase: SupabaseServiceClient, orde
     return null;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("commerce_orders")
     .select("*")
     .eq("id", id)
@@ -904,7 +904,7 @@ export async function prepareCommerceOrderCheckout(
       stripePaymentStatus: session.payment_status || "unpaid",
     };
 
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from("commerce_orders")
       .update({
         payment_status: "pending",
@@ -1045,7 +1045,7 @@ export async function markCommerceOrderConfirmationMessageSent(
     confirmationSource: source,
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("commerce_orders")
     .update({
       metadata,
@@ -1107,7 +1107,7 @@ export async function markCommerceOrderPaymentMessageSent(
     ...(checkoutFallbackMessageId ? { checkoutFallbackMessageId } : {}),
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("commerce_orders")
     .update({
       metadata,
@@ -1164,7 +1164,7 @@ export async function markCommerceOrderPaymentThankYouMessageSent(
     paymentThankYouSource: source,
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("commerce_orders")
     .update({
       metadata,
@@ -1208,7 +1208,7 @@ export async function markCommerceOrderPaid(
     return null;
   }
 
-  let query = supabase
+  let query = (supabase as any)
     .from("commerce_orders")
     .select("*")
     .eq("id", orderId)
@@ -1244,7 +1244,7 @@ export async function markCommerceOrderPaid(
     stripePaidAt: paidAt,
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("commerce_orders")
     .update({
       status: "paid",
@@ -1289,7 +1289,7 @@ export async function markCommerceOrderPaymentFailed(
     return null;
   }
 
-  let query = supabase
+  let query = (supabase as any)
     .from("commerce_orders")
     .select("*")
     .eq("id", orderId)
@@ -1324,7 +1324,7 @@ export async function markCommerceOrderPaymentFailed(
     stripePaymentFailureReason: reason || "",
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("commerce_orders")
     .update({
       payment_status: "failed",

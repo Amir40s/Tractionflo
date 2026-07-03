@@ -354,7 +354,7 @@ async function claimIdempotentSend({
       idempotencyKey,
       idempotencyStatus: 'sending',
     },
-  });
+  } as any);
 
   if (!error) {
     return { claimed: true, lockMid, sent: [] };
@@ -393,8 +393,7 @@ async function completeIdempotentSendLock({
   idempotencyKey: string;
   automated: boolean;
 }) {
-  const { error } = await supabase
-    .from('messages')
+  const { error } = await (supabase.from('messages') as any)
     .update({
       mid: sent.message_id || lockMid,
       text: sent.text || text || (sent.attachment ? `[${sent.attachment.type} attachment] ${sent.attachment.url}` : ''),
