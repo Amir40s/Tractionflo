@@ -15,7 +15,7 @@ type InstagramParticipantProfile = {
 
 async function getParticipantProfile(participantId: string, accessToken: string): Promise<InstagramParticipantProfile> {
   try {
-    const profileUrl = new URL(`https://graph.instagram.com/v21.0/${participantId}`);
+    const profileUrl = new URL(`https://graph.facebook.com/v21.0/${participantId}`);
     profileUrl.searchParams.set("fields", "id,username,name,profile_pic");
     profileUrl.searchParams.set("access_token", accessToken);
 

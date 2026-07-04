@@ -65,6 +65,13 @@ export type CommerceCheckoutPreparationResult = {
 
 export type CommerceCheckoutReturnTo = "instagram" | "inbox" | "";
 
+export type CommerceCheckoutProviderConnection = {
+  enabled: boolean;
+  provider: string;
+  actionUrl: string;
+  secretToken: string;
+};
+
 type CommerceOrderRow = {
   id?: string;
   user_id?: string;
@@ -131,6 +138,86 @@ function getMetadataString(metadata: Record<string, unknown>, keys: string[]) {
 
 function getStripeSecretKey() {
   return process.env.STRIPE_SECRET_KEY?.trim() || "";
+}
+
+function sanitizeCheckoutUrl(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const raw = value.trim();
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+export async function getCommerceCheckoutProviderForUser(
+  supabase: SupabaseServiceClient,
+  userId: string
+): Promise<CommerceCheckoutProviderConnection | null> {
+  if (!userId) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("ros_provider_connections")
+    .select("enabled, provider, action_url, secret_token")
+    .eq("user_id", userId)
+    .eq("outcome_type", "purchase_product")
+    .limit(1);
+
+  if (error) {
+    if (isCommerceOrdersTableMissing(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  const row = Array.isArray(data) ? data[0] as {
+    enabled?: boolean | null;
+    provider?: string | null;
+    action_url?: string | null;
+    secret_token?: string | null;
+  } | undefined : undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  const actionUrl = sanitizeCheckoutUrl(row.action_url || "");
+  const secretToken = typeof row.secret_token === "string" ? row.secret_token.trim() : "";
+
+  if (!actionUrl && !secretToken) {
+    return null;
+  }
+
+  return {
+    enabled: row.enabled !== false || Boolean(actionUrl || secretToken),
+    provider: row.provider?.trim() || "Stripe Checkout",
+    actionUrl,
+    secretToken,
+  };
+}
+
+export async function getCommerceStripeSecretKeyForUser(supabase: SupabaseServiceClient, userId: string) {
+  const provider = await getCommerceCheckoutProviderForUser(supabase, userId);
+
+  return provider?.enabled ? provider.secretToken : "";
+}
+
+export async function isCommerceCheckoutConfiguredForUser(supabase: SupabaseServiceClient, userId: string) {
+  const provider = await getCommerceCheckoutProviderForUser(supabase, userId);
+
+  return Boolean(provider?.enabled && (provider.actionUrl || provider.secretToken));
 }
 
 function getCommerceCheckoutBaseUrl(baseUrl?: string) {
@@ -292,7 +379,7 @@ export async function listCommerceOrdersForUser(
   supabase: SupabaseServiceClient,
   userId: string
 ): Promise<CommerceOrdersListResult> {
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from("commerce_orders")
     .select("*")
     .eq("user_id", userId)
@@ -659,7 +746,7 @@ export async function getCommerceOrderById(supabase: SupabaseServiceClient, orde
     return null;
   }
 
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from("commerce_orders")
     .select("*")
     .eq("id", id)
@@ -754,15 +841,17 @@ async function createStripeCheckoutSession(
   {
     baseUrl,
     returnTo = "",
+    stripeSecretKey,
   }: {
     baseUrl?: string;
     returnTo?: CommerceCheckoutReturnTo | string;
+    stripeSecretKey?: string;
   } = {}
 ) {
-  const stripeSecretKey = getStripeSecretKey();
+  const resolvedStripeSecretKey = stripeSecretKey?.trim() || "";
 
-  if (!stripeSecretKey) {
-    throw new Error("Stripe checkout is not configured. Add STRIPE_SECRET_KEY.");
+  if (!resolvedStripeSecretKey) {
+    throw new Error("Stripe checkout is not configured for this account.");
   }
 
   const unitAmount = getStripeUnitAmount(order);
@@ -818,7 +907,7 @@ async function createStripeCheckoutSession(
   const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${stripeSecretKey}`,
+      Authorization: `Bearer ${resolvedStripeSecretKey}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: params,
@@ -840,6 +929,70 @@ async function createStripeCheckoutSession(
   return data;
 }
 
+async function persistAccountPaymentLinkCheckout(
+  supabase: SupabaseServiceClient,
+  {
+    userId,
+    order,
+    provider,
+    returnTo,
+  }: {
+    userId: string;
+    order: CommerceOrder;
+    provider: CommerceCheckoutProviderConnection;
+    returnTo: CommerceCheckoutReturnTo | string;
+  }
+): Promise<CommerceCheckoutPreparationResult> {
+  const now = new Date().toISOString();
+  const metadata = {
+    ...(order.metadata || {}),
+    stripeCheckoutUrl: provider.actionUrl,
+    stripeCheckoutCreatedAt: now,
+    checkoutReturnTo: normalizeCommerceCheckoutReturnTo(returnTo || "instagram"),
+    checkoutProvider: "account_stripe_payment_link",
+    stripeProviderName: provider.provider,
+  };
+
+  const { data, error } = await (supabase as any)
+    .from("commerce_orders")
+    .update({
+      payment_status: "pending",
+      payment_method: provider.provider || "Stripe Payment Link",
+      metadata,
+      updated_at: now,
+    })
+    .eq("id", order.id)
+    .eq("user_id", userId)
+    .select("*")
+    .single();
+
+  if (error) {
+    if (isCommerceOrdersTableMissing(error)) {
+      return {
+        order: {
+          ...order,
+          paymentStatus: "pending",
+          paymentMethod: provider.provider || "Stripe Payment Link",
+          metadata,
+          updatedAt: now,
+        },
+        checkoutUrl: provider.actionUrl,
+        checkoutConfigured: true,
+        checkoutCreated: false,
+      };
+    }
+
+    throw error;
+  }
+
+  return {
+    order: data ? normalizeCommerceOrder(data as CommerceOrderRow) : order,
+    checkoutUrl: provider.actionUrl,
+    checkoutConfigured: true,
+    checkoutCreated: false,
+  };
+}
+
 export async function prepareCommerceOrderCheckout(
   supabase: SupabaseServiceClient,
   {
@@ -859,17 +1012,22 @@ export async function prepareCommerceOrderCheckout(
   const existingCheckoutUrl = getCommerceOrderCheckoutUrl(order);
   const normalizedReturnTo = normalizeCommerceCheckoutReturnTo(returnTo || "instagram");
   const existingReturnTo = getMetadataString(order.metadata || {}, ["checkoutReturnTo", "returnTo", "return_to"]);
+  const accountCheckoutProvider = await getCommerceCheckoutProviderForUser(supabase, userId);
+  const accountCheckoutConfigured = Boolean(
+    accountCheckoutProvider?.enabled &&
+      (accountCheckoutProvider.actionUrl || accountCheckoutProvider.secretToken)
+  );
 
   if (order.paymentStatus === "paid" || order.status === "paid") {
     return {
       order,
       checkoutUrl: existingCheckoutUrl,
-      checkoutConfigured: isStripeCommerceCheckoutConfigured(),
+      checkoutConfigured: accountCheckoutConfigured || Boolean(existingCheckoutUrl),
       checkoutCreated: false,
     };
   }
 
-  if (existingCheckoutUrl && !forceNew && existingReturnTo === normalizedReturnTo) {
+  if (existingCheckoutUrl && accountCheckoutConfigured && !forceNew && existingReturnTo === normalizedReturnTo) {
     return {
       order,
       checkoutUrl: existingCheckoutUrl,
@@ -878,20 +1036,30 @@ export async function prepareCommerceOrderCheckout(
     };
   }
 
-  if (!isStripeCommerceCheckoutConfigured()) {
+  if (!accountCheckoutProvider?.enabled || !accountCheckoutConfigured) {
     return {
       order,
       checkoutUrl: "",
       checkoutConfigured: false,
       checkoutCreated: false,
-      error: "Stripe checkout is not configured.",
+      error: "Stripe checkout is not configured for this account.",
     };
+  }
+
+  if (accountCheckoutProvider.actionUrl && !accountCheckoutProvider.secretToken) {
+    return persistAccountPaymentLinkCheckout(supabase, {
+      userId,
+      order,
+      provider: accountCheckoutProvider,
+      returnTo: normalizedReturnTo,
+    });
   }
 
   try {
     const session = await createStripeCheckoutSession(order, {
       baseUrl,
       returnTo: normalizedReturnTo,
+      stripeSecretKey: accountCheckoutProvider.secretToken,
     });
     const now = new Date().toISOString();
     const metadata = {
@@ -900,6 +1068,8 @@ export async function prepareCommerceOrderCheckout(
       stripeCheckoutUrl: session.url || "",
       stripeCheckoutCreatedAt: now,
       checkoutReturnTo: normalizedReturnTo,
+      checkoutProvider: "account_stripe_checkout",
+      stripeProviderName: accountCheckoutProvider.provider,
       stripePaymentIntentId: session.payment_intent || "",
       stripePaymentStatus: session.payment_status || "unpaid",
     };
@@ -937,10 +1107,19 @@ export async function prepareCommerceOrderCheckout(
       checkoutCreated: true,
     };
   } catch (error) {
+    if (accountCheckoutProvider.actionUrl) {
+      return persistAccountPaymentLinkCheckout(supabase, {
+        userId,
+        order,
+        provider: accountCheckoutProvider,
+        returnTo: normalizedReturnTo,
+      });
+    }
+
     return {
       order,
       checkoutUrl: "",
-      checkoutConfigured: true,
+      checkoutConfigured: accountCheckoutConfigured,
       checkoutCreated: false,
       error: error instanceof Error ? error.message : "Could not create Stripe checkout.",
     };

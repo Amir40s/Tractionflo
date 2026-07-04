@@ -318,7 +318,6 @@ export async function sendInstagramCommercePaymentMessage({
       result.checkoutButtonMessageId = sentButton.message_id || "";
       result.checkoutButtonSent = true;
       result.messageId = result.checkoutButtonMessageId || result.messageId;
-      return result;
     } catch (error) {
       result.checkoutButtonError = error instanceof Error ? error.message : "Instagram checkout button failed.";
     }
@@ -338,7 +337,7 @@ export async function sendInstagramCommercePaymentMessage({
     return result;
   }
 
-  if (checkoutUrl && shouldTryButton) {
+  if (checkoutUrl && shouldTryButton && result.checkoutButtonError && !result.checkoutButtonSent) {
     const fallbackText = buildCheckoutFallbackText(checkoutUrl);
     const fallback = await sendInstagramTextMessage(accessToken, recipientId, fallbackText);
     result.checkoutFallbackMessageId = fallback.message_id || "";

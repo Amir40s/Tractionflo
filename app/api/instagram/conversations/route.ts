@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
 import { canAccessPage, filterAssignedConversations, getUserPermissionProfile } from '@/lib/agent-permissions';
+import {
+  buildCommerceOrderPaidReply,
+  buildCommerceOrderPaymentReply,
+  getCommerceOrderCheckoutUrl,
+  listCommerceOrdersForUser,
+  type CommerceOrder,
+} from '@/lib/commerce-orders';
 import { getFreshInstagramAccount } from '@/lib/instagram-token';
 import { createSupabaseServiceClient } from '@/lib/supabase';
 import { createClient } from '@/utils/supabase/server';
@@ -147,7 +154,7 @@ async function getParticipantProfile(participant: InstagramParticipant | undefin
   }
 
   try {
-    const profileUrl = new URL(`https://graph.instagram.com/v21.0/${participant.id}`);
+    const profileUrl = new URL(`https://graph.facebook.com/v21.0/${participant.id}`);
     profileUrl.searchParams.set('fields', 'id,username,name,profile_pic');
     profileUrl.searchParams.set('access_token', accessToken);
 
@@ -491,6 +498,203 @@ function dedupeStoredMessages(rows: StoredMessageRow[]) {
   });
 }
 
+function getCommerceMetadataString(order: CommerceOrder, keys: string[]) {
+  const metadata = order.metadata || {};
+
+  for (const key of keys) {
+    const value = metadata[key];
+
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return '';
+}
+
+function getCommerceMessageTimestamp(order: CommerceOrder, keys: string[], fallback = '') {
+  const metadataValue = getCommerceMetadataString(order, keys);
+  const parsedMetadata = metadataValue ? Date.parse(metadataValue) : Number.NaN;
+
+  if (Number.isFinite(parsedMetadata)) {
+    return parsedMetadata;
+  }
+
+  const parsedFallback = fallback ? Date.parse(fallback) : Number.NaN;
+  if (Number.isFinite(parsedFallback)) {
+    return parsedFallback;
+  }
+
+  return Date.now();
+}
+
+function hasStoredMid(rows: StoredMessageRow[], mid: string) {
+  return Boolean(mid && rows.some((row) => row.mid === mid));
+}
+
+function getCommerceOrderConversationId(order: CommerceOrder) {
+  return order.conversationId || order.instagramSenderId;
+}
+
+function getCommerceOrderSenderId(order: CommerceOrder, ownIgUserId: string) {
+  return getCommerceMetadataString(order, ['businessInstagramId', 'business_instagram_id']) || ownIgUserId;
+}
+
+function createCommerceSyntheticRow({
+  order,
+  ownIgUserId,
+  mid,
+  text,
+  timestamp,
+  messageType,
+  extraMetadata = {},
+}: {
+  order: CommerceOrder;
+  ownIgUserId: string;
+  mid: string;
+  text: string;
+  timestamp: number;
+  messageType: string;
+  extraMetadata?: Record<string, unknown>;
+}): StoredMessageRow | null {
+  const conversationId = getCommerceOrderConversationId(order);
+  const senderId = getCommerceOrderSenderId(order, ownIgUserId);
+  const recipientId = order.instagramSenderId;
+
+  if (!order.userId || !conversationId || !recipientId || !mid) {
+    return null;
+  }
+
+  return {
+    mid,
+    user_id: order.userId,
+    conversation_id: conversationId,
+    sender_id: senderId,
+    recipient_id: recipientId,
+    direction: 'outbound',
+    text,
+    timestamp,
+    raw_event: {
+      message_id: mid,
+      recipient_id: recipientId,
+      synthetic: true,
+      commerceMessageType: messageType,
+    },
+    metadata: {
+      ...(order.metadata || {}),
+      ...extraMetadata,
+      source: 'commerce_order_metadata_reconciliation',
+      orderId: order.id,
+      commerceOrderId: order.id,
+      commerceMessageType: messageType,
+      synthetic: true,
+    },
+    created_at: new Date(timestamp).toISOString(),
+  };
+}
+
+async function loadCommerceOutboundRowsForInbox({
+  supabase,
+  userId,
+  ownIgUserId,
+  existingRows,
+}: {
+  supabase: ReturnType<typeof createSupabaseServiceClient>;
+  userId: string;
+  ownIgUserId: string;
+  existingRows: StoredMessageRow[];
+}) {
+  const result = await listCommerceOrdersForUser(supabase, userId).catch((error) => {
+    console.error('Commerce order reconciliation lookup error:', error);
+    return null;
+  });
+
+  if (!result?.tableReady) {
+    return [];
+  }
+
+  const rows: StoredMessageRow[] = [];
+
+  for (const order of result.orders) {
+    const checkoutButtonMessageId = getCommerceMetadataString(order, [
+      'checkoutButtonMessageId',
+      'checkout_button_message_id',
+    ]);
+    const paymentTextMessageId = getCommerceMetadataString(order, [
+      'paymentTextMessageId',
+      'payment_text_message_id',
+    ]);
+    const paymentMessageId = getCommerceMetadataString(order, [
+      'paymentMessageId',
+      'payment_message_id',
+    ]);
+    const paymentThankYouMessageId = getCommerceMetadataString(order, [
+      'paymentThankYouMessageId',
+      'payment_thank_you_message_id',
+    ]);
+    const checkoutUrl = getCommerceOrderCheckoutUrl(order);
+
+    if (checkoutButtonMessageId && !hasStoredMid(existingRows, checkoutButtonMessageId) && !hasStoredMid(rows, checkoutButtonMessageId)) {
+      const row = createCommerceSyntheticRow({
+        order,
+        ownIgUserId,
+        mid: checkoutButtonMessageId,
+        text: '',
+        timestamp: getCommerceMessageTimestamp(order, ['checkoutButtonSentAt', 'checkout_button_sent_at', 'paymentSentAt'], order.confirmedAt || order.updatedAt),
+        messageType: 'checkout_button',
+        extraMetadata: {
+          checkoutUrl,
+          checkoutButtonSent: true,
+        },
+      });
+
+      if (row) {
+        rows.push(row);
+      }
+    }
+
+    const textPaymentMid = paymentTextMessageId || (!checkoutButtonMessageId ? paymentMessageId : '');
+    if (textPaymentMid && !hasStoredMid(existingRows, textPaymentMid) && !hasStoredMid(rows, textPaymentMid)) {
+      const row = createCommerceSyntheticRow({
+        order,
+        ownIgUserId,
+        mid: textPaymentMid,
+        text: buildCommerceOrderPaymentReply(order, checkoutUrl, false, { includeCheckoutUrl: Boolean(checkoutUrl) }),
+        timestamp: getCommerceMessageTimestamp(order, ['paymentSentAt', 'payment_sent_at'], order.confirmedAt || order.updatedAt),
+        messageType: 'payment_text',
+        extraMetadata: {
+          checkoutUrl,
+        },
+      });
+
+      if (row) {
+        rows.push(row);
+      }
+    }
+
+    if (paymentThankYouMessageId && !hasStoredMid(existingRows, paymentThankYouMessageId) && !hasStoredMid(rows, paymentThankYouMessageId)) {
+      const row = createCommerceSyntheticRow({
+        order,
+        ownIgUserId,
+        mid: paymentThankYouMessageId,
+        text: buildCommerceOrderPaidReply(order),
+        timestamp: getCommerceMessageTimestamp(
+          order,
+          ['paymentThankYouSentAt', 'payment_thank_you_sent_at'],
+          order.paidAt || order.updatedAt
+        ),
+        messageType: 'payment_thank_you',
+      });
+
+      if (row) {
+        rows.push(row);
+      }
+    }
+  }
+
+  return rows;
+}
+
 function normalizeDedupeText(value: string) {
   return value.replace(/\s+/g, ' ').trim().toLowerCase();
 }
@@ -619,6 +823,14 @@ async function loadStoredMessagesForInbox({
     }
   }
 
+  const commerceRows = await loadCommerceOutboundRowsForInbox({
+    supabase,
+    userId,
+    ownIgUserId,
+    existingRows: rows,
+  });
+  rows.push(...commerceRows);
+
   return dedupeStoredMessages(rows);
 }
 
@@ -666,17 +878,21 @@ async function buildStoredConversations({
         updated_time: getMessageTimeIso(latest),
         messages: dedupeConversationMessages(sortedRows.map((message, index) => {
           const parsed = parseStoredMessageContent(message.text || '', message.metadata);
+          const isNote = message.direction === 'note';
           const isMe =
-            message.direction === 'outbound' ||
-            (ownIgUserId && message.sender_id === ownIgUserId && message.direction !== 'inbound');
+            !isNote &&
+            (message.direction === 'outbound' ||
+              (ownIgUserId && message.sender_id === ownIgUserId && message.direction !== 'inbound'));
 
           return {
             id: message.mid || `${conversationId}-${message.timestamp || index}`,
             text: parsed.text,
             attachments: parsed.attachments,
             catalogItems: parsed.catalogItems,
-            from: isMe ? 'me' : 'user',
-            sender_name: isMe
+            from: isNote ? 'note' : isMe ? 'me' : 'user',
+            sender_name: isNote
+              ? 'Internal Note'
+              : isMe
               ? 'You'
               : participantProfile.name || participantProfile.username || getFallbackParticipantName(conversationId),
             sender_profile_pic: isMe ? undefined : participantProfile.profile_pic,

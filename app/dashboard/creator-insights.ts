@@ -44,6 +44,9 @@ type InstagramSettingsMessage = {
     preview_url?: string;
     name?: string;
   }[];
+  catalogItems?: {
+    priceAmount?: number | null;
+  }[];
   from: "me" | "user" | "note";
   sender_name?: string;
   sender_id?: string;
@@ -460,6 +463,7 @@ const creatorHumanEscalationKeywords = ["human", "agent", "support", "representa
 const creatorCustomBulkEscalationKeywords = ["custom", "customize", "customise", "personalized", "personalised", "bulk", "wholesale", "large order", "big order", "corporate order", "bridal event", "company order", "group order"];
 const creatorComplexEscalationKeywords = ["complex", "not in your knowledge", "not listed", "not sure", "medical", "injury", "injured", "pain", "orthopedic", "orthopaedic", "allergy", "sensitive issue"];
 const creatorVipLeadEscalationKeywords = ["ready to buy", "want to buy", "want to order", "place order", "confirm order", "send payment", "payment link", "checkout", "buy now", "book now", "reserve it", "reserve this"];
+const creatorPaymentRequestEscalationKeywords = ["payment link", "checkout link", "send payment", "send checkout", "payment method", "card detail", "billing", "accept payment", "payment info", "how to pay", "where to pay", "pay now", "payment gateway"];
 const creatorUrgentOrderEscalationKeywords = ["urgent", "asap", "today", "tonight", "tomorrow", "rush", "immediately", "same day"];
 const creatorEscalationKeywords = [
   ...creatorRefundEscalationKeywords,
@@ -469,6 +473,7 @@ const creatorEscalationKeywords = [
   ...creatorCustomBulkEscalationKeywords,
   ...creatorComplexEscalationKeywords,
   ...creatorVipLeadEscalationKeywords,
+  ...creatorPaymentRequestEscalationKeywords,
   ...creatorUrgentOrderEscalationKeywords,
   ...creatorPartnershipKeywords,
 ];
@@ -805,6 +810,83 @@ function getCommerceRevenueTotals(orders: CommerceOrder[]) {
   };
 }
 
+function isCommerceOrderLead(order: CommerceOrder) {
+  return order.status === "confirmed" || order.status === "paid" || order.paymentStatus === "paid";
+}
+
+function getCommerceOrderConversationId(order: CommerceOrder) {
+  return order.conversationId || order.instagramSenderId || order.id;
+}
+
+function getCommerceOrderLeadName(order: CommerceOrder, conversation?: InstagramSettingsConversation) {
+  if (conversation) {
+    return getConversationLabel(conversation);
+  }
+
+  return order.instagramUsername || (order.instagramSenderId ? `Instagram user ${order.instagramSenderId.slice(-6)}` : "Instagram customer");
+}
+
+function getCommerceOrderLeadTime(order: CommerceOrder) {
+  return order.paidAt || order.confirmedAt || order.updatedAt || order.createdAt;
+}
+
+function buildCommerceOrderOpportunityCard(
+  order: CommerceOrder,
+  conversation?: InstagramSettingsConversation
+): OpportunityPageCard {
+  const isPaid = order.status === "paid" || order.paymentStatus === "paid";
+  const amount = getCommerceOrderAmount(order);
+  const formattedValue = amount > 0 ? formatCreatorMoney(amount) : order.priceText || "Payment";
+  const conversationId = getCommerceOrderConversationId(order);
+  const productTitle = order.productTitle || "Instagram order";
+  const score = isPaid ? 99 : 88;
+
+  return {
+    id: `commerce-order-${sanitizeCreatorStateKey(order.id || conversationId)}`,
+    conversationId,
+    name: getCommerceOrderLeadName(order, conversation),
+    subtitle: isPaid ? "Paid Instagram order" : "Confirmed Instagram order",
+    detail: isPaid
+      ? `Payment received for ${truncateCreatorText(productTitle, 72)}.`
+      : `Customer confirmed ${truncateCreatorText(productTitle, 72)}. Waiting for Stripe payment.`,
+    badge: isPaid ? "PAID ORDER" : "CHECKOUT SENT",
+    time: formatInstagramRelativeTime(getCommerceOrderLeadTime(order)),
+    tone: "green",
+    icon: isPaid ? CircleDollarSign : ShoppingCart,
+    value: isPaid ? `${formattedValue} paid` : `${formattedValue} pending`,
+    scoreLabel: isPaid ? "Paid Customer" : "Hot Lead",
+    score: `${score}/100`,
+    progress: `${score}%`,
+    action: "Review",
+    verified: Boolean(conversation?.participant.username || order.instagramUsername),
+    avatars: conversation
+      ? [getCreatorAvatarNumber(conversation), getCreatorAvatarNumber(conversation, 1), getCreatorAvatarNumber(conversation, 2)]
+      : undefined,
+    stage: "Hot",
+    classification: "Hot",
+    urgency: "High",
+    intent: isPaid ? "Paid Stripe order" : "Confirmed checkout intent",
+    interestLevel: "High",
+    qualificationFacts: [
+      { label: "Interest", value: "High" },
+      { label: "Goals", value: "Captured" },
+      { label: "Budget", value: isPaid ? "Paid" : "Mentioned" },
+      { label: "Timeline", value: "Now" },
+      { label: "Buying intent", value: isPaid ? "Converted" : "Detected" },
+      { label: "Class", value: "Hot" },
+    ],
+    signals: [
+      isPaid ? "Paid Stripe order" : "Order confirmed",
+      productTitle,
+      isPaid ? "Checkout completed" : "Stripe checkout sent",
+    ],
+    missing: isPaid ? [] : ["payment completion"],
+    recommendedAction: isPaid
+      ? "Follow up with fulfillment, delivery, or the next customer step."
+      : "Monitor Stripe payment and follow up if checkout is not completed.",
+  };
+}
+
 function getCreatorSortedMessages(conversation: InstagramSettingsConversation) {
   return [...conversation.messages].sort((a, b) => getCreatorMessageTime(b) - getCreatorMessageTime(a));
 }
@@ -871,6 +953,7 @@ function getCreatorEscalationSourceKey(conversation: InstagramSettingsConversati
     if (category === "urgent_order") return hasCreatorUrgentOrderSignal(text);
     if (category === "brand_deal") return countCreatorKeywordHits(text, creatorPartnershipKeywords) > 0;
     if (category === "vip_lead") return hasCreatorVipLeadEscalationSignal(text, countCreatorKeywordHits(text, creatorBuyerKeywords), inboundCount);
+    if (category === "payment") return hasCreatorKeyword(text, creatorPaymentRequestEscalationKeywords);
     if (category === "human") return hasCreatorKeyword(text, creatorHumanEscalationKeywords);
     if (category === "complex") return hasCreatorKeyword(text, creatorComplexEscalationKeywords);
 
@@ -960,7 +1043,7 @@ export function classifyCreatorOpportunity(conversation: InstagramSettingsConver
     // Find catalog item price amount if available in any message
     let extractedPrice: number | null = null;
     for (const msg of conversation.messages) {
-      const items = (msg as any).catalogItems;
+      const items = msg.catalogItems;
       if (Array.isArray(items) && items.length > 0) {
         for (const item of items) {
           if (typeof item.priceAmount === "number" && item.priceAmount > 0) {
@@ -1033,6 +1116,7 @@ export function classifyCreatorEscalations(
     const hasBulkSignal = hasCreatorKeyword(text, creatorCustomBulkEscalationKeywords) || hasCreatorQuantityEscalationSignal(text);
     const hasUrgentSignal = hasCreatorUrgentOrderSignal(text);
     const hasVipSignal = hasCreatorVipLeadEscalationSignal(text, buyerHits, inboundCount);
+    const hasPaymentRequestSignal = hasCreatorKeyword(text, creatorPaymentRequestEscalationKeywords);
     const hasHumanSignal = hasCreatorKeyword(text, creatorHumanEscalationKeywords);
     const hasComplexSignal = hasCreatorKeyword(text, creatorComplexEscalationKeywords);
     const hasKnownSignal =
@@ -1043,6 +1127,7 @@ export function classifyCreatorEscalations(
       hasUrgentSignal ||
       partnershipHits > 0 ||
       hasVipSignal ||
+      hasPaymentRequestSignal ||
       hasHumanSignal ||
       hasComplexSignal;
 
@@ -1050,7 +1135,8 @@ export function classifyCreatorEscalations(
       !hasCreatorKeyword(text, creatorEscalationKeywords) &&
       !hasBulkSignal &&
       !hasUrgentSignal &&
-      !hasVipSignal
+      !hasVipSignal &&
+      !hasPaymentRequestSignal
     ) {
       return [];
     }
@@ -1105,6 +1191,23 @@ export function classifyCreatorEscalations(
         summary: "Customer expressed dissatisfaction, complaint language, or poor-service feedback.",
         evidence: evidenceFor((messageText) => hasCreatorKeyword(messageText, creatorComplaintEscalationKeywords)),
         recommendedAction: "Take over with an apology, acknowledge the complaint, collect the order/context, and resolve it manually.",
+      });
+    }
+
+    if (hasPaymentRequestSignal && isCreatorEscalationRuleEnabled(activeRules, "payments")) {
+      escalations.push({
+        category: "payment",
+        badge: "Payment Request",
+        badgeTone: "bg-[#fff0f3] text-[#df405b]",
+        borderTone: "border-[#ffc7d0]",
+        glowTone: "bg-[#fffafa]",
+        dotTone: "bg-[#df405b]",
+        icon: DollarSign,
+        risk: "High",
+        riskLevel: "High",
+        summary: "Customer asked for payment link, checkout link, or payment information.",
+        evidence: evidenceFor((messageText) => hasCreatorKeyword(messageText, creatorPaymentRequestEscalationKeywords)),
+        recommendedAction: "Take over immediately. Process payment through Stripe checkout. Do not offer external payment methods or direct payment requests outside the system.",
       });
     }
 
@@ -1235,14 +1338,8 @@ export function buildCreatorLiveSummary(
   const pendingOrderCount = sortedOrders.filter((order) => order.status === "pending_confirmation").length;
   const confirmedOrderCount = sortedOrders.filter((order) => order.status === "confirmed" || order.status === "paid" || order.paymentStatus === "paid").length;
   const paidOrderCount = sortedOrders.filter((order) => order.status === "paid" || order.paymentStatus === "paid").length;
-  const buyerCount = opportunityRecords.filter((record) => record.opportunity.badge === "HIGH INTENT").length;
-  const hotLeadCount = opportunityRecords.filter((record) => record.opportunity.classification === "Hot").length;
-  const partnershipCount = opportunityRecords.filter((record) => record.opportunity.badge === "PARTNERSHIP").length;
-  const warmLeadCount = opportunityRecords.filter((record) => record.opportunity.stage === "Warm").length;
-  const coldLeadCount = opportunityRecords.filter((record) => record.opportunity.classification === "Cold").length;
-  const communityCount = opportunityRecords.filter((record) => record.opportunity.badge === "COMMUNITY").length;
 
-  const opportunityCards: OpportunityPageCard[] = opportunityRecords.map(({ conversation, opportunity }) => {
+  const conversationOpportunityCards: OpportunityPageCard[] = opportunityRecords.map(({ conversation, opportunity }) => {
     const preview = getCreatorConversationPreview(conversation);
     const score = opportunity.score;
     const opportunityId = getCreatorOpportunitySourceKey(conversation, opportunity);
@@ -1275,6 +1372,32 @@ export function buildCreatorLiveSummary(
       recommendedAction: opportunity.recommendedAction,
     };
   });
+  const conversationByIdOrSender = new Map<string, InstagramSettingsConversation>();
+  for (const conversation of dateRangeConversations) {
+    conversationByIdOrSender.set(conversation.id, conversation);
+    if (conversation.participant.id) {
+      conversationByIdOrSender.set(conversation.participant.id, conversation);
+    }
+  }
+  const commerceOrderOpportunityCards = sortedOrders
+    .filter(isCommerceOrderLead)
+    .map((order) =>
+      buildCommerceOrderOpportunityCard(
+        order,
+        conversationByIdOrSender.get(order.conversationId) || conversationByIdOrSender.get(order.instagramSenderId)
+      )
+    );
+  const commerceLeadConversationIds = new Set(commerceOrderOpportunityCards.map((card) => card.conversationId));
+  const opportunityCards: OpportunityPageCard[] = [
+    ...commerceOrderOpportunityCards,
+    ...conversationOpportunityCards.filter((card) => !commerceLeadConversationIds.has(card.conversationId)),
+  ];
+  const buyerCount = opportunityCards.filter((card) => card.badge === "HIGH INTENT" || card.badge === "PAID ORDER" || card.badge === "CHECKOUT SENT").length;
+  const hotLeadCount = opportunityCards.filter((card) => card.classification === "Hot").length;
+  const partnershipCount = opportunityCards.filter((card) => card.badge === "PARTNERSHIP").length;
+  const warmLeadCount = opportunityCards.filter((card) => card.classification === "Warm").length;
+  const coldLeadCount = opportunityCards.filter((card) => card.classification === "Cold").length;
+  const communityCount = opportunityCards.filter((card) => card.badge === "COMMUNITY").length;
 
   const dashboardOpportunities: Opportunity[] = opportunityCards.slice(0, 4).map((card) => ({
     id: card.id,
@@ -1360,8 +1483,8 @@ export function buildCreatorLiveSummary(
     },
     {
       label: "Qualified",
-      value: formatCreatorInteger(opportunityRecords.length),
-      detail: `${formatCreatorPercent(opportunityRecords.length, Math.max(1, totalCount))}\nof chats`,
+      value: formatCreatorInteger(opportunityCards.length),
+      detail: `${formatCreatorPercent(opportunityCards.length, Math.max(1, totalCount))}\nof chats`,
       tone: "text-[#13b95f] bg-[#eafaf0]",
       icon: Sparkles,
     },
@@ -1414,10 +1537,9 @@ export function buildCreatorLiveSummary(
   const audienceMetrics: AudienceMetric[] = [
     { label: "Total Audience", value: formatCreatorInteger(totalCount), change: "from Instagram", tone: "orange", icon: Users },
     { label: "Engaged Audience", value: formatCreatorInteger(engagedConversations.length), change: "messaged you", tone: "green", icon: Sparkles },
-    { label: "Leads", value: formatCreatorInteger(opportunityRecords.length), change: "intent detected", tone: "blue", icon: User },
+    { label: "Leads", value: formatCreatorInteger(opportunityCards.length), change: "intent detected", tone: "blue", icon: User },
     { label: "Customers", value: formatCreatorInteger(buyerCount), change: "buying keywords", tone: "orange", icon: ShoppingCart },
-    { label: "Partners", value: formatCreatorInteger(partnershipCount), change: "partnership keywords", tone: "orange", icon: Handshake },
-  ];
+   ];
 
   const audienceSources: AudienceSource[] = [
     {
@@ -1506,6 +1628,7 @@ export function buildCreatorLiveSummary(
   const escalationTabs: EscalationTab[] = [
     { id: "all", label: "All", count: formatCreatorInteger(escalations.length), tone: "text-[#3044ff] bg-[#eef0ff]", icon: Sparkles },
     { id: "refunds", label: "Refunds", count: formatCreatorInteger(escalations.filter((item) => item.category === "refund").length), tone: "text-[#df405b] bg-[#fff0f3]", icon: Shield },
+    { id: "payments", label: "Payments", count: formatCreatorInteger(escalations.filter((item) => item.category === "payment").length), tone: "text-[#df405b] bg-[#fff0f3]", icon: DollarSign },
     { id: "complaints", label: "Complaints", count: formatCreatorInteger(escalations.filter((item) => ["complaint", "product_issue", "issue"].includes(item.category)).length), tone: "text-[#ff850d] bg-[#fff3e6]", icon: Sparkles },
     { id: "human", label: "Human", count: formatCreatorInteger(escalations.filter((item) => ["human", "complex"].includes(item.category)).length), tone: "text-[#7a35ff] bg-[#f0edff]", icon: Users },
   ];
@@ -1542,13 +1665,13 @@ export function buildCreatorLiveSummary(
     confirmedOrderCount,
     paidOrderCount,
     commerceTableReady,
-    opportunityCount: opportunityRecords.length,
+    opportunityCount: opportunityCards.length,
     escalationCount: escalationRecords.length,
     dashboardOpportunities,
     dashboardPipeline,
     recentActivity,
     opportunityTabs: [
-      { label: "Qualified Leads", count: formatCreatorInteger(opportunityRecords.length), icon: Users },
+      { label: "Qualified Leads", count: formatCreatorInteger(opportunityCards.length), icon: Users },
       { label: "Hot Leads", count: formatCreatorInteger(hotLeadCount), icon: ShoppingCart },
       { label: "Warm Leads", count: formatCreatorInteger(warmLeadCount), icon: Flame },
       { label: "Cold Leads", count: formatCreatorInteger(coldLeadCount), icon: User },
@@ -1556,7 +1679,7 @@ export function buildCreatorLiveSummary(
       { label: "Community Leads", count: formatCreatorInteger(communityCount), icon: User },
     ],
     opportunityMetrics: [
-      { label: "Leads Generated", value: formatCreatorInteger(opportunityRecords.length), change: "from Instagram DMs", icon: Users },
+      { label: "Leads Generated", value: formatCreatorInteger(opportunityCards.length), change: "from Instagram DMs", icon: Users },
       { label: "Hot Leads", value: formatCreatorInteger(hotLeadCount), change: "qualified score 75+", icon: ShoppingCart },
       {
         label: "Collected Revenue",
@@ -1564,7 +1687,7 @@ export function buildCreatorLiveSummary(
         change: "from paid Stripe orders",
         icon: CircleDollarSign,
       },
-      { label: "Lead Rate", value: formatCreatorPercent(opportunityRecords.length, Math.max(1, totalCount)), change: "of conversations", icon: ChartPie },
+      { label: "Lead Rate", value: formatCreatorPercent(opportunityCards.length, Math.max(1, totalCount)), change: "of conversations", icon: ChartPie },
     ],
     opportunityCards,
     audienceMetrics,

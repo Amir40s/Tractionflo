@@ -40,6 +40,7 @@ type ToastNotification = RealtimeNotificationPayload & {
 };
 
 const toastLifetimeMs = 6500;
+const duplicateToastWindowMs = 15_000;
 
 function getNotificationIcon(type: RealtimeNotificationType) {
   switch (type) {
@@ -105,6 +106,40 @@ async function sendBrowserNotification(notification: RealtimeNotificationPayload
   return result.delivered;
 }
 
+function getNotificationDuplicateKey(notification: RealtimeNotificationPayload) {
+  const metadata = notification.metadata || {};
+  const source = typeof metadata.source === "string" ? metadata.source : "";
+  const senderId = typeof metadata.senderId === "string" ? metadata.senderId : "";
+  const messageIds = typeof metadata.messageIds === "string" ? metadata.messageIds : "";
+
+  return [notification.type, notification.title, notification.body, notification.url || "", source, senderId, messageIds]
+    .join("|")
+    .toLowerCase();
+}
+
+function hasRecentDuplicateNotification(
+  recentNotifications: Map<string, number>,
+  notification: RealtimeNotificationPayload,
+  now = Date.now()
+) {
+  const duplicateKey = getNotificationDuplicateKey(notification);
+
+  for (const [key, timestamp] of recentNotifications) {
+    if (now - timestamp > duplicateToastWindowMs) {
+      recentNotifications.delete(key);
+    }
+  }
+
+  const previousTimestamp = recentNotifications.get(duplicateKey);
+
+  if (previousTimestamp && now - previousTimestamp < duplicateToastWindowMs) {
+    return true;
+  }
+
+  recentNotifications.set(duplicateKey, now);
+  return false;
+}
+
 export default function RealtimeNotifications() {
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSetting[]>(() =>
@@ -114,6 +149,7 @@ export default function RealtimeNotifications() {
   const lastEscalationAtRef = useRef(0);
   const pusherRef = useRef<Pusher | null>(null);
   const subscribedChannelsRef = useRef<Channel[]>([]);
+  const recentNotificationsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     notificationSettingsRef.current = notificationSettings;
@@ -199,6 +235,10 @@ export default function RealtimeNotifications() {
 
           channel.bind(bootstrap.eventName, async (notification: RealtimeNotificationPayload) => {
             if (!notification?.id || !notification.title) {
+              return;
+            }
+
+            if (hasRecentDuplicateNotification(recentNotificationsRef.current, notification)) {
               return;
             }
 

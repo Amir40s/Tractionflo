@@ -30,7 +30,7 @@ import {
 import type { EmojiClickData } from "emoji-picker-react";
 import { EmojiStyle, SkinTonePickerLocation, Theme } from "emoji-picker-react";
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AiLeadInsight, AiWorkflowRunResult } from "@/lib/ai-integration";
 import {
   detectConversationEscalations,
@@ -59,6 +59,7 @@ import {
   loadEscalationWorkflowStateFromDatabase,
   readStoredEscalationWorkflowState,
 } from "../dashboard/escalation-resolution";
+import { classifyCreatorOpportunity } from "../dashboard/creator-insights";
 import NotificationBell from "./NotificationBell";
 
 const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
@@ -1135,6 +1136,81 @@ function ConvList({
   const needsConnection = error === "No Instagram account connected" || showOAuthError;
   const needsReconnect = Boolean(error && /access token|session has expired|oauth/i.test(error));
 
+  const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [leadFilter, setLeadFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("latest");
+
+  const filteredAndSortedConvs = useMemo(() => {
+    const processed = convs.map((conv) => {
+      const opportunity = classifyCreatorOpportunity(conv as any);
+      const score = opportunity?.score ?? 0;
+      const classification = opportunity?.classification ?? "Cold";
+      
+      const lastMsg = conv.messages.find((message) => message.from !== "note");
+      const timeStr = lastMsg?.time || conv.updated_time;
+      const timestamp = timeStr ? new Date(timeStr).getTime() : 0;
+      
+      const name = conv.participant.username || conv.participant.name || `User ${conv.participant.id.slice(-6)}`;
+      
+      return {
+        conv,
+        opportunity,
+        score,
+        classification,
+        timestamp,
+        name,
+      };
+    });
+
+    return processed
+      .filter((item) => {
+        if (search.trim()) {
+          const q = search.toLowerCase();
+          const matchName = item.name.toLowerCase().includes(q);
+          const matchMsg = item.conv.messages.some(
+            (m) => m.text?.toLowerCase().includes(q)
+          );
+          if (!matchName && !matchMsg) return false;
+        }
+
+        if (dateFilter !== "all") {
+          const now = Date.now();
+          const msPerDay = 24 * 60 * 60 * 1000;
+          const diffDays = (now - item.timestamp) / msPerDay;
+
+          if (dateFilter === "today" && diffDays > 1) return false;
+          if (dateFilter === "7d" && diffDays > 7) return false;
+          if (dateFilter === "30d" && diffDays > 30) return false;
+        }
+
+        if (leadFilter !== "all") {
+          const c = item.classification.toLowerCase();
+          if (leadFilter === "hot" && c !== "hot") return false;
+          if (leadFilter === "warm" && c !== "warm") return false;
+          if (leadFilter === "cold" && c !== "cold") return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === "latest") {
+          return b.timestamp - a.timestamp;
+        }
+        if (sortBy === "oldest") {
+          return a.timestamp - b.timestamp;
+        }
+        if (sortBy === "score_desc") {
+          return b.score - a.score;
+        }
+        if (sortBy === "score_asc") {
+          return a.score - b.score;
+        }
+        return 0;
+      })
+      .map((item) => item.conv);
+  }, [convs, search, dateFilter, leadFilter, sortBy]);
+
   return (
     <section className="hidden h-full min-w-0 flex-col border-r border-[#e7eaf2] bg-white md:flex">
       <header className="flex h-[58px] shrink-0 items-center justify-between gap-3 px-5">
@@ -1176,6 +1252,65 @@ function ConvList({
           </button>
         </div>
       </header>
+
+      {isConnected && convs.length > 0 && (
+        <div className="px-3.5 py-2.5 border-b border-[#e7eaf2] space-y-2 shrink-0 bg-white">
+          <div className="relative flex items-center">
+            <Search size={14} className="absolute left-3 text-[#8b92a6]" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search chats or messages..."
+              className="w-full h-8.5 pl-8.5 pr-8 text-[12px] font-semibold rounded-[8px] border border-[#dde3ee] bg-white text-black outline-none placeholder:text-[#9aa1b5] focus:border-[#3044ff] focus:ring-2 focus:ring-[#3044ff]/10"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-2.5 p-1 rounded-full text-[#8b92a6] hover:bg-[#eff1f6]"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-1.5">
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="h-7 text-[10px] font-bold text-[#20273b] bg-[#f6f7fb] border border-transparent rounded-[6px] px-1.5 outline-none cursor-pointer hover:bg-[#eff1f6] focus:border-[#3044ff]/20 transition"
+            >
+              <option value="all">Any Date</option>
+              <option value="today">Today</option>
+              <option value="7d">Last 7d</option>
+              <option value="30d">Last 30d</option>
+            </select>
+
+            <select
+              value={leadFilter}
+              onChange={(e) => setLeadFilter(e.target.value)}
+              className="h-7 text-[10px] font-bold text-[#20273b] bg-[#f6f7fb] border border-transparent rounded-[6px] px-1.5 outline-none cursor-pointer hover:bg-[#eff1f6] focus:border-[#3044ff]/20 transition"
+            >
+              <option value="all">Any Lead</option>
+              <option value="hot">🔥 Hot Lead</option>
+              <option value="warm">⚡ Warm Lead</option>
+              <option value="cold">❄️ Cold Lead</option>
+            </select>
+
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="h-7 text-[10px] font-bold text-[#20273b] bg-[#f6f7fb] border border-transparent rounded-[6px] px-1.5 outline-none cursor-pointer hover:bg-[#eff1f6] focus:border-[#3044ff]/20 transition"
+            >
+              <option value="latest">Latest</option>
+              <option value="oldest">Oldest</option>
+              <option value="score_desc">Score High</option>
+              <option value="score_asc">Score Low</option>
+            </select>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-2.5 pb-3">
         {loading ? (
@@ -1232,33 +1367,27 @@ function ConvList({
               </button>
             )}
           </div>
-        ) : convs.length === 0 ? (
+        ) : filteredAndSortedConvs.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 px-4 pt-16 text-center">
-            <div className="relative flex h-14 w-14 items-center justify-center rounded-[18px] bg-gradient-to-tr from-[#ffbd00] via-[#ff2d85] to-[#6d3cff]">
-              <div className="h-8 w-8 rounded-[9px] border-[3px] border-white" />
-              <div className="absolute h-3.5 w-3.5 rounded-full border-[3px] border-white" />
-              <div className="absolute right-3 top-3 h-1.5 w-1.5 rounded-full bg-white" />
-            </div>
-            <p className="text-[13px] font-bold text-black">No DMs yet</p>
-            {account && (
-              <p className="max-w-[220px] text-[11px] font-semibold leading-[1.45] text-[#3044ff]">
-                Connected as {formatInstagramAccount(account)}
-              </p>
-            )}
+            <p className="text-[13px] font-bold text-black">No matching chats</p>
             <p className="text-[11px] font-medium leading-[1.5] text-[#596175]">
-              Instagram conversations will appear here as they arrive via your connected account.
+              Try adjusting your search query or filter options.
             </p>
             <button
               type="button"
-              onClick={onRefresh}
-              className="mt-1 flex h-8 items-center justify-center gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-4 text-[12px] font-semibold text-black"
+              onClick={() => {
+                setSearch("");
+                setDateFilter("all");
+                setLeadFilter("all");
+                setSortBy("latest");
+              }}
+              className="flex h-8 items-center justify-center rounded-[8px] bg-[#3044ff] px-4 text-[12px] font-semibold text-white"
             >
-              <RefreshCw size={13} />
-              Refresh inbox
+              Clear filters
             </button>
           </div>
         ) : (
-          convs.map((conv) => {
+          filteredAndSortedConvs.map((conv) => {
             const lastMsg = conv.messages.find((message) => message.from !== "note");
             const name = conv.participant.username || conv.participant.name || `User ${conv.participant.id.slice(-6)}`;
             const avatarSrc = conv.participant.profile_pic || "";
@@ -1301,7 +1430,29 @@ function ConvList({
                           </span>
                         ) : null}
                       </>
-                    ) : null}
+                    ) : (
+                      (() => {
+                        const opportunity = classifyCreatorOpportunity(conv as any);
+                        if (!opportunity) return null;
+                        const classification = opportunity.classification;
+                        const score = opportunity.score;
+                        if (classification === "Hot") {
+                          return (
+                            <span className="shrink-0 rounded-full bg-[#ffd0d8] px-1.5 py-0.5 text-[9px] font-extrabold text-[#c41a36]">
+                              🔥 Hot ({score}%)
+                            </span>
+                          );
+                        }
+                        if (classification === "Warm") {
+                          return (
+                            <span className="shrink-0 rounded-full bg-[#ffe4b3] px-1.5 py-0.5 text-[9px] font-extrabold text-[#b86000]">
+                              ⚡ Warm ({score}%)
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()
+                    )}
                   </span>
                   <span className="mt-1 block line-clamp-1 text-[12px] font-medium leading-[1.35] text-[#4f566c]">
                     {getShortMessagePreview(lastMsg)}
@@ -2867,6 +3018,129 @@ function SummaryPanel({
               ) : null}
 
               {/* AI qualification and ROS 9-Layer Pipeline panels removed to save screen space and background resources */}
+
+              {/* Lead Score Section */}
+              {(() => {
+                const opportunity = conv ? classifyCreatorOpportunity(conv as any) : null;
+                if (!opportunity) return null;
+
+                const score: number = (opportunity as any).score ?? 0;
+                const classification: string = (opportunity as any).classification ?? "Cold";
+                const badge: string = opportunity.badge ?? "";
+                const signals: string[] = (opportunity as any).signals ?? [];
+                const recommendedAction: string = (opportunity as any).recommendedAction ?? "";
+                const qualificationFacts: { label: string; value: string }[] = (opportunity as any).qualificationFacts ?? [];
+
+                const isHot = classification === "Hot";
+                const isWarm = classification === "Warm";
+
+                const bgClass = isHot
+                  ? "border-[#ffd0d8] bg-[#fff5f7]"
+                  : isWarm
+                    ? "border-[#ffe4b3] bg-[#fffaf0]"
+                    : "border-[#dde3ee] bg-[#f8f9fb]";
+
+                const barColor = isHot
+                  ? "bg-[#e3294a]"
+                  : isWarm
+                    ? "bg-[#ff9500]"
+                    : "bg-[#8b92a6]";
+
+                const labelColor = isHot
+                  ? "text-[#c41a36]"
+                  : isWarm
+                    ? "text-[#b86000]"
+                    : "text-[#596175]";
+
+                const dotColor = isHot
+                  ? "bg-[#e3294a]"
+                  : isWarm
+                    ? "bg-[#ff9500]"
+                    : "bg-[#8b92a6]";
+
+                const scoreLabel = isHot ? "Hot Lead" : isWarm ? "Warm Lead" : "Cold Lead";
+
+                return (
+                  <div className={`mt-3 rounded-[10px] border p-2.5 ${bgClass}`}>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <h3 className="flex items-center gap-1.5 text-[12px] font-extrabold text-black">
+                        <Target size={14} className={labelColor} strokeWidth={2.35} />
+                        Lead Score
+                      </h3>
+                      <span className={`text-[11px] font-extrabold px-2 py-0.5 rounded-full ${
+                        isHot
+                          ? "bg-[#ffd0d8] text-[#c41a36]"
+                          : isWarm
+                            ? "bg-[#ffe4b3] text-[#b86000]"
+                            : "bg-[#e7eaf2] text-[#596175]"
+                      }`}>
+                        {badge || scoreLabel}
+                      </span>
+                    </div>
+
+                    {/* Score bar */}
+                    <div className="mb-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-semibold text-[#596175]">{scoreLabel}</span>
+                        <span className={`text-[12px] font-extrabold ${labelColor}`}>{score}%</span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-[#e7eaf2] overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                          style={{ width: `${Math.min(100, score)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Qualification facts grid */}
+                    {qualificationFacts.length > 0 && (
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-2 mb-2">
+                        {qualificationFacts.slice(0, 4).map((fact) => (
+                          <div key={fact.label} className="flex items-center justify-between gap-1">
+                            <span className="text-[10px] font-medium text-[#8b92a6] truncate">{fact.label}</span>
+                            <span className={`text-[10px] font-extrabold truncate ${
+                              fact.value === "Missing" || fact.value === "Low"
+                                ? "text-[#df405b]"
+                                : fact.value === "Captured" || fact.value === "Mentioned" || fact.value === "Detected" || fact.value === "High"
+                                  ? "text-[#0a9b3f]"
+                                  : "text-[#596175]"
+                            }`}>{fact.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Signals */}
+                    {signals.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {signals.slice(0, 3).map((signal) => (
+                          <span
+                            key={signal}
+                            className={`inline-flex items-center gap-0.5 rounded-[6px] px-1.5 py-0.5 text-[9px] font-extrabold ${
+                              isHot
+                                ? "bg-[#ffd0d8] text-[#c41a36]"
+                                : isWarm
+                                  ? "bg-[#ffe4b3] text-[#b86000]"
+                                  : "bg-[#e7eaf2] text-[#596175]"
+                            }`}
+                          >
+                            <span className={`w-1 h-1 rounded-full ${dotColor} shrink-0`} />
+                            {signal}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Recommended action */}
+                    {recommendedAction && (
+                      <div className="mt-2 rounded-[8px] bg-white border border-[#e7eaf2] px-2.5 py-2">
+                        <p className="text-[10px] font-extrabold text-[#596175] uppercase tracking-wide mb-0.5">Next step</p>
+                        <p className="text-[11px] font-semibold text-[#252c41] leading-[1.4]">{recommendedAction}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="mt-3 rounded-[10px] border border-[#e2e7f2] bg-white p-2.5">
                 <div className="flex items-center justify-between gap-2">

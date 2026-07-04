@@ -15,14 +15,21 @@ import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-function isProviderConfigured(provider: { enabled: boolean; actionUrl: string; webhookUrl: string; apiEndpoint: string; outcomeType: string }) {
+function isProviderConfigured(provider: {
+  enabled: boolean;
+  actionUrl: string;
+  webhookUrl: string;
+  apiEndpoint: string;
+  outcomeType: string;
+  secretSaved?: boolean;
+}) {
   return Boolean(
     provider.enabled &&
       (
         provider.actionUrl ||
         provider.webhookUrl ||
         provider.apiEndpoint ||
-        provider.outcomeType === "purchase_product" ||
+        provider.secretSaved ||
         provider.outcomeType === "follow_creator"
       )
   );
