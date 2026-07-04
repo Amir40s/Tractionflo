@@ -95,8 +95,7 @@ export async function GET() {
       analysis.summary
     );
 
-    // Generate AI context prompt
-    const businessContextPrompt = generateBusinessContextPrompt(
+     const businessContextPrompt = generateBusinessContextPrompt(
       profile,
       posts,
       analysis.keywords,
@@ -104,8 +103,7 @@ export async function GET() {
       analysis.summary
     );
 
-    // Get OpenAI API key from environment
-    const openaiApiKey = process.env.OPENAI_API_KEY;
+     const openaiApiKey = process.env.OPENAI_API_KEY;
     if (!openaiApiKey) {
       logger.warn("OpenAI API key not configured");
       return NextResponse.json(

@@ -86,7 +86,7 @@ Return ONLY valid JSON with this exact structure:
     {
       "text": "<exact comment text>",
       "username": "<@username>",
-      "intent": "<one of: Buying Intent | Price Question | Product Interest | Lead Signal | Urgency>",
+      "intent": "<one of: Buying Intent | Price Question | Product Interest | Lead Signal | Urgency | Engagement>",
       "postCaption": "<first 60 chars of post caption>"
     }
   ],
@@ -94,8 +94,8 @@ Return ONLY valid JSON with this exact structure:
 }
 
 Rules:
-- strongComments: include only comments with real buying/lead signals, max 5
-- If few signals found, scores should be lower (20-40 range)
+- strongComments: Extract the top comments from the corpus to highlight as potential leads or audience engagement examples, up to 5 comments. If any comments are available, you MUST populate this array with up to 5 items. Classify the intent of each comment appropriately (e.g. choose one of: Buying Intent, Price Question, Product Interest, Lead Signal, Urgency, or Engagement).
+- If few signals found, scores should be lower (20-40 range) but you must still output the top comments in strongComments.
 - overallScore should be a weighted average (buyingIntent 30%, revenueOpportunity 25%, leadGenPotential 20%, sellingPotential 15%, engagementQuality 10%)
 - Be accurate and honest, not overly optimistic`;
 
@@ -246,6 +246,7 @@ export async function POST() {
         bio: profile.biography,
         followers: profile.followers_count,
       });
+
     }
 
     const report: OpportunityReportScore = {

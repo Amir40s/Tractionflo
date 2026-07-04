@@ -796,7 +796,7 @@ function PipelineOverview({
 
   const getTabForPipeline = (label: string): DashboardTab => {
     if (isOpportunityLabel(label)) return "opportunities";
-    if (label.toLowerCase().includes("offer")) return "ros";
+    if (label.toLowerCase().includes("offer")) return "opportunities";
     if (label.toLowerCase().includes("payment") || label.toLowerCase().includes("pending")) return "ros";
     if (label.toLowerCase().includes("buyer")) return "opportunities";
     return "dashboard";
@@ -938,9 +938,11 @@ function RevenueHero({
   const revenueDetail = `${formatCreatorInteger(summary.paidOrderCount)} paid order${summary.paidOrderCount === 1 ? "" : "s"} from Instagram checkout.`;
 
   const getTabForMetric = (label: string): DashboardTab => {
-    if (label.toLowerCase().includes("buy")) return "opportunities";
-    if (label.toLowerCase().includes("follow")) return "inbox" as DashboardTab;
-    if (label.toLowerCase().includes("payment")) return "ros";
+    const lowercase = label.toLowerCase();
+    if (lowercase.includes("buy")) return "opportunities";
+    if (lowercase.includes("offer")) return "opportunities";
+    if (lowercase.includes("follow")) return "inbox" as DashboardTab;
+    if (lowercase.includes("payment")) return "ros";
     if (isOpportunityLabel(label)) return "opportunities";
     return "dashboard";
   };

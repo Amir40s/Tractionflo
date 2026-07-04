@@ -1547,7 +1547,7 @@ function OpportunitiesCard({ data }: { data: OnboardingData }) {
 
   return (
     <Card>
-      <StepTitle number={4} title="Top Missed Opportunities" subtitle="Examples of high value prospects" />
+      <StepTitle number={4} title="Engagement" subtitle="Examples of high value prospects" />
       {visible.length > 0 ? (
         <div className="divide-y divide-[#eef1f5]">
           {visible.map((opportunity) => (
@@ -1598,10 +1598,10 @@ function OpportunitiesCard({ data }: { data: OnboardingData }) {
 
 function UnlockCard({ data, onFinish }: { data: OnboardingData; onFinish: () => void }) {
   const items = [
-    `${formatCompactNumber(data.hotLeads)} hot leads`,
-    `${formatCompactNumber(data.interestedProspects)} interested prospects`,
-    `${formatCompactNumber(data.missedConversations)} missed conversations`,
-    data.potentialRevenue > 0 ? `${formatCurrency(data.potentialRevenue, data.revenueCurrency)} potential revenue` : "Pricing data needed",
+    `  hot leads`,
+    `  interested prospects`,
+    `  missed conversations`,
+    data.potentialRevenue > 0 ? ` potential revenue` : "Pricing data needed",
   ];
 
   return (
@@ -2825,6 +2825,8 @@ export default function OnboardingPage() {
       });
     }
 
+
+
     return {
       ...data,
       ...draft,
@@ -3001,7 +3003,7 @@ export default function OnboardingPage() {
     {
       id: "opportunities",
       phase: "Phase 1: Discovery",
-      label: "Missed Opportunities",
+      label: "Engagement",
       width: "max-w-[560px]",
       content: <OpportunitiesCard data={visibleData} />,
     },
