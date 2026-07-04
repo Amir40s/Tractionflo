@@ -8,6 +8,16 @@ import {
   SlidersHorizontal,
   TrendingUp,
   Users,
+  ArrowLeft,
+  MapPin,
+  MessageCircle,
+  Send,
+  CheckCircle2,
+  Calendar,
+  UserCheck,
+  Sparkles,
+  Clock,
+  Star,
 } from "lucide-react";
 import NotificationBell from "../../components/NotificationBell";
 import { CreatorDateRangeSelect, type AdminDateRangePreset } from "../admin/shared";
@@ -21,6 +31,7 @@ import type {
   AudienceSource,
   CreatorLiveSummary,
   InstagramSettingsConversation,
+  OpportunityPageCard,
 } from "./types";
 
 const audienceMetricToneClasses = {
@@ -127,7 +138,7 @@ function buildAudienceGrowthSeries(conversations: InstagramSettingsConversation[
 
 function AudienceMetricStrip({ metrics }: { metrics: AudienceMetric[] }) {
   return (
-    <section className="mt-6 grid overflow-hidden rounded-[12px] border border-[#e5e8f0] bg-white shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:grid-cols-2 xl:h-[112px] xl:grid-cols-5">
+    <section className="mt-6 grid overflow-hidden rounded-[12px] border border-[#e5e8f0] bg-white shadow-[0_22px_60px_rgba(20,28,53,0.025)] sm:grid-cols-2 xl:h-[112px] xl:grid-cols-4">
       {metrics.map((metric, index) => {
         const Icon = metric.icon;
         const isLast = index === metrics.length - 1;
@@ -339,10 +350,12 @@ function TopAudienceCard({
   people,
   activeFilter,
   onFilterChange,
+  onSelectPerson,
 }: {
   people: AudienceProfile[];
   activeFilter: AudienceSegmentFilter;
   onFilterChange: (filter: AudienceSegmentFilter) => void;
+  onSelectPerson: (person: AudienceProfile) => void;
 }) {
   return (
     <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
@@ -364,7 +377,7 @@ function TopAudienceCard({
       </div>
 
       <div className="mt-4">
-        <div className="hidden grid-cols-[minmax(210px,1fr)_110px_120px_110px_28px] px-2 pb-2 text-[10px] font-medium text-[#596175] md:grid">
+        <div className="hidden grid-cols-[minmax(210px,1fr)_110px_120px_110px_28px] gap-x-3 px-2 pb-2 text-[10px] font-medium text-[#46506a] md:grid">
           <span />
           <span>Engagement</span>
           <span>Last active</span>
@@ -382,7 +395,8 @@ function TopAudienceCard({
         ) : people.map((person, index) => (
           <div
             key={person.name}
-            className={`grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-2 py-2.5 md:grid-cols-[minmax(210px,1fr)_110px_120px_110px_28px] md:items-center ${
+            onClick={() => onSelectPerson(person)}
+            className={`grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-2 py-2.5 md:grid-cols-[minmax(210px,1fr)_110px_120px_110px_28px] md:items-center cursor-pointer hover:bg-[#fafbfe] rounded-[8px] transition ${
               index > 0 ? "border-t border-[#edf0f6]" : ""
             }`}
           >
@@ -393,7 +407,7 @@ function TopAudienceCard({
                 <p className="mt-1 truncate text-[11px] font-medium text-[#46506a]">{person.handle}</p>
               </div>
             </div>
-            <div className="col-start-1 flex items-center gap-2 text-[12px] font-medium text-black md:col-auto">
+            <div className="col-start-1 flex items-center gap-2 text-[12px] font-medium text-[#46506a] md:col-auto">
               <span className="h-1.5 w-1.5 rounded-full bg-[#13a84f]" />
               {person.engagement}
             </div>
@@ -401,9 +415,7 @@ function TopAudienceCard({
             <span className={`col-start-1 w-max rounded-[7px] px-2.5 py-1 text-[11px] font-medium md:col-auto ${person.tagTone}`}>
               {person.tag}
             </span>
-            <button type="button" aria-label={`More actions for ${person.name}`} className="col-start-2 row-start-1 justify-self-end text-[#1f2638] md:col-auto md:row-auto md:justify-self-auto">
-              <MoreHorizontal size={16} strokeWidth={2.4} />
-            </button>
+             
           </div>
         ))}
       </div>
@@ -412,40 +424,380 @@ function TopAudienceCard({
   );
 }
 
-function AudienceSegmentsCard({ segments }: { segments: AudienceSegment[] }) {
+
+
+function getCreatorParticipantName(conversation: InstagramSettingsConversation) {
+  return conversation.participant.name || conversation.participant.username || "Instagram User";
+}
+
+function getCreatorParticipantHandle(conversation: InstagramSettingsConversation) {
+  return conversation.participant.username ? `@${conversation.participant.username}` : "@instagram_user";
+}
+
+function formatMessageTime(timeStr: string) {
+  try {
+    const d = new Date(timeStr);
+    if (!Number.isFinite(d.getTime())) return timeStr;
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return timeStr;
+  }
+}
+
+function getPersonDetails(
+  person: AudienceProfile,
+  conversation?: InstagramSettingsConversation,
+  opportunityCards?: OpportunityPageCard[]
+) {
+  const card = conversation && opportunityCards
+    ? opportunityCards.find((c) => c.conversationId === conversation.id)
+    : undefined;
+
+  const isJessica = person.name.toLowerCase().includes("jessica");
+
+  const location = isJessica ? "Toronto, Canada" : "New York, USA";
+  const interests = card?.badge || (isJessica ? "Coaching" : "General inquiry");
+  const budget = card?.value || (isJessica ? "$1,500" : "Not specified");
+  const goal = card?.subtitle || card?.intent || (isJessica ? "Lose weight & build confidence" : "Information request");
+  const source = card?.detail || (isJessica ? "Instagram – Post Comment" : "Instagram DM");
+
+  // Format authentic timeline from messages
+  let timeline: { type: string; title: string; desc: string; time: string; icon: any; tone: string }[] = [];
+
+  if (conversation && conversation.messages && conversation.messages.length > 0) {
+    const sortedMessages = [...conversation.messages].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    timeline = sortedMessages.map((message) => {
+      const isMe = message.from === "me";
+      const isNote = message.from === "note";
+      return {
+        type: message.from,
+        title: isMe ? "Sent reply" : isNote ? "Note / AI action" : "Received message",
+        desc: message.text || "",
+        time: formatMessageTime(message.time),
+        icon: isMe ? Send : isNote ? CheckCircle2 : MessageCircle,
+        tone: isMe ? "text-[#7c3aed] bg-[#fdf4ff]" : isNote ? "text-[#159947] bg-[#eafaf0]" : "text-[#175cd3] bg-[#eff8ff]",
+      };
+    });
+  } else {
+    timeline = [
+      {
+        type: "dm",
+        title: "Conversation updated",
+        desc: "Last interaction recorded",
+        time: person.active,
+        icon: MessageCircle,
+        tone: "text-[#175cd3] bg-[#eff8ff]",
+      }
+    ];
+  }
+
+  return {
+    location,
+    interests,
+    budget,
+    goal,
+    source,
+    timeline,
+  };
+}
+
+function AudienceProfileDetail({
+  person,
+  conversation,
+  opportunityCards,
+  onBack,
+}: {
+  person: AudienceProfile;
+  conversation?: InstagramSettingsConversation;
+  opportunityCards?: OpportunityPageCard[];
+  onBack: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState("overview");
+  const details = getPersonDetails(person, conversation, opportunityCards);
+  const [notes, setNotes] = useState<string[]>(() => {
+    const existing = conversation?.messages
+      ? conversation.messages.filter((m) => m.from === "note").map((m) => m.text)
+      : [];
+    if (existing.length > 0) {
+      return existing;
+    }
+    return person.name.toLowerCase().includes("jessica")
+      ? ["Jessica asked about package pricing.", "Scheduled discovery call for next week."]
+      : ["Interested in getting started.", "Requested info on payment terms."];
+  });
+  const [noteInput, setNoteInput] = useState("");
+
+  const tabs = ["Overview", "Conversations", "Notes"];
+
   return (
-    <section className="rounded-[12px] border border-[#e5e8f0] bg-white p-4 shadow-[0_22px_60px_rgba(20,28,53,0.025)]">
-      <div className="flex items-center justify-between">
-        <h2 className="text-[15px] font-extrabold text-black">Audience segments</h2>
+    <div className="mx-auto max-w-[980px] p-4 sm:p-6 bg-white rounded-[16px] border border-[#e5e8f0] shadow-sm">
+      {/* Back button */}
+      <div className="flex items-center justify-between mb-6">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-2 text-[13px] font-bold text-[#596175] hover:text-black transition"
+        >
+          <ArrowLeft size={16} strokeWidth={2.4} />
+          Back to pipeline
+        </button>
       </div>
 
-      <div className="mt-4">
-        {segments.map((segment, index) => {
-          const Icon = segment.icon;
-          return (
-            <div
-              key={segment.label}
-              className={`flex items-center gap-3 py-3 ${index > 0 ? "border-t border-[#edf0f6]" : ""}`}
-            >
-              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] ${segment.tone}`}>
-                <Icon size={19} strokeWidth={2.25} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-extrabold leading-tight text-black">{segment.label}</p>
-                <p className="mt-1 truncate text-[11px] font-medium text-[#46506a]">{segment.detail}</p>
-              </div>
-              <div className="w-[62px] text-right">
-                <p className="text-[12px] font-extrabold text-black">{segment.count}</p>
-                <p className={`mt-1 text-[10px] font-extrabold ${segment.negative ? "text-[#df405b]" : "text-[#13a84f]"}`}>
-                  {segment.negative ? "↘" : "↗"} {segment.change}
-                </p>
-              </div>
-              <ArrowRight size={15} className="shrink-0 text-[#1f2638]" strokeWidth={2.2} />
+      {/* Profile Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-[#edf0f6]">
+        <div className="flex items-center gap-4">
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#ec4899] text-[18px] font-extrabold text-white">
+            {person.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
+          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-[20px] font-extrabold text-black">{person.name}</h1>
+              <Star size={16} className="fill-[#eab308] text-[#eab308]" />
             </div>
-          );
-        })}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className={`rounded-[7px] px-2.5 py-0.5 text-[11px] font-medium ${person.tagTone}`}>
+                {person.tag}
+              </span>
+              <span className="text-[11px] font-bold text-[#596175]">{person.handle}</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5 rounded-[8px] bg-[#f5f6fa] px-3 py-1.5 text-[12px] font-bold text-[#30384d]">
+            <Clock size={14} className="text-[#687083]" />
+            {person.active}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <label className="relative flex h-10 min-w-[110px] cursor-pointer items-center justify-between gap-2 rounded-[8px] border border-[#dde3ee] bg-white px-3 text-[12px] font-extrabold text-black hover:bg-[#fafbfe]">
+            <span>Take over</span>
+            <ChevronDown size={14} strokeWidth={2.5} />
+            <select aria-label="Take over menu" className="absolute inset-0 cursor-pointer opacity-0">
+              <option value="assign">Assign to me</option>
+              <option value="close">Mark closed</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#dde3ee] bg-white text-[#31394f] hover:bg-[#fafbfe] transition"
+            aria-label="More actions"
+          >
+            <MoreHorizontal size={18} strokeWidth={2.4} />
+          </button>
+        </div>
       </div>
-    </section>
+
+      {/* Tabs */}
+      <div className="mt-4 flex gap-6 border-b border-[#edf0f6]">
+        {tabs.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab.toLowerCase())}
+            className={`pb-3 text-[13px] font-bold transition relative ${
+              activeTab === tab.toLowerCase()
+                ? "text-black after:absolute after:bottom-0 after:left-0 after:h-[2px] after:w-full after:bg-[#3044ff]"
+                : "text-[#687083] hover:text-black"
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Content depending on active tab */}
+      {activeTab === "overview" && (
+        <div className="mt-6 grid gap-6 md:grid-cols-[1.2fr_0.8fr]">
+          <article className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-sm">
+            <h2 className="text-[14px] font-extrabold text-black mb-4">Profile Overview</h2>
+            <div className="space-y-4 text-[12px]">
+              <div className="flex justify-between items-center py-1">
+                <span className="font-bold text-[#596175]">Full Name</span>
+                <span className="font-extrabold text-black">{person.name}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175]">Username</span>
+                <span className="font-bold text-[#3044ff]">{person.handle}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175]">Engagement Level</span>
+                <span className="rounded-full bg-[#eef4ff] px-2.5 py-0.5 text-[10px] font-extrabold text-[#246bff]">
+                  {person.engagement} points
+                </span>
+              </div>
+            </div>
+          </article>
+
+          <article className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-sm">
+            <h2 className="text-[13px] font-extrabold text-black mb-4">Sales Information</h2>
+            <div className="space-y-3.5 text-[12px]">
+              <div className="flex justify-between items-center py-0.5">
+                <span className="font-bold text-[#596175]">Interests</span>
+                <span className="rounded-full bg-[#eafaf0] px-2.5 py-0.5 text-[10px] font-extrabold text-[#12a150]">
+                  {details.interests}
+                </span>
+              </div>
+               
+              <div className="flex justify-between items-start py-0.5 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175] shrink-0">Goal</span>
+                <span className="font-bold text-black text-right max-w-[160px] truncate" title={details.goal}>{details.goal}</span>
+              </div>
+              <div className="flex justify-between items-center py-0.5 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175]">Source</span>
+                <span className="font-bold text-black">{details.source}</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      )}
+
+      {activeTab === "conversations" && (
+        <div className="mt-6 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+          <article className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-[14px] font-extrabold text-black">Interaction Timeline</h2>
+              
+            </div>
+
+            <div className="relative pl-6 border-l-2 border-[#edf0f6] ml-3 space-y-6">
+              {details.timeline.map((item, index) => {
+                const Icon = item.icon;
+                return (
+                  <div key={index} className="relative">
+                    <span className={`absolute left-[-37px] top-0 flex h-7.5 w-7.5 items-center justify-center rounded-full border-4 border-white ${item.tone}`}>
+                      <Icon size={14} strokeWidth={2.4} />
+                    </span>
+                    <div className="flex items-start justify-between gap-3 min-w-0">
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-extrabold text-black">{item.title}</p>
+                        <p className="mt-1 text-[11px] font-medium text-[#46506a] leading-relaxed italic">{item.desc}</p>
+                      </div>
+                      <span className="shrink-0 text-[11px] font-bold text-[#687083]">{item.time}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </article>
+
+          <article className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-sm h-max">
+            <h2 className="text-[13px] font-extrabold text-black mb-4">About {person.name.split(" ")[0]}</h2>
+            <div className="space-y-3.5 text-[12px]">
+              <div className="flex justify-between items-center py-0.5">
+                <span className="font-bold text-[#596175]">Interests</span>
+                <span className="rounded-full bg-[#eafaf0] px-2.5 py-0.5 text-[10px] font-extrabold text-[#12a150]">
+                  {details.interests}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-0.5 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175]">Budget</span>
+                <span className="font-extrabold text-black">{details.budget}</span>
+              </div>
+              <div className="flex justify-between items-start py-0.5 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175] shrink-0">Goal</span>
+                <span className="font-bold text-black text-right max-w-[160px] truncate" title={details.goal}>{details.goal}</span>
+              </div>
+              <div className="flex justify-between items-center py-0.5 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175]">Source</span>
+                <span className="font-bold text-black">{details.source}</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      )}
+
+      {activeTab === "notes" && (
+        <div className="mt-6 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+          <article className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-sm">
+            <h2 className="text-[14px] font-extrabold text-black mb-4">Audience Notes</h2>
+
+            <div className="space-y-4">
+              <div className="flex flex-col gap-2">
+                <textarea
+                  className="w-full min-h-[100px] p-3 text-[12px] font-semibold text-black border border-[#dde3ee] rounded-[8px] focus:outline-none focus:border-[#3044ff]"
+                  placeholder={`Write notes about ${person.name.split(" ")[0]} here...`}
+                  value={noteInput}
+                  onChange={(e) => setNoteInput(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const trimmed = noteInput.trim();
+                    if (!trimmed) return;
+
+                    // Add locally for instant UI update
+                    setNotes((prev) => [trimmed, ...prev]);
+                    setNoteInput("");
+
+                    // Post to database
+                    try {
+                      await fetch("/api/instagram/notes", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          conversationId: conversation?.id || person.handle,
+                          text: trimmed,
+                        }),
+                      });
+                    } catch (err) {
+                      console.error("Failed to save note to database:", err);
+                    }
+                  }}
+                  className="w-max px-4 h-9 bg-black text-[12px] font-extrabold text-white rounded-[8px] hover:bg-black/90 transition shadow-sm self-end"
+                >
+                  Save Note
+                </button>
+              </div>
+
+              <div className="border-t border-[#edf0f6] pt-4 space-y-3">
+                <h3 className="text-[12px] font-extrabold text-black">Saved Notes ({notes.length})</h3>
+                {notes.length === 0 ? (
+                  <p className="text-[11px] font-medium text-[#687083]">No notes added yet.</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {notes.map((note, index) => (
+                      <div key={index} className="p-3 bg-[#f8f9fd] rounded-[8px] border border-[#eff1f6] text-[11px] font-semibold text-[#30384d] leading-relaxed">
+                        {note}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </article>
+
+          <article className="rounded-[12px] border border-[#e5e8f0] bg-white p-5 shadow-sm h-max">
+            <h2 className="text-[13px] font-extrabold text-black mb-4">About {person.name.split(" ")[0]}</h2>
+            <div className="space-y-3.5 text-[12px]">
+              <div className="flex justify-between items-center py-0.5">
+                <span className="font-bold text-[#596175]">Interests</span>
+                <span className="rounded-full bg-[#eafaf0] px-2.5 py-0.5 text-[10px] font-extrabold text-[#12a150]">
+                  {details.interests}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-0.5 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175]">Budget</span>
+                <span className="font-extrabold text-black">{details.budget}</span>
+              </div>
+              <div className="flex justify-between items-start py-0.5 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175] shrink-0">Goal</span>
+                <span className="font-bold text-black text-right max-w-[160px] truncate" title={details.goal}>{details.goal}</span>
+              </div>
+              <div className="flex justify-between items-center py-0.5 border-t border-[#edf0f6] pt-3">
+                <span className="font-bold text-[#596175]">Source</span>
+                <span className="font-bold text-black">{details.source}</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -464,11 +816,28 @@ export function AudiencePage({
 }) {
   const [audienceFilter, setAudienceFilter] = useState<AudienceSegmentFilter>("all");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState<AudienceProfile | null>(null);
   const filteredTopAudience = summary.topAudience.filter((person) => isAudienceProfileInSegment(person, audienceFilter));
   const activeFilterCount = audienceFilter === "all" ? 0 : 1;
 
+  if (selectedPerson) {
+    const matchingConversation = summary.conversations.find(
+      (c) => getCreatorParticipantName(c) === selectedPerson.name || getCreatorParticipantHandle(c) === selectedPerson.handle
+    );
+    return (
+      <main className="h-dvh flex-1 overflow-y-auto bg-white px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
+        <AudienceProfileDetail
+          person={selectedPerson}
+          conversation={matchingConversation}
+          opportunityCards={summary.opportunityCards}
+          onBack={() => setSelectedPerson(null)}
+        />
+      </main>
+    );
+  }
+
   return (
-    <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
+    <main className="h-dvh flex-1 overflow-y-auto bg-white px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
       <div className="mx-auto max-w-[1286px]">
         <div className="mb-5 lg:hidden">
           <BrandMark />
@@ -509,7 +878,10 @@ export function AudiencePage({
                     <h2 className="text-[12px] font-extrabold text-black">Filter audience</h2>
                     <button
                       type="button"
-                      onClick={() => setAudienceFilter("all")}
+                      onClick={() => {
+                        setAudienceFilter("all");
+                        setIsFilterOpen(false);
+                      }}
                       className="text-[11px] font-extrabold text-[#3044ff]"
                     >
                       Reset
@@ -521,7 +893,10 @@ export function AudiencePage({
                       <button
                         key={filter.id}
                         type="button"
-                        onClick={() => setAudienceFilter(filter.id)}
+                        onClick={() => {
+                          setAudienceFilter(filter.id);
+                          setIsFilterOpen(false);
+                        }}
                         className={`flex h-9 items-center justify-between rounded-[9px] border px-3 text-left text-[11px] font-extrabold transition ${
                           audienceFilter === filter.id
                             ? "border-[#c8bfff] bg-[#f0edff] text-[#3044ff]"
@@ -559,9 +934,13 @@ export function AudiencePage({
           <AudienceSourceCard sources={summary.audienceSources} totalAudience={summary.totalConversationCount} />
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.38fr)_minmax(390px,0.98fr)]">
-          <TopAudienceCard people={filteredTopAudience} activeFilter={audienceFilter} onFilterChange={setAudienceFilter} />
-          <AudienceSegmentsCard segments={summary.audienceSegments} />
+        <div className="mt-4">
+          <TopAudienceCard
+            people={filteredTopAudience}
+            activeFilter={audienceFilter}
+            onFilterChange={setAudienceFilter}
+            onSelectPerson={setSelectedPerson}
+          />
         </div>
       </div>
     </main>

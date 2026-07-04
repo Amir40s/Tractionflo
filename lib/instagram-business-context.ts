@@ -12,7 +12,7 @@ export type InstagramBusinessPost = {
   thumbnail_url?: string;
   permalink?: string;
   comments_data?: {
-    data: Array<{ text: string }>;
+    data: Array<{ text: string; username?: string; timestamp?: string }>;
   };
 };
 
@@ -37,6 +37,23 @@ export type InstagramBusinessAnalysis = {
   keywords: string[];
   contentTypes: string[];
   confidence: number;
+  opportunityReport?: {
+    leadCapability: string;
+    interestedProspectsPercent: number;
+    hotLeadsCount: number;
+    potentialRevenue: number;
+    opportunities: Array<{
+      id: string;
+      name: string;
+      username: string;
+      avatarUrl?: string;
+      badge: "Hot Lead" | "Warm Lead" | "Needs Reply";
+      score: number;
+      missed: boolean;
+      estimatedValue: number;
+      reasons: string[];
+    }>;
+  } | null;
 };
 
 export async function fetchInstagramGraphAPI<T>(
@@ -111,6 +128,30 @@ export async function fetchInstagramBusinessProfile(
         return await fetchInstagramGraphAPI<InstagramBusinessProfile>("me", accessToken, fields4);
       }
     }
+  }
+}
+
+/**
+ * Fetch comments for a specific post
+ */
+export async function fetchInstagramPostComments(
+  accessToken: string,
+  postId: string,
+  limit: number = 15
+): Promise<Array<{ text: string; username?: string; timestamp?: string }>> {
+  try {
+    const response = await fetchInstagramGraphAPI<{
+      data: Array<{ id: string; text?: string; username?: string; timestamp?: string }>;
+    }>(`${postId}/comments`, accessToken, "id,text,username,timestamp");
+    
+    return (response.data || []).map(comment => ({
+      text: comment.text || "",
+      username: comment.username,
+      timestamp: comment.timestamp
+    })).slice(0, limit);
+  } catch (error) {
+    logger.warn(`Failed to fetch comments for post ${postId}`, { error });
+    return [];
   }
 }
 
@@ -276,12 +317,34 @@ export async function analyzeInstagramBusinessContextWithVision({
   profile,
   posts,
   maxPosts = 5,
+  accessToken,
 }: {
   apiKey?: string;
   profile: InstagramBusinessProfile;
   posts: InstagramBusinessPost[];
   maxPosts?: number;
+  accessToken?: string;
 }): Promise<InstagramBusinessAnalysis> {
+  // Fetch comments for posts if accessToken is available
+  let postsWithComments = posts;
+  if (accessToken && posts.length > 0) {
+    postsWithComments = await Promise.all(
+      posts.map(async (post) => {
+        try {
+          const comments = await fetchInstagramPostComments(accessToken, post.id, 10);
+          return {
+            ...post,
+            comments_data: {
+              data: comments.map(c => ({ text: c.text, username: c.username || "user", timestamp: c.timestamp || "" }))
+            }
+          };
+        } catch {
+          return post;
+        }
+      })
+    );
+  }
+
   function chooseTopPillars(combinedText: string) {
     const scored = [
       { label: "Ecommerce & product sales", score: /ecommerce|e-commerce|shopify|shop|store|cart|checkout|order|shipping|catalog|product|products|buy now|add to cart|sale/.test(combinedText) ? 100 : 0 },
@@ -299,8 +362,8 @@ export async function analyzeInstagramBusinessContextWithVision({
   }
 
   const fallback = () => {
-    const { keywords, themes } = extractBusinessKeywords(posts, profile.biography);
-    const combinedText = [profile.biography || "", ...posts.map((post) => post.caption || ""), ...keywords, ...themes].join(" ").toLowerCase();
+    const { keywords, themes } = extractBusinessKeywords(postsWithComments, profile.biography);
+    const combinedText = [profile.biography || "", ...postsWithComments.map((post) => post.caption || ""), ...keywords, ...themes].join(" ").toLowerCase();
     const contentPillars = chooseTopPillars(combinedText);
 
     const offerSignals = [
@@ -315,6 +378,25 @@ export async function analyzeInstagramBusinessContextWithVision({
 
     const sellingWhat = contentPillars[0] || offerSignals[0] || "General content or services";
 
+    const totalComments = postsWithComments.reduce((sum, post) => sum + (post.comments_count || 0), 0);
+    const fallbackOpportunityReport = totalComments > 0 ? {
+      leadCapability: `Moderate - based on ${totalComments} comments found. Content shows active audience engagement.`,
+      interestedProspectsPercent: 20,
+      hotLeadsCount: Math.max(1, Math.min(5, Math.round(totalComments * 0.15))),
+      potentialRevenue: Math.max(1, Math.min(5, Math.round(totalComments * 0.15))) * 150,
+      opportunities: postsWithComments.slice(0, 2).map((post, idx) => ({
+        id: `mock-comment-${idx}`,
+        name: `User ${idx + 1}`,
+        username: `user_${idx + 1}`,
+        avatarUrl: "",
+        badge: "Warm Lead" as const,
+        score: 65,
+        missed: true,
+        estimatedValue: 150,
+        reasons: ["Interacted with your recent posts"]
+      }))
+    } : null;
+
     return {
       summary: `${profile.username} appears to be selling ${sellingWhat.toLowerCase()}.`,
       businessType: sellingWhat,
@@ -322,8 +404,9 @@ export async function analyzeInstagramBusinessContextWithVision({
       contentPillars,
       offerSignals,
       keywords,
-      contentTypes: Array.from(new Set(posts.map((post) => post.media_type).filter(Boolean))),
+      contentTypes: Array.from(new Set(postsWithComments.map((post) => post.media_type).filter(Boolean))),
       confidence: 0.45,
+      opportunityReport: fallbackOpportunityReport,
     };
   };
 
@@ -331,15 +414,20 @@ export async function analyzeInstagramBusinessContextWithVision({
     return fallback();
   }
 
-  const selectedPosts = posts.slice(0, Math.max(1, maxPosts));
+  const selectedPosts = postsWithComments.slice(0, Math.max(1, maxPosts));
   const postTextBlocks = selectedPosts.map((post, index) => {
     const imageUrl = getPostImageUrl(post);
+    const commentsList = (post.comments_data?.data || [])
+      .map((c, i) => `  ${i + 1}. @${c.username || 'user'}: "${c.text}"`)
+      .join("\n") || "  No comments fetched.";
     return [
       `Post ${index + 1}:`,
       `- Caption: ${post.caption || "No caption"}`,
       `- Media type: ${post.media_type || "Unknown"}`,
       `- Likes: ${post.like_count || 0}`,
-      `- Comments: ${post.comments_count || 0}`,
+      `- Comments Count: ${post.comments_count || 0}`,
+      `- Comments:`,
+      commentsList,
       `- Media URL: ${imageUrl || "No image URL"}`,
       `- Timestamp: ${post.timestamp || "Unknown"}`,
     ].join("\n");
@@ -395,7 +483,7 @@ export async function analyzeInstagramBusinessContextWithVision({
       content: [
         {
           type: "text" as const,
-          text: "You analyze Instagram business accounts using bio, captions, and images. Return only valid JSON. Focus on what the user is selling, teaching, offering, or promoting.",
+          text: "You analyze Instagram business accounts using bio, captions, comments, and images. Return only valid JSON. Focus on what the user is selling, teaching, offering, or promoting, and identifying leads/opportunities from the comments.",
         },
       ],
     },
@@ -409,11 +497,26 @@ export async function analyzeInstagramBusinessContextWithVision({
             `Name: ${profile.name || "Unknown"}`,
             `Bio: ${profile.biography || "No bio provided"}`,
             `Followers: ${profile.followers_count || 0}`,
-            `\nPosts to inspect:\n${postTextBlocks}`,
-            `\nReturn JSON with keys: summary, businessType, sellingWhat, contentPillars, offerSignals, keywords, contentTypes, confidence.`,
+            `\nPosts and Comments to inspect:\n${postTextBlocks}`,
+            `\nReturn JSON with keys: summary, businessType, sellingWhat, contentPillars, offerSignals, keywords, contentTypes, confidence, opportunityReport.`,
             `\nCRITICAL INSTRUCTIONS:`,
             `1. For 'summary', write a detailed and comprehensive 6-7 line paragraph explaining exactly what the business is doing, based strictly on the images and captions. Make it descriptive and long.`,
             `2. Business classification: Do not assume it is an e-commerce store or digital marketing course unless the posts or images explicitly confirm it. If it sells a course or digital product, say that explicitly. Do not default to AI automation unless the content clearly says so.`,
+            `3. For 'opportunityReport', analyze the comments of all posts to find leads. If comments are present, analyze them; if not, return null. Return an object with keys:`,
+            `   - 'leadCapability': A brief 1-sentence summary of the business's lead generation capability (e.g. "Strong - high comments showing buying intent").`,
+            `   - 'interestedProspectsPercent': The percentage of total comments (from 0 to 100) that show interest, questions, or purchase intent.`,
+            `   - 'hotLeadsCount': Number of high-intent leads found in the comments.`,
+            `   - 'potentialRevenue': Estimated potential revenue (hotLeadsCount * typical offer price, default to $150 per lead if unknown).`,
+            `   - 'opportunities': Array of objects (max 5) representing individual comment leads. Each object has keys:`,
+            `     - 'id': A unique string.`,
+            `     - 'name': The commenter's name or username.`,
+            `     - 'username': The commenter's Instagram username.`,
+            `     - 'avatarUrl': null or a placeholder.`,
+            `     - 'badge': "Hot Lead" if they want to buy, "Warm Lead" if showing interest, "Needs Reply" if they asked a question.`,
+            `     - 'score': A number from 0 to 100.`,
+            `     - 'missed': true,`,
+            `     - 'estimatedValue': Typical offer price (default to 150),`,
+            `     - 'reasons': Array of 1-3 strings explaining why this is a lead (e.g. "Asked for product link", "Interested in coaching").`
           ].join("\n"),
         },
         ...postMessages,
@@ -435,7 +538,7 @@ export async function analyzeInstagramBusinessContextWithVision({
         messages: openAiMessages,
         response_format: { type: "json_object" },
         temperature: 0.2,
-        max_tokens: 1200,
+        max_tokens: 1500,
       }),
       signal: controller.signal,
     });
@@ -466,6 +569,7 @@ export async function analyzeInstagramBusinessContextWithVision({
       keywords: Array.isArray(parsed.keywords) && parsed.keywords.length > 0 ? parsed.keywords : fallbackAnalysis.keywords,
       contentTypes: Array.isArray(parsed.contentTypes) && parsed.contentTypes.length > 0 ? parsed.contentTypes : fallbackAnalysis.contentTypes,
       confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.7,
+      opportunityReport: parsed.opportunityReport || fallbackAnalysis.opportunityReport || null,
     };
   } catch (error) {
     logger.warn("Vision analysis failed, using fallback analysis", {

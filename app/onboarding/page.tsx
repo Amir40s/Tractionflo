@@ -145,6 +145,33 @@ type AILearnedContext = {
   lastSynced: string;
 };
 
+type OpportunityScore = {
+  sellingPotential: number;
+  leadGenPotential: number;
+  revenueOpportunity: number;
+  buyingIntent: number;
+  engagementQuality: number;
+  overallScore: number;
+  insights: {
+    sellingPotential: string;
+    leadGenPotential: string;
+    revenueOpportunity: string;
+    buyingIntent: string;
+    engagementQuality: string;
+  };
+  strongComments: Array<{
+    text: string;
+    username: string;
+    intent: string;
+    postCaption: string;
+  }>;
+  summary: string;
+  lowDataWarning: boolean;
+  postsAnalyzed: number;
+  commentsAnalyzed: number;
+  generatedAt: string;
+};
+
 type OnboardingData = {
   isLoading: boolean;
   error: string;
@@ -288,10 +315,10 @@ const emptyData: OnboardingData = {
 const discoveryRows = [
   { label: "Instagram Profile", icon: Camera },
   { label: "Recent Posts & Reels", icon: FileText },
-  { label: "Comments & DMs", icon: MessageCircle },
-  { label: "Story Replies", icon: Send },
+  { label: "Meta Webhook Connection", icon: Link2 },
+  { label: "Comments", icon: MessageCircle },
   { label: "Business Knowledge", icon: BookOpen },
-  { label: "Analyzing Opportunities", icon: Target },
+  // { label: "Analyzing Opportunities", icon: Target },
 ];
 
 const goalOptions = [
@@ -1269,10 +1296,10 @@ function DiscoveryCard({ data }: { data: OnboardingData }) {
   const statuses: Record<string, "Completed" | "In Progress" | "Waiting" | "Limited"> = {
     "Instagram Profile": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
     "Recent Posts & Reels": data.isLoading ? "In Progress" : data.mediaCount > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
-    "Comments & DMs": data.isLoading ? "In Progress" : data.conversationCount > 0 || data.totalPostComments > 0 ? "Completed" : data.connected ? "Limited" : "Waiting",
-    "Story Replies": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
+    "Meta Webhook Connection": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
+    "Comments": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
     "Business Knowledge": data.isLoading ? "In Progress" : data.knowledgeCount > 0 || data.catalogCount > 0 || Boolean(data.aiLearnedContext) ? "Completed" : data.connected ? "Limited" : "Waiting",
-    "Analyzing Opportunities": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
+    // "Analyzing Opportunities": data.isLoading ? "In Progress" : data.connected ? "Completed" : "Waiting",
   };
 
   return (
@@ -1325,42 +1352,192 @@ function DiscoveryCard({ data }: { data: OnboardingData }) {
   );
 }
 
-function ReportCard({ data }: { data: OnboardingData }) {
+const INTENT_COLORS: Record<string, string> = {
+  "Buying Intent": "bg-[#fff1ed] text-[#d92d20]",
+  "Price Question": "bg-[#fff8eb] text-[#b54708]",
+  "Product Interest": "bg-[#eafaf0] text-[#159947]",
+  "Lead Signal": "bg-[#eff8ff] text-[#175cd3]",
+  "Urgency": "bg-[#fdf4ff] text-[#7c3aed]",
+};
+
+function ScoreBar({
+  label,
+  value,
+  insight,
+  color,
+}: {
+  label: string;
+  value: number;
+  insight: string;
+  color: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[13px] font-extrabold text-[#101828]">{label}</span>
+        <span className={`text-[15px] font-extrabold ${color}`}>{value}%</span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-[#f2f4f7]">
+        <div
+          className="h-full rounded-full transition-all duration-700"
+          style={{
+            width: `${value}%`,
+            background:
+              value >= 70
+                ? "linear-gradient(90deg,#16a34a,#4ade80)"
+                : value >= 40
+                ? "linear-gradient(90deg,#f59e0b,#fbbf24)"
+                : "linear-gradient(90deg,#ef4444,#f87171)",
+          }}
+        />
+      </div>
+      {insight && (
+        <p className="text-[11px] font-semibold leading-relaxed text-[#667085]">{insight}</p>
+      )}
+    </div>
+  );
+}
+
+function OverallGauge({ score }: { score: number }) {
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (score / 100) * circumference;
+  const color =
+    score >= 70 ? "#16a34a" : score >= 40 ? "#f59e0b" : "#ef4444";
+  const label =
+    score >= 70 ? "Strong" : score >= 40 ? "Moderate" : "Low";
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <svg width="128" height="128" viewBox="0 0 128 128">
+        <circle
+          cx="64" cy="64" r={radius}
+          fill="none" stroke="#f2f4f7" strokeWidth="10"
+        />
+        <circle
+          cx="64" cy="64" r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth="10"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          transform="rotate(-90 64 64)"
+          style={{ transition: "stroke-dashoffset 1s ease" }}
+        />
+        <text x="64" y="60" textAnchor="middle" className="" style={{ fontFamily: "inherit", fontSize: 26, fontWeight: 800, fill: "#101828" }}>
+          {score}
+        </text>
+        <text x="64" y="78" textAnchor="middle" style={{ fontFamily: "inherit", fontSize: 11, fontWeight: 700, fill: color }}>
+          {label}
+        </text>
+      </svg>
+      <p className="text-[12px] font-extrabold text-[#344054]">Overall Opportunity Score</p>
+    </div>
+  );
+}
+
+function ReportCard({
+  data,
+  report,
+  reportLoading,
+}: {
+  data: OnboardingData;
+  report: OpportunityScore | null;
+  reportLoading: boolean;
+}) {
+  if (!data.connected && !data.isLoading) {
+    return (
+      <Card>
+        <StepTitle number={3} title="Your Opportunity Report" subtitle="AI-powered audience analysis" />
+        <div className="rounded-[12px] border border-dashed border-[#d0d5dd] p-8 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#f8fafc]">
+            <Target size={26} className="text-[#667085]" />
+          </div>
+          <p className="text-[14px] font-extrabold text-black">Connect Instagram First</p>
+          <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#667085]">
+            Connect your Instagram account so we can analyze your audience comments and generate your opportunity report.
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
+  if (reportLoading || !report) {
+    return (
+      <Card>
+        <StepTitle number={3} title="Your Opportunity Report" subtitle="Analyzing your audience comments..." />
+        <div className="grid grid-cols-2 divide-x divide-y divide-[#eef1f5] overflow-hidden rounded-[8px] border border-[#eef1f5]">
+          {[
+            { tone: "bg-[#fff4e6]" },
+            { tone: "bg-[#f2f4f7]" },
+            { tone: "bg-[#fff1ed]" },
+            { tone: "bg-[#eafaf0]" },
+          ].map((cell, idx) => (
+            <div key={idx} className="min-h-[126px] p-4 animate-pulse">
+              <div className="flex items-center gap-3">
+                <span className={`flex h-9 w-9 items-center justify-center rounded-[8px] ${cell.tone}`} />
+                <div className="h-6 w-12 bg-gray-200 rounded" />
+              </div>
+              <div className="mt-4 h-4 w-28 bg-gray-200 rounded" />
+              <div className="mt-2 h-3 w-32 bg-gray-200 rounded" />
+            </div>
+          ))}
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card>
-      <StepTitle number={3} title="Your Opportunity Report" subtitle="Here's what we found for you" />
+      <StepTitle number={3} title="Your Opportunity Report" subtitle="AI evaluation of audience conversion probability" />
       <div className="grid grid-cols-2 divide-x divide-y divide-[#eef1f5] overflow-hidden rounded-[8px] border border-[#eef1f5]">
         <MetricCell
           icon={Flame}
-          value={formatCompactNumber(data.hotLeads)}
-          label="Hot Leads"
-          detail="High intent prospects"
+          value={`${report.sellingPotential}%`}
+          label="Selling Potential"
+          detail={report.insights.sellingPotential || "Product selling capability"}
           tone="bg-[#fff4e6] text-[#ff7a00]"
         />
         <MetricCell
           icon={Users}
-          value={formatCompactNumber(data.interestedProspects)}
-          label="Interested Prospects"
-          detail="Engaged and showing interest"
+          value={`${report.leadGenPotential}%`}
+          label="Lead Potential"
+          detail={report.insights.leadGenPotential || "Lead generation capability"}
           tone="bg-[#f2f4f7] text-black"
         />
         <MetricCell
           icon={MessageCircle}
-          value={formatCompactNumber(data.missedConversations)}
-          label="Missed Conversations"
-          detail="Latest customer message needs reply"
+          value={`${report.buyingIntent}%`}
+          label="Buying Intent"
+          detail={report.insights.buyingIntent || "Audience buying intent"}
           tone="bg-[#fff1ed] text-[#f04438]"
         />
         <MetricCell
           icon={DollarSign}
-          value={formatCurrency(data.potentialRevenue, data.revenueCurrency)}
-          label="Potential Revenue"
-          detail={data.revenueBasis || "Needs paid order or catalog pricing"}
+          value={`${report.revenueOpportunity}%`}
+          label="Revenue Opportunity"
+          detail={report.insights.revenueOpportunity || "Sales and deals value"}
           tone="bg-[#eafaf0] text-[#159947]"
         />
       </div>
 
+      {report.summary && (
+        <p className="mt-5 text-[12px] font-semibold leading-relaxed text-[#475467] text-center border-t border-[#eef1f5] pt-4">
+          {report.summary}
+        </p>
+      )}
 
+      {report.lowDataWarning && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-[8px] border border-[#fedf89] bg-[#fffbeb] p-3 text-[11px] font-semibold text-[#7a4b00]">
+          <AlertCircle size={15} className="mt-0.5 shrink-0 text-[#b54708]" />
+          <span>Fewer than 10 comments found. Post more content to get a stronger report.</span>
+        </div>
+      )}
+
+      <div className="mt-5">
+        <NextButton />
+      </div>
     </Card>
   );
 }
@@ -1410,7 +1587,7 @@ function OpportunitiesCard({ data }: { data: OnboardingData }) {
           <MessageCircle className="mx-auto text-[#98a2b3]" size={26} strokeWidth={2.2} />
           <p className="mt-3 text-[13px] font-extrabold text-black">No missed opportunities yet</p>
           <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#667085]">
-            Real opportunities will appear here after Instagram conversations or stored webhook messages are available.
+            Opportunities will appear here automatically once audience members comment on your posts or send messages.
           </p>
         </div>
       )}
@@ -2276,6 +2453,34 @@ function MissingInfoForm({
   const [detail, setDetail] = useState(item.complete ? item.detail : "");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [scrapeUrl, setScrapeUrl] = useState("");
+  const [scrapingUrl, setScrapingUrl] = useState(false);
+
+  const handleUrlScrape = async () => {
+    if (!scrapeUrl.trim()) return;
+    setScrapingUrl(true);
+    setError("");
+    try {
+      const response = await fetch("/api/knowledge/sources/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: scrapeUrl.trim() }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Failed to scrape URL");
+      }
+      if (data.text) {
+        setDetail(data.text);
+      } else {
+        throw new Error("No readable text found on page.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to scrape URL");
+    } finally {
+      setScrapingUrl(false);
+    }
+  };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -2315,6 +2520,38 @@ function MissingInfoForm({
           {error}
         </div>
       )}
+
+      <div>
+        <FieldLabel>Scrape from Website URL</FieldLabel>
+        <div className="flex gap-2">
+          <input
+            type="url"
+            className={textInputClass()}
+            placeholder="https://example.com/pricing"
+            value={scrapeUrl}
+            onChange={(e) => setScrapeUrl(e.target.value)}
+            disabled={uploading || scrapingUrl}
+          />
+          <button
+            type="button"
+            onClick={() => void handleUrlScrape()}
+            disabled={uploading || scrapingUrl || !scrapeUrl.trim()}
+            className="px-4 py-2 bg-black text-white rounded-[8px] text-[12px] font-extrabold disabled:opacity-50 hover:bg-[#1f2937] transition shrink-0"
+          >
+            {scrapingUrl ? "Scraping..." : "Scrape"}
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] font-semibold text-[#667085]">
+          Scrape pricing, refund, or policy details directly from your website.
+        </p>
+      </div>
+
+      <div className="relative flex py-2 items-center">
+        <div className="flex-grow border-t border-[#e8ebf2]"></div>
+        <span className="flex-shrink mx-4 text-[#667085] text-[12px] font-extrabold">OR</span>
+        <div className="flex-grow border-t border-[#e8ebf2]"></div>
+      </div>
+
       <form
         className="space-y-4"
         onSubmit={(event) => {
@@ -2324,9 +2561,9 @@ function MissingInfoForm({
       >
         <div>
           <FieldLabel>{item.label}</FieldLabel>
-          <textarea className={textAreaClass()} placeholder="Type details here..." value={detail} onChange={(event) => setDetail(event.target.value)} disabled={uploading} />
+          <textarea className={textAreaClass()} placeholder="Type details here..." value={detail} onChange={(event) => setDetail(event.target.value)} disabled={uploading || scrapingUrl} />
         </div>
-        <button type="submit" disabled={uploading} className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white disabled:opacity-50">
+        <button type="submit" disabled={uploading || scrapingUrl} className="flex h-11 w-full items-center justify-center rounded-[8px] bg-black text-[13px] font-extrabold text-white disabled:opacity-50">
           Save Information
         </button>
       </form>
@@ -2405,6 +2642,9 @@ export default function OnboardingPage() {
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const [connectUsername, setConnectUsername] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
+  const [opportunityReport, setOpportunityReport] = useState<OpportunityScore | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState("");
 
   const loadOnboardingData = useCallback(async () => {
     try {
@@ -2484,6 +2724,42 @@ export default function OnboardingPage() {
     };
   }, [loadOnboardingData]);
 
+  // Load cached opportunity report on mount
+  useEffect(() => {
+    async function loadCachedReport() {
+      try {
+        const res = await fetch("/api/instagram/opportunity-report", {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        const payload = await res.json().catch(() => ({})) as { report?: OpportunityScore | null };
+        if (payload.report) setOpportunityReport(payload.report);
+      } catch {
+        // Silently ignore — user can generate manually
+      }
+    }
+    void loadCachedReport();
+  }, []);
+
+  async function generateOpportunityReport() {
+    setReportLoading(true);
+    setReportError("");
+    try {
+      const res = await fetch("/api/instagram/opportunity-report", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const payload = await res.json().catch(() => ({})) as { report?: OpportunityScore; error?: string };
+      if (!res.ok || payload.error) throw new Error(payload.error || "Failed to generate report");
+      if (payload.report) setOpportunityReport(payload.report);
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : "Could not generate report");
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
   useEffect(() => {
     function handleNextStep() {
       setStepIndex((current) => Math.min(current + 1, onboardingScreenCount - 1));
@@ -2494,6 +2770,12 @@ export default function OnboardingPage() {
 
     return () => window.removeEventListener(onboardingNextEvent, handleNextStep);
   }, []);
+
+  useEffect(() => {
+    if (stepIndex === 2 && data.connected && !opportunityReport && !reportLoading) {
+      void generateOpportunityReport();
+    }
+  }, [stepIndex, data.connected, opportunityReport, reportLoading]);
 
   const phaseOneSummary = useMemo(() => {
     if (!data.connected) {
@@ -2522,6 +2804,27 @@ export default function OnboardingPage() {
       enabledRules,
     });
 
+    let opportunities = data.opportunities;
+    if (opportunities.length === 0 && opportunityReport?.strongComments && opportunityReport.strongComments.length > 0) {
+      opportunities = opportunityReport.strongComments.map((comment, index) => {
+        const cleanUsername = comment.username.replace(/^@/, "");
+        return {
+          id: `comment-opp-${index}-${cleanUsername}`,
+          name: cleanUsername,
+          username: cleanUsername,
+          avatarUrl: "",
+          badge: comment.intent === "Buying Intent" || comment.intent === "Urgency" ? "Hot Lead" : "Warm Lead",
+          score: comment.intent === "Buying Intent" ? 95 : 85,
+          missed: true,
+          estimatedValue: data.averageValue > 0 ? Math.round(data.averageValue) : 100,
+          reasons: [
+            `Commented: "${comment.text}"`,
+            comment.intent ? `Detected: ${comment.intent}` : "Showed interest",
+          ],
+        } satisfies Opportunity;
+      });
+    }
+
     return {
       ...data,
       ...draft,
@@ -2534,8 +2837,9 @@ export default function OnboardingPage() {
       missingItems,
       behavior: draft.behavior ?? data.behavior,
       knowledgeScore,
+      opportunities,
     } satisfies OnboardingData;
-  }, [data, draft]);
+  }, [data, draft, opportunityReport]);
 
   async function finishOnboarding() {
     window.localStorage.setItem("tractionflo_onboarding_completed", "true");
@@ -2678,8 +2982,21 @@ export default function OnboardingPage() {
       id: "report",
       phase: "Phase 1: Discovery",
       label: "Opportunity Report",
-      width: "max-w-[560px]",
-      content: <ReportCard data={visibleData} />,
+      width: "max-w-[600px]",
+      content: (
+        <>
+          {reportError && (
+            <div className="mb-3 rounded-[8px] border border-[#fedf89] bg-[#fffbeb] p-3 text-[12px] font-semibold text-[#7a4b00]">
+              {reportError}
+            </div>
+          )}
+          <ReportCard
+            data={visibleData}
+            report={opportunityReport}
+            reportLoading={reportLoading}
+          />
+        </>
+      ),
     },
     {
       id: "opportunities",
@@ -2870,7 +3187,7 @@ export default function OnboardingPage() {
         </section>
 
         <section className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
-          <div className={`max-h-full w-full overflow-hidden py-1 ${currentScreen.width}`}>{currentScreen.content}</div>
+          <div className={`max-h-full w-full overflow-y-auto py-1 pr-1 ${currentScreen.width}`}>{currentScreen.content}</div>
         </section>
 
         {activeModal?.type === "business" ? (

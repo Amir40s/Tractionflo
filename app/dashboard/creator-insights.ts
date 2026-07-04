@@ -1539,8 +1539,7 @@ export function buildCreatorLiveSummary(
     { label: "Engaged Audience", value: formatCreatorInteger(engagedConversations.length), change: "messaged you", tone: "green", icon: Sparkles },
     { label: "Leads", value: formatCreatorInteger(opportunityCards.length), change: "intent detected", tone: "blue", icon: User },
     { label: "Customers", value: formatCreatorInteger(buyerCount), change: "buying keywords", tone: "orange", icon: ShoppingCart },
-    { label: "Partners", value: formatCreatorInteger(partnershipCount), change: "partnership keywords", tone: "orange", icon: Handshake },
-  ];
+   ];
 
   const audienceSources: AudienceSource[] = [
     {

@@ -744,76 +744,7 @@ function OpportunityList({
   );
 }
 
-function ActivityList({
-  summary,
-  onNavigate,
-}: {
-  summary: CreatorLiveSummary;
-  onNavigate?: (tab: DashboardTab) => void;
-}) {
-  const [page, setPage] = useState(1);
-  const fallbackActivity = summary.conversations.map((conversation) => {
-    const preview = getCreatorConversationPreview(conversation);
 
-    return {
-      title: "Conversation updated",
-      subtitle: `${getCreatorParticipantName(conversation)}: ${truncateCreatorText(preview, 72)}`,
-      time: formatInstagramRelativeTime(getCreatorLastMessage(conversation)?.time || conversation.updated_time),
-      icon: MessageSquare,
-      tone: "text-[#2f63f6] bg-[#eef5ff]",
-      meta: undefined,
-    };
-  });
-  const activity = summary.recentActivity.length > 0 ? summary.recentActivity : fallbackActivity;
-  const paginatedActivity = getPaginatedItems(activity, page, 4);
-
-  return (
-    <article className={`${panelClass} p-5`}>
-      <div className="mb-4">
-        <h2 className="text-[15px] font-extrabold text-black">What TractionFlo Did While You Were Away</h2>
-      </div>
-
-      {activity.length > 0 ? (
-        <div className="divide-y divide-[#edf0f6]">
-          {paginatedActivity.items.map((item, index) => {
-            const Icon = item.icon;
-
-            return (
-              <button
-                key={`${item.title}-${index}`}
-                type="button"
-                onClick={() => openDashboardTab(item.title.toLowerCase().includes("lead") ? "opportunities" : "inbox", onNavigate)}
-                className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3 text-left"
-              >
-                <span className={`flex h-9 w-9 items-center justify-center rounded-full ${item.tone}`}>
-                  <Icon size={17} strokeWidth={2.35} />
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-[12px] font-extrabold text-black">{item.title}</span>
-                  <span className="mt-1 block truncate text-[11px] font-semibold text-[#687083]">{item.subtitle}</span>
-                </span>
-                <span className="text-right text-[11px] font-bold text-[#687083]">{item.meta || item.time}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="rounded-[8px] border border-dashed border-[#e4e7f0] p-6 text-center">
-          <p className="text-[13px] font-extrabold text-black">No activity yet.</p>
-          <p className="mt-2 text-[12px] font-semibold text-[#687083]">Connect Instagram to start tracking pipeline updates.</p>
-        </div>
-      )}
-      <CardPagination
-        endItem={paginatedActivity.endItem}
-        onPageChange={setPage}
-        page={paginatedActivity.safePage}
-        startItem={paginatedActivity.startItem}
-        totalItems={activity.length}
-        totalPages={paginatedActivity.totalPages}
-      />
-    </article>
-  );
-}
 
 function PipelineOverview({
   intent,
@@ -824,34 +755,40 @@ function PipelineOverview({
   summary: CreatorLiveSummary;
   onNavigate?: (tab: DashboardTab) => void;
 }) {
+  const readyBuyerVal = intent.readyToBuyCount;
+  const paymentPendingVal = intent.waitingPaymentCount;
+  const offersSentVal = intent.offersSentCount;
+  const qualifiedVal = Math.max(intent.readyToBuyCount, summary.opportunityCount, offersSentVal, paymentPendingVal, readyBuyerVal);
+  const newOppVal = Math.max(summary.opportunityCount, qualifiedVal);
+
   const steps = [
     {
       label: "New Opportunities",
-      value: summary.opportunityCount,
+      value: newOppVal,
       icon: Eye,
       tone: "orange" as ToneName,
     },
     {
       label: "Qualified Opportunities",
-      value: Math.max(intent.readyToBuyCount, summary.opportunityCount),
+      value: qualifiedVal,
       icon: UserCheck,
       tone: "pink" as ToneName,
     },
     {
       label: "Offers Sent",
-      value: intent.offersSentCount,
+      value: offersSentVal,
       icon: Send,
       tone: "orange" as ToneName,
     },
     {
       label: "Payment Pending",
-      value: intent.waitingPaymentCount,
+      value: paymentPendingVal,
       icon: DollarSign,
       tone: "blue" as ToneName,
     },
     {
       label: "Ready Buyer",
-      value: intent.readyToBuyCount,
+      value: readyBuyerVal,
       icon: Users,
       tone: "green" as ToneName,
     },
@@ -918,107 +855,9 @@ function getOpportunitySourceLabel(badge: string) {
   return "Other Signals";
 }
 
-function buildRevenueSources(summary: CreatorLiveSummary) {
-  const toneOrder: ToneName[] = ["pink", "orange", "blue"];
 
-  if (summary.revenueMode === "paid") {
-    const orderSources = [
-      {
-        label: "Paid orders",
-        amount: summary.paidRevenue,
-        tone: "green" as ToneName,
-      },
-    ].filter((source) => source.amount > 0);
-    const total = orderSources.reduce((sum, source) => sum + source.amount, 0);
 
-    return orderSources.map((source) => ({
-      ...source,
-      percentLabel: total > 0 ? `${Math.round((source.amount / total) * 100)}%` : "0%",
-    }));
-  }
 
-  const groupedSources = summary.conversations.reduce<Record<string, number>>((sources, conversation) => {
-    const opportunity = classifyCreatorOpportunity(conversation, summary.escalationRules);
-
-    if (!opportunity) {
-      return sources;
-    }
-
-    const label = getOpportunitySourceLabel(opportunity.badge);
-    sources[label] = (sources[label] || 0) + (opportunity.value || 0);
-    return sources;
-  }, {});
-  const total = Object.values(groupedSources).reduce((sum, value) => sum + value, 0);
-
-  return Object.entries(groupedSources)
-    .sort(([, valueA], [, valueB]) => valueB - valueA)
-    .map(([label, amount], index) => ({
-      label,
-      amount,
-      tone: toneOrder[index % toneOrder.length],
-      percentLabel: total > 0 ? `${Math.round((amount / total) * 100)}%` : "0%",
-    }));
-}
-
-function RevenueSources({
-  summary,
-  onNavigate,
-}: {
-  summary: CreatorLiveSummary;
-  onNavigate?: (tab: DashboardTab) => void;
-}) {
-  const [page, setPage] = useState(1);
-  const sources = buildRevenueSources(summary);
-  const paginatedSources = getPaginatedItems(sources, page, 4);
-
-  return (
-    <article className={`${panelClass} p-5`}>
-      <button
-        type="button"
-        onClick={() => onNavigate?.("ros")}
-        className="w-full text-left focus:outline-none hover:opacity-85 transition mb-5 block"
-      >
-        <div>
-          <h2 className="text-[15px] font-extrabold text-black">Top Revenue Sources</h2>
-          <p className="mt-1 text-[11px] font-bold text-[#687083]">Grouped from completed Stripe payments</p>
-        </div>
-      </button>
-      {sources.length > 0 ? (
-        <div className="space-y-4">
-          {paginatedSources.items.map((source) => (
-            <div key={source.label} className="grid grid-cols-[104px_minmax(0,1fr)_72px_38px] items-center gap-3 text-[12px] font-bold">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className={`h-3 w-3 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(20,28,53,0.08)] ${toneClasses[source.tone].dot}`} />
-                <span className="truncate text-[#30384d]">{source.label}</span>
-              </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-[#f0f1f5]">
-                <div
-                  className={`h-full rounded-full bg-gradient-to-r ${toneClasses[source.tone].bar}`}
-                  style={{ width: source.percentLabel }}
-                />
-              </div>
-              <span className="text-right font-extrabold text-black">{formatCreatorMoney(source.amount)}</span>
-              <span className="text-right text-[#687083]">{source.percentLabel}</span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-[8px] border border-dashed border-[#e4e7f0] p-6 text-center">
-          <p className="text-[13px] font-extrabold text-black">No paid revenue yet.</p>
-          <p className="mt-2 text-[12px] font-semibold text-[#687083]">Completed Stripe payments will appear here.</p>
-        </div>
-      )}
-      <CardPagination
-        endItem={paginatedSources.endItem}
-        onPageChange={setPage}
-        page={paginatedSources.safePage}
-        startItem={paginatedSources.startItem}
-        totalItems={sources.length}
-        totalPages={paginatedSources.totalPages}
-      />
-    </article>
-  );
-}
 
 function RealDataNote({ summary }: { summary: CreatorLiveSummary }) {
   return (
@@ -1109,7 +948,7 @@ function RevenueHero({
   return (
     <article className="relative overflow-hidden rounded-[8px] bg-black p-5 text-white shadow-[0_24px_70px_rgba(0,0,0,0.16)] sm:p-7">
       <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-[#ff6b00] via-[#e81f72] to-[#7548ff]" />
-      <div className="relative grid gap-6 lg:grid-cols-[minmax(240px,0.78fr)_minmax(0,1.22fr)] lg:items-center">
+      <div className="relative grid gap-6 lg:grid-cols-[minmax(240px,0.58fr)_minmax(0,1.42fr)] lg:items-center">
         <button
           type="button"
           onClick={() => openDashboardTab("ros", onNavigate)}
@@ -1124,7 +963,7 @@ function RevenueHero({
           </p>
           <RealDataNote summary={summary} />
         </button>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
           {heroStats.map((item) => (
             <HeroMetricCard
               key={item.label}
@@ -1170,50 +1009,6 @@ export function DashboardOverview({
     ? Array.from({ length: getDashboardChartPointCount(revenueTrendRange) }, () => 0)
     : buildRevenueTrendSeries(summary, getDashboardChartPointCount(revenueTrendRange));
   const totalForTrends = Math.max(1, summary.totalConversationCount);
-  const statItems = [
-    {
-      label: revenueLabel,
-      value: isLoading ? "..." : formatCreatorMoney(revenueTotal),
-      trend: revenueTrendLabel,
-      icon: DollarSign,
-      tone: "green" as ToneName,
-    },
-    {
-      label: "Ready Buyers",
-      value: isLoading ? "..." : formatCreatorInteger(intent.readyToBuyCount),
-      trend: getTrendShare(intent.readyToBuyCount, totalForTrends),
-      icon: Users,
-      tone: "orange" as ToneName,
-    },
-    {
-      label: "Offers Sent",
-      value: isLoading ? "..." : formatCreatorInteger(intent.offersSentCount),
-      trend: getTrendShare(intent.offersSentCount, Math.max(1, summary.outboundMessageCount || totalForTrends)),
-      icon: Send,
-      tone: "pink" as ToneName,
-    },
-    {
-      label: "Qualified Opportunities",
-      value: isLoading ? "..." : formatCreatorInteger(summary.opportunityCount),
-      trend: getTrendShare(summary.opportunityCount, totalForTrends),
-      icon: Eye,
-      tone: "orange" as ToneName,
-    },
-    {
-      label: "Conversations Started",
-      value: isLoading ? "..." : formatCreatorInteger(intent.activeContacts),
-      trend: getTrendShare(intent.activeContacts, totalForTrends),
-      icon: MessageSquare,
-      tone: "pink" as ToneName,
-    },
-    {
-      label: "Buying Signals Detected",
-      value: isLoading ? "..." : formatCreatorInteger(intent.buyingSignalCount),
-      trend: getTrendShare(intent.buyingSignalCount, Math.max(1, summary.totalMessageCount || totalForTrends)),
-      icon: Sparkles,
-      tone: "orange" as ToneName,
-    },
-  ];
   const heroStats = [
     {
       label: "Ready to buy",
@@ -1237,11 +1032,25 @@ export function DashboardOverview({
       tone: "orange" as ToneName,
     },
     {
+      label: "Offers Sent",
+      detail: "Outbound offers",
+      value: intent.offersSentCount,
+      icon: Send,
+      tone: "pink" as ToneName,
+    },
+    {
       label: "New opportunities",
       detail: "Recently detected",
-      value: summary.opportunityCount,
-      icon: Users,
-      tone: "green" as ToneName,
+      value: Math.max(summary.opportunityCount, intent.readyToBuyCount, intent.waitingPaymentCount, intent.offersSentCount),
+      icon: Eye,
+      tone: "orange" as ToneName,
+    },
+    {
+      label: "Buying Signals",
+      detail: "Signals detected",
+      value: intent.buyingSignalCount,
+      icon: Sparkles,
+      tone: "orange" as ToneName,
     },
   ];
 
@@ -1310,7 +1119,7 @@ export function DashboardOverview({
           </div>
         ) : null}
 
-        <section className="mt-7 grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
+        <section className="mt-7">
           <RevenueHero
             heroStats={heroStats}
             isLoading={isLoading}
@@ -1318,42 +1127,6 @@ export function DashboardOverview({
             revenueTotal={revenueTotal}
             summary={summary}
           />
-
-          <article className={`${panelClass} p-5 sm:p-6`}>
-            <div className="mb-5">
-              <h2 className="text-[15px] font-extrabold text-black">TractionFlo Live Summary</h2>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {statItems.map((item) => {
-                const getTabForLiveSummary = (label: string): DashboardTab => {
-                  if (label.toLowerCase().includes("revenue")) return "ros";
-                  if (label.toLowerCase().includes("buyer")) return "opportunities";
-                  if (label.toLowerCase().includes("offer")) return "ros";
-                  if (isOpportunityLabel(label)) return "opportunities";
-                  if (label.toLowerCase().includes("contact") || label.toLowerCase().includes("conversation")) return "inbox" as DashboardTab;
-                  if (label.toLowerCase().includes("signal")) return "opportunities";
-                  return "dashboard";
-                };
-                const targetTab = getTabForLiveSummary(item.label);
-
-                return (
-                  <a
-                    key={item.label}
-                    href={getDashboardTabHref(targetTab)}
-                    onClick={(event) => openDashboardTab(targetTab, onNavigate, event)}
-                    aria-label={`Open ${item.label}`}
-                    title={`Open ${item.label}`}
-                    className="block min-w-0 cursor-pointer rounded-[6px] border-[#edf0f6] py-2 text-left no-underline transition hover:bg-[#fafbfe] active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3044ff]/20 sm:border-l sm:pl-5 first:sm:border-l-0 first:sm:pl-0"
-                  >
-                    <IconBubble icon={item.icon} tone={item.tone} />
-                    <p className="mt-5 truncate text-[27px] font-extrabold leading-none text-black">{item.value}</p>
-                    <p className="mt-3 text-[12px] font-bold text-[#30384d]">{item.label}</p>
-                    <TrendText>{item.trend}</TrendText>
-                  </a>
-                );
-              })}
-            </div>
-          </article>
         </section>
 
         <section className="mt-5 grid gap-5 xl:grid-cols-[0.78fr_1.12fr_0.95fr]">
@@ -1361,7 +1134,6 @@ export function DashboardOverview({
 
           <div className="grid content-start gap-5">
             <PipelineOverview intent={intent} summary={summary} onNavigate={onNavigate} />
-            <ActivityList summary={summary} onNavigate={onNavigate} />
           </div>
 
           <div className="grid content-start gap-5">
@@ -1378,8 +1150,6 @@ export function DashboardOverview({
               </div>
               <RevenueTrendChart values={revenueSeries} />
             </article>
-
-            <RevenueSources summary={summary} />
           </div>
         </section>
       </div>

@@ -878,17 +878,21 @@ async function buildStoredConversations({
         updated_time: getMessageTimeIso(latest),
         messages: dedupeConversationMessages(sortedRows.map((message, index) => {
           const parsed = parseStoredMessageContent(message.text || '', message.metadata);
+          const isNote = message.direction === 'note';
           const isMe =
-            message.direction === 'outbound' ||
-            (ownIgUserId && message.sender_id === ownIgUserId && message.direction !== 'inbound');
+            !isNote &&
+            (message.direction === 'outbound' ||
+              (ownIgUserId && message.sender_id === ownIgUserId && message.direction !== 'inbound'));
 
           return {
             id: message.mid || `${conversationId}-${message.timestamp || index}`,
             text: parsed.text,
             attachments: parsed.attachments,
             catalogItems: parsed.catalogItems,
-            from: isMe ? 'me' : 'user',
-            sender_name: isMe
+            from: isNote ? 'note' : isMe ? 'me' : 'user',
+            sender_name: isNote
+              ? 'Internal Note'
+              : isMe
               ? 'You'
               : participantProfile.name || participantProfile.username || getFallbackParticipantName(conversationId),
             sender_profile_pic: isMe ? undefined : participantProfile.profile_pic,
