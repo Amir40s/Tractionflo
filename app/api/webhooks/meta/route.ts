@@ -57,6 +57,7 @@ import { storeInstagramMessage } from '@/lib/instagram-message-store';
 import {
   sendInstagramCommercePaymentMessage,
   sendInstagramGenericTemplate,
+  sendInstagramCommentReply,
   type InstagramGenericTemplateElement,
 } from '@/lib/instagram-send-api';
 import { shouldSuppressRealtimeNotification } from '@/lib/notification-preferences';
@@ -141,6 +142,8 @@ type AutomationMessageEvent = {
   text: string;
   timestamp?: number;
   previousSenderMessageCount: number;
+  isComment?: boolean;
+  commentId?: string;
 };
 
 type InstagramParticipantProfile = {
@@ -1801,7 +1804,7 @@ async function processInstagramAutomations(
         : [];
 
       let catalogImageMessageId = '';
-      if (catalogOffer?.imageUrl?.startsWith('https://')) {
+      if (!event.isComment && catalogOffer?.imageUrl?.startsWith('https://')) {
         try {
           const imageSent = await sendInstagramAttachmentMessage(account.access_token, event.senderId, {
             type: 'image',
@@ -1820,15 +1823,31 @@ async function processInstagramAutomations(
         }
       }
 
-      logger.info("processInstagramAutomations: Sending Instagram text message reply...", { reply: reply.trim() });
-      const sent = await sendInstagramTextMessageWithQuickReplyFallback(
-        account.access_token,
-        event.senderId,
-        reply.trim(),
-        pendingOrder ? getConfirmOrderQuickReplies(pendingOrder.id) : []
-      );
-      logger.info("processInstagramAutomations: Instagram text message sent successfully", { message_id: sent.message_id });
-
+      let sent: { message_id?: string; recipient_id?: string; id?: string } = {};
+      if (event.isComment && event.commentId) {
+        logger.info("processInstagramAutomations: Sending Instagram comment reply...", { reply: reply.trim(), commentId: event.commentId });
+        try {
+          sent = await sendInstagramCommentReply(
+            account.access_token,
+            event.commentId,
+            reply.trim()
+          );
+          sent.message_id = sent.id; // Map id to message_id for consistency downstream
+          logger.info("processInstagramAutomations: Instagram comment reply sent successfully", { message_id: sent.message_id });
+        } catch (commentError) {
+          logger.error("processInstagramAutomations: Could not send Instagram comment reply.", { error: commentError });
+        }
+      } else {
+        logger.info("processInstagramAutomations: Sending Instagram text message reply...", { reply: reply.trim() });
+        sent = await sendInstagramTextMessageWithQuickReplyFallback(
+          account.access_token,
+          event.senderId,
+          reply.trim(),
+          pendingOrder ? getConfirmOrderQuickReplies(pendingOrder.id) : []
+        );
+        logger.info("processInstagramAutomations: Instagram text message sent successfully", { message_id: sent.message_id });
+      }
+      
       const outboundOrderId = orderId || checkoutReplyOrder?.id || '';
       const outboundMetadata = {
         source: isFirstInboundDm && welcome.enabled ? 'instagram_webhook_welcome' : 'instagram_webhook_ai',
@@ -1893,7 +1912,7 @@ async function processInstagramAutomations(
       }
 
       let catalogCarouselMessageId = '';
-      if (catalogCarouselCards.length > 1) {
+      if (!event.isComment && catalogCarouselCards.length > 0) {
         try {
           const carouselSent = await sendInstagramGenericTemplate(
             account.access_token,
@@ -2160,6 +2179,55 @@ export async function POST(request: Request) {
             }
           }
         }
+
+        for (const change of (entry.changes || [])) {
+          if (change.field === 'comments') {
+            const commentValue = change.value;
+            if (commentValue && commentValue.id && commentValue.text && commentValue.from) {
+              const commentId = commentValue.id;
+              const text = commentValue.text;
+              const senderId = commentValue.from.id;
+              const recipientId = entry.id; // The page/business ID
+              const mid = `comment-${commentId}`;
+
+              // Don't auto-reply to our own comments
+              if (senderId === recipientId) {
+                continue;
+              }
+
+              const alreadyStored = await hasStoredMessage(supabase, mid);
+              if (!alreadyStored) {
+                const previousSenderMessageCount = await getSenderMessageCount(supabase, senderId);
+                
+                const connectedAccount = await getFreshInstagramAccountByIgUserId(supabase, recipientId).catch(() => null);
+                
+                messagesToInsert.push({
+                  mid,
+                  userId: connectedAccount?.user_id || null,
+                  conversationId: senderId,
+                  senderId,
+                  recipientId,
+                  text: `__COMMENT__:${text}`,
+                  timestamp: entry.time || Date.now(),
+                  rawEvent: change as Record<string, unknown>,
+                  participant: null,
+                  direction: 'inbound' as const,
+                });
+
+                automationEvents.push({
+                  mid,
+                  senderId,
+                  recipientId,
+                  text,
+                  timestamp: entry.time || Date.now(),
+                  previousSenderMessageCount,
+                  isComment: true,
+                  commentId,
+                });
+              }
+            }
+          }
+        }
       }
 
       const insertedMids = new Set<string>();
@@ -2192,9 +2260,12 @@ export async function POST(request: Request) {
 
         const messagesForNotification = messagesToInsert.filter(m => insertedMids.has(m.mid));
         const notificationMessages = messagesForNotification.filter((message) => {
-          const cleanText = message.text.startsWith('__STORY_REPLY__:') && message.text.includes('__TEXT__:')
-            ? message.text.split('__TEXT__:', 2)[1]
-            : message.text;
+          let cleanText = message.text;
+          if (cleanText.startsWith('__STORY_REPLY__:') && cleanText.includes('__TEXT__:')) {
+            cleanText = cleanText.split('__TEXT__:', 2)[1];
+          } else if (cleanText.startsWith('__COMMENT__:')) {
+            cleanText = cleanText.slice('__COMMENT__:'.length);
+          }
 
           return !shouldSuppressRealtimeNotification({
             title: 'New Instagram message',
@@ -2205,14 +2276,19 @@ export async function POST(request: Request) {
 
         if (notificationMessages.length > 0) {
           const firstMsgText = notificationMessages[0].text;
-          const cleanText = firstMsgText.startsWith('__STORY_REPLY__:') && firstMsgText.includes('__TEXT__:')
-            ? firstMsgText.split('__TEXT__:', 2)[1]
-            : firstMsgText;
-          const notificationTitle = notificationMessages.length === 1 ? 'New Instagram message' : 'New Instagram messages';
+          let cleanText = firstMsgText;
+          if (cleanText.startsWith('__STORY_REPLY__:') && cleanText.includes('__TEXT__:')) {
+            cleanText = cleanText.split('__TEXT__:', 2)[1];
+          } else if (cleanText.startsWith('__COMMENT__:')) {
+            cleanText = cleanText.slice('__COMMENT__:'.length);
+          }
+          const notificationTitle = notificationMessages.length === 1 
+            ? (firstMsgText.startsWith('__COMMENT__:') ? 'New Instagram comment' : 'New Instagram message') 
+            : 'New Instagram messages';
           const notificationBody =
             notificationMessages.length === 1
-              ? cleanText.slice(0, 120) || 'A new Instagram DM arrived.'
-              : `${notificationMessages.length} new Instagram DMs arrived.`;
+              ? cleanText.slice(0, 120) || 'A new Instagram message arrived.'
+              : `${notificationMessages.length} new Instagram messages arrived.`;
           const notificationMetadata = {
             count: notificationMessages.length,
             messageIds: notificationMessages.map((message) => message.mid).filter(Boolean).sort().join(','),

@@ -18,6 +18,7 @@ import {
   mergeOpportunityWorkflowState,
   type OpportunityWorkflowStatePatch,
 } from "@/lib/opportunity-workflow-state";
+import { PipelineBoard } from "./PipelineBoard";
 
 const opportunityToneClasses = {
 
@@ -288,6 +289,7 @@ export function OpportunitiesPage({
 }) {
   const [leadCategoryFilter, setLeadCategoryFilter] = useState<LeadCategoryFilter>("all");
   const [leadUrgencyFilter, setLeadUrgencyFilter] = useState<LeadUrgencyFilter>("all");
+  const [viewMode, setViewMode] = useState<"list" | "pipeline">("pipeline");
   const [currentPage, setCurrentPage] = useState(1);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [opportunityWorkflowState, setOpportunityWorkflowState] = useState(emptyOpportunityWorkflowState);
@@ -359,6 +361,30 @@ export function OpportunitiesPage({
     setCurrentPage((page) => Math.min(page, nextTotalPages));
   }
 
+  if (viewMode === "pipeline") {
+    return (
+      <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] pb-24 pt-4 text-black lg:py-6">
+        <div className="mx-auto flex max-w-[1286px] items-center justify-end px-4 sm:px-6 lg:px-8 mb-4">
+          <div className="flex rounded-[9px] border border-[#e0e4ef] bg-[#f8f9fc] p-1">
+            <button
+              onClick={() => setViewMode("pipeline")}
+              className={`px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition ${viewMode === "pipeline" ? "bg-white text-black shadow-sm" : "text-[#596175] hover:text-black"}`}
+            >
+              Pipeline
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className={`px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition ${viewMode === "list" ? "bg-white text-black shadow-sm" : "text-[#596175] hover:text-black"}`}
+            >
+              List
+            </button>
+          </div>
+        </div>
+        <PipelineBoard cards={unresolvedOpportunityCards} />
+      </main>
+    );
+  }
+
   return (
     <main className="h-dvh flex-1 overflow-y-auto bg-[#fdfdff] px-4 pb-24 pt-4 text-black sm:px-6 lg:px-8 lg:py-6 xl:px-10">
       <div className="mx-auto max-w-[1286px]">
@@ -373,7 +399,23 @@ export function OpportunitiesPage({
               Qualified Instagram leads with score, intent, missing details, and the next action to take.
             </p>
           </div>
-
+          
+          <div className="w-full flex justify-end lg:w-auto">
+            <div className="flex rounded-[9px] border border-[#e0e4ef] bg-[#f8f9fc] p-1">
+              <button
+                onClick={() => setViewMode("pipeline")}
+                className={`px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition ${viewMode === "pipeline" ? "bg-white text-black shadow-sm" : "text-[#596175] hover:text-black"}`}
+              >
+                Pipeline
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={`px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition ${viewMode === "list" ? "bg-white text-black shadow-sm" : "text-[#596175] hover:text-black"}`}
+              >
+                List
+              </button>
+            </div>
+          </div>
           <div className="grid w-full grid-cols-[1fr_auto] items-center gap-3 sm:flex sm:w-auto sm:gap-5">
             <CreatorDateRangeSelect
               dateRangePreset={dateRangePreset}

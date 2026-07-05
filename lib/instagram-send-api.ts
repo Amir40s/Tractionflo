@@ -347,3 +347,34 @@ export async function sendInstagramCommercePaymentMessage({
 
   return result;
 }
+
+export async function sendInstagramCommentReply(
+  accessToken: string,
+  commentId: string,
+  message: string
+) {
+  const replyUrl = new URL(`https://graph.instagram.com/v21.0/${commentId}/replies`);
+  replyUrl.searchParams.set("access_token", accessToken);
+
+  const body = new URLSearchParams();
+  body.set("message", message);
+
+  const response = await fetch(replyUrl.toString(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+
+  const data = (await response.json().catch(() => ({}))) as InstagramSendResult;
+
+  if (!response.ok || data.error) {
+    throw new InstagramSendApiError(
+      data.error?.message || "Instagram could not post this comment reply.",
+      data.error
+    );
+  }
+
+  return data;
+}
