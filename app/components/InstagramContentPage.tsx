@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import MusicSearch, { type InstagramAudioResult } from "./MusicSearch";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -104,7 +105,7 @@ type DraftState = {
 };
 
 type CommentTakeoverMode = "ai" | "human";
-type InstagramContentTab = "posts" | "stories" | "followers";
+type InstagramContentTab = "posts" | "stories" | "followers" | "publisher";
 type ContentPageSize = 5 | 10 | 20 | 30 | 50 | "all";
 
 const commentAutomationStorageKey = "tractionflo.instagram.commentAutomation";
@@ -1445,8 +1446,190 @@ function getPostDetailIdFromPath() {
     return "";
   }
 
-  const match = window.location.pathname.match(/^\/instagram-content\/([^/?#]+)/);
+  const match = window.location.pathname.match(/\/instagram-content\/([^/?]+)/);
   return match?.[1] ? decodeURIComponent(match[1]) : "";
+}
+
+function PublisherTab() {
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
+  const [caption, setCaption] = useState("");
+  const [scheduledFor, setScheduledFor] = useState("");
+  const [selectedAudio, setSelectedAudio] = useState<InstagramAudioResult | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+
+  const handleMediaFilesChange = (files: FileList | null) => {
+    if (!files) return;
+    const newFiles = Array.from(files);
+    if (mediaFiles.length + newFiles.length > 10) {
+      setError("Maximum 10 files allowed for carousel.");
+      return;
+    }
+    setMediaFiles(prev => [...prev, ...newFiles]);
+    setError("");
+  };
+
+  const removeFile = (index: number) => {
+    setMediaFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handlePublish = async () => {
+    if (mediaFiles.length === 0) {
+      setError("Please select at least one media file.");
+      return;
+    }
+
+    setPublishing(true);
+    setError("");
+    setStatus("Publishing/Scheduling content...");
+
+    try {
+      const formData = new FormData();
+      mediaFiles.forEach(file => formData.append("media", file));
+      formData.append("caption", caption);
+      if (scheduledFor) {
+        formData.append("scheduledFor", scheduledFor);
+      }
+      if (selectedAudio) {
+        formData.append("audioId", selectedAudio.id);
+        formData.append("audioName", selectedAudio.title);
+      }
+
+      const response = await fetch("/api/instagram/content/publish", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Failed to publish content.");
+      }
+
+      setStatus(`Success: ${data.message}`);
+      setMediaFiles([]);
+      setCaption("");
+      setScheduledFor("");
+      setSelectedAudio(null);
+    } catch (err) {
+      setStatus("");
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-4xl pt-6">
+      <div className="rounded-[10px] border border-[#e6eaf2] bg-white p-6 shadow-[0_16px_38px_rgba(20,28,53,0.025)]">
+        <h2 className="text-[18px] font-extrabold text-black">Create Instagram Post</h2>
+        <p className="mt-2 text-[13px] font-semibold text-[#596175]">
+          Upload an image, video, or up to 10 media files for a carousel. You can publish immediately or schedule for later.
+        </p>
+
+        {error && (
+          <div className="mt-4 rounded-[8px] bg-[#fff0f3] px-4 py-3 text-[13px] font-semibold text-[#df405b]">
+            {error}
+          </div>
+        )}
+
+        <div className="mt-6">
+          <label className="block text-[13px] font-extrabold text-[#253049] mb-2">Media Files</label>
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-[10px] border border-dashed border-[#cfd6e6] bg-[#fbfcff] px-4 py-8 text-center transition hover:border-[#4b3cff] hover:bg-[#f8f7ff]">
+            <input
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              onChange={(e) => handleMediaFilesChange(e.target.files)}
+              disabled={publishing || mediaFiles.length >= 10}
+              className="sr-only"
+            />
+            <span className="flex h-11 w-11 items-center justify-center rounded-[10px] bg-[#f0edff] text-[#4b3cff]">
+              <UploadCloud size={22} strokeWidth={2.35} />
+            </span>
+            <span className="mt-3 text-[13px] font-extrabold text-black">
+              Click to select media
+            </span>
+            <span className="mt-1 text-[12px] font-semibold text-[#596175]">
+              JPG, PNG, GIF, WebP, MP4, or MOV up to 50MB. (Max 10 files)
+            </span>
+          </label>
+
+          {mediaFiles.length > 0 && (
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 md:gap-4">
+              {mediaFiles.map((file, i) => (
+                <div key={i} className="relative aspect-square overflow-hidden rounded-[8px] border border-[#e6eaf2] bg-[#f7f8fc]">
+                  {file.type.startsWith("image/") ? (
+                    <img src={URL.createObjectURL(file)} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <video src={URL.createObjectURL(file)} className="h-full w-full object-cover" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeFile(i)}
+                    className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/80"
+                  >
+                    <X size={12} strokeWidth={3} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6">
+          <label className="block text-[13px] font-extrabold text-[#253049] mb-2">Caption & Hashtags</label>
+          <textarea
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            placeholder="Write a caption..."
+            disabled={publishing}
+            className="min-h-[120px] w-full resize-none rounded-[8px] border border-[#dde3ee] bg-white px-3 py-2.5 text-[13px] font-semibold leading-relaxed text-black outline-none focus:border-[#4b3cff] focus:ring-2 focus:ring-[#4b3cff]/10"
+          />
+        </div>
+
+        <div className="mt-6">
+          <label className="block text-[13px] font-extrabold text-[#253049] mb-2">Add Music (Optional)</label>
+          <p className="mb-3 text-[12px] font-semibold text-[#596175]">
+            Search and attach audio from the Instagram Music Library to your Reel or post.
+          </p>
+          <MusicSearch 
+            selectedAudio={selectedAudio} 
+            onSelect={setSelectedAudio} 
+            onClear={() => setSelectedAudio(null)} 
+          />
+        </div>
+
+        <div className="mt-6">
+          <label className="block text-[13px] font-extrabold text-[#253049] mb-2">Schedule (Optional)</label>
+          <input
+            type="datetime-local"
+            value={scheduledFor}
+            onChange={(e) => setScheduledFor(e.target.value)}
+            disabled={publishing}
+            className="w-full md:w-auto rounded-[8px] border border-[#dde3ee] bg-white px-3 py-2.5 text-[13px] font-semibold text-black outline-none focus:border-[#4b3cff] focus:ring-2 focus:ring-[#4b3cff]/10"
+          />
+          <p className="mt-1.5 text-[12px] font-semibold text-[#596175]">
+            Leave blank to publish immediately.
+          </p>
+        </div>
+
+        <div className="mt-8 flex items-center justify-between border-t border-[#e6eaf2] pt-6">
+          <p className="text-[13px] font-semibold text-[#13823b]">{status}</p>
+          <button
+            type="button"
+            onClick={handlePublish}
+            disabled={publishing || mediaFiles.length === 0}
+            className="flex h-11 items-center justify-center gap-2 rounded-[8px] bg-[#4b3cff] px-6 text-[13px] font-extrabold text-white shadow-[0_14px_30px_rgba(75,60,255,0.2)] disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[#3f32e6]"
+          >
+            {publishing ? <RefreshCw size={16} className="animate-spin" strokeWidth={2.25} /> : <Send size={16} strokeWidth={2.25} />}
+            {publishing ? "Processing..." : scheduledFor ? "Schedule Post" : "Publish Now"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function InstagramContentPage() {
@@ -2164,8 +2347,8 @@ export default function InstagramContentPage() {
           )
         ) : (
           <>
-            <div className="mt-6 flex w-full max-w-[520px] rounded-[10px] border border-[#e1e5ef] bg-white p-1 shadow-[0_14px_36px_rgba(20,28,53,0.035)]">
-              {(["posts", "stories", "followers"] as const).map((tab) => (
+            <div className="mt-6 flex w-full max-w-[600px] rounded-[10px] border border-[#e1e5ef] bg-white p-1 shadow-[0_14px_36px_rgba(20,28,53,0.035)]">
+              {(["posts", "stories", "followers", "publisher"] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
@@ -2187,6 +2370,8 @@ export default function InstagramContentPage() {
                 onStartDateChange={handleFollowerStartDateChange}
                 onEndDateChange={handleFollowerEndDateChange}
               />
+            ) : activeTab === "publisher" ? (
+              <PublisherTab />
             ) : (
               <>
                 <section className="mt-5 w-full">

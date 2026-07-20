@@ -80,6 +80,167 @@ export async function fetchInstagramGraphAPI<T>(
   return data as T;
 }
 
+export async function postInstagramGraphAPI<T>(
+  endpoint: string,
+  accessToken: string,
+  params: Record<string, string>
+): Promise<T> {
+  const url = new URL(`https://graph.instagram.com/v21.0/${endpoint}`);
+  url.searchParams.set("access_token", accessToken);
+
+  const body = new URLSearchParams(params);
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    body,
+    cache: "no-store",
+  });
+  const data = await response.json();
+
+  if (!response.ok || data.error) {
+    throw new Error(
+      data.error?.message || `Instagram API error: ${response.statusText}`
+    );
+  }
+
+  return data as T;
+}
+
+export type InstagramContainerResponse = {
+  id: string;
+};
+
+export type InstagramAudioResult = {
+  id: string;
+  title: string;
+  artist_name: string;
+  duration_in_ms?: number;
+  preview_url?: string;
+};
+
+export async function searchInstagramAudio(
+  accessToken: string,
+  userId: string,
+  query: string
+): Promise<InstagramAudioResult[]> {
+  try {
+    const url = new URL(`https://graph.facebook.com/v21.0/ig_audio`);
+    url.searchParams.set("access_token", accessToken);
+    url.searchParams.set("audio_type", "music");
+    url.searchParams.set("user_id", userId);
+    if (query) {
+      url.searchParams.set("search_query", query);
+    }
+    
+    const response = await fetch(url.toString(), { cache: "no-store" });
+    const data = await response.json();
+    
+    if (!response.ok || data.error) {
+      logger.warn("Failed to fetch Instagram audio", { error: data.error });
+      return [];
+    }
+    
+    return data.data || [];
+  } catch (error) {
+    logger.warn("Exception fetching Instagram audio", { error: error instanceof Error ? error.message : String(error) });
+    return [];
+  }
+}
+
+export async function createInstagramMediaContainer(
+  accessToken: string,
+  mediaUrl: string,
+  mediaType: "IMAGE" | "VIDEO" | "REELS",
+  caption?: string,
+  audioId?: string
+): Promise<string> {
+  const params: Record<string, string> = {
+    media_type: mediaType,
+  };
+
+  if (mediaType === "VIDEO" || mediaType === "REELS") {
+    params.video_url = mediaUrl;
+  } else {
+    params.image_url = mediaUrl;
+  }
+
+  if (caption) {
+    params.caption = caption;
+  }
+
+  if (audioId) {
+    params.audio_configuration = JSON.stringify({ audio_id: audioId });
+  }
+
+  const container = await postInstagramGraphAPI<InstagramContainerResponse>(
+    "me/media",
+    accessToken,
+    params
+  );
+
+  return container.id;
+}
+
+export async function createInstagramCarouselContainer(
+  accessToken: string,
+  childrenContainerIds: string[],
+  caption?: string
+): Promise<string> {
+  const params: Record<string, string> = {
+    media_type: "CAROUSEL",
+    children: childrenContainerIds.join(","),
+  };
+
+  if (caption) {
+    params.caption = caption;
+  }
+
+  const container = await postInstagramGraphAPI<InstagramContainerResponse>(
+    "me/media",
+    accessToken,
+    params
+  );
+
+  return container.id;
+}
+
+export async function publishInstagramMedia(
+  accessToken: string,
+  creationId: string
+): Promise<string> {
+  const response = await postInstagramGraphAPI<InstagramContainerResponse>(
+    "me/media_publish",
+    accessToken,
+    { creation_id: creationId }
+  );
+
+  return response.id;
+}
+
+export async function waitForInstagramContainer(
+  accessToken: string,
+  containerId: string,
+  maxAttempts = 15
+): Promise<void> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const response = await fetchInstagramGraphAPI<{ status_code: string }>(
+      containerId,
+      accessToken,
+      "status_code"
+    );
+    
+    if (response.status_code === "FINISHED") {
+      return;
+    }
+    if (response.status_code === "ERROR") {
+      throw new Error(`Instagram container processing failed for ID ${containerId}`);
+    }
+    
+    // Wait 3 seconds before next check
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error(`Timed out waiting for container ${containerId} to finish processing.`);
+}
+
 /**
  * Fetch Instagram business profile details
  */

@@ -368,13 +368,13 @@ export function OpportunitiesPage({
           <div className="flex rounded-[9px] border border-[#e0e4ef] bg-[#f8f9fc] p-1">
             <button
               onClick={() => setViewMode("pipeline")}
-              className={`px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition ${viewMode === "pipeline" ? "bg-white text-black shadow-sm" : "text-[#596175] hover:text-black"}`}
+              className="px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition bg-white text-black shadow-sm"
             >
               Pipeline
             </button>
             <button
               onClick={() => setViewMode("list")}
-              className={`px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition ${viewMode === "list" ? "bg-white text-black shadow-sm" : "text-[#596175] hover:text-black"}`}
+              className="px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition text-[#596175] hover:text-black"
             >
               List
             </button>
@@ -404,13 +404,13 @@ export function OpportunitiesPage({
             <div className="flex rounded-[9px] border border-[#e0e4ef] bg-[#f8f9fc] p-1">
               <button
                 onClick={() => setViewMode("pipeline")}
-                className={`px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition ${viewMode === "pipeline" ? "bg-white text-black shadow-sm" : "text-[#596175] hover:text-black"}`}
+                className="px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition text-[#596175] hover:text-black"
               >
                 Pipeline
               </button>
               <button
                 onClick={() => setViewMode("list")}
-                className={`px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition ${viewMode === "list" ? "bg-white text-black shadow-sm" : "text-[#596175] hover:text-black"}`}
+                className="px-3 py-1.5 text-[12px] font-extrabold rounded-[6px] transition bg-white text-black shadow-sm"
               >
                 List
               </button>
